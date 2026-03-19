@@ -1,15 +1,46 @@
 export const colorSynonymMap: Record<string, string[]> = {
-  black: ["onyx", "jet", "midnight", "charcoal", "stealth", "dark", "ebony", "obsidian", "noir"],
-  white: ["pearl", "ivory", "cream", "arctic", "ghost", "snow", "frost", "alabaster"],
-  blue: ["navy", "cobalt", "royal blue", "midnight", "slate blue", "ocean", "sky blue", "cerulean", "azure", "sapphire", "indigo", "dark blue"],
-  red: ["crimson", "scarlet", "cherry", "maroon", "burgundy", "wine", "vermillion", "ruby", "garnet", "cardinal"],
-  green: ["olive", "forest", "emerald", "sage", "hunter", "lime", "moss", "jade", "military green", "army green"],
-  yellow: ["gold", "amber", "honey", "mustard", "lemon", "sunshine", "canary"],
-  orange: ["tangerine", "rust", "copper", "coral", "burnt orange", "terracotta"],
-  gray: ["grey", "silver", "graphite", "slate", "ash", "pewter", "titanium", "gunmetal", "aluminum"],
-  pink: ["rose", "blush", "fuchsia", "magenta", "salmon", "hot pink", "bubblegum"],
-  purple: ["violet", "plum", "lavender", "lilac", "amethyst", "grape", "mauve"],
-  brown: ["tan", "chocolate", "espresso", "mocha", "camel", "khaki", "bronze", "coffee", "chestnut"],
+  black: [
+    "matte black", "gloss black", "stealth", "blackout", "carbon",
+    "onyx", "jet", "midnight", "charcoal", "ebony", "obsidian", "noir", "dark",
+  ],
+  white: [
+    "pearl", "ivory", "cream", "gloss white", "matte white",
+    "arctic", "ghost", "snow", "frost", "alabaster",
+  ],
+  blue: [
+    "navy", "cobalt", "royal", "royal blue", "azure", "sapphire", "midnight",
+    "steel blue", "slate blue", "ocean", "sky blue", "cerulean", "indigo", "dark blue",
+  ],
+  red: [
+    "crimson", "scarlet", "burgundy", "maroon", "cherry", "cardinal",
+    "wine", "vermillion", "ruby", "garnet",
+  ],
+  green: [
+    "olive", "forest", "lime", "sage", "emerald", "hunter", "military",
+    "military green", "army green", "moss", "jade",
+  ],
+  orange: [
+    "burnt orange", "amber", "copper", "rust", "tangerine",
+    "coral", "terracotta",
+  ],
+  yellow: [
+    "gold", "mustard", "hi-viz", "hi-vis", "neon yellow", "fluorescent",
+    "honey", "lemon", "sunshine", "canary",
+  ],
+  grey: [
+    "gray", "charcoal", "gunmetal", "silver", "slate",
+    "graphite", "ash", "pewter", "titanium", "aluminum",
+  ],
+  pink: [
+    "rose", "blush", "fuchsia", "magenta", "salmon", "hot pink", "bubblegum",
+  ],
+  purple: [
+    "violet", "plum", "lavender", "lilac", "amethyst", "grape", "mauve",
+  ],
+  brown: [
+    "tan", "chocolate", "espresso", "mocha", "camel", "khaki", "bronze",
+    "coffee", "chestnut",
+  ],
 };
 
 export function expandColorQuery(query: string): string[] {
@@ -18,11 +49,34 @@ export function expandColorQuery(query: string): string[] {
   expanded.add(lowerQuery);
 
   for (const [primary, synonyms] of Object.entries(colorSynonymMap)) {
-    if (primary === lowerQuery || synonyms.includes(lowerQuery)) {
+    if (
+      primary === lowerQuery ||
+      synonyms.some((s) => s === lowerQuery || lowerQuery.includes(s) || s.includes(lowerQuery))
+    ) {
       expanded.add(primary);
       synonyms.forEach((s) => expanded.add(s));
     }
   }
 
   return Array.from(expanded);
+}
+
+export function extractColorFromQuery(query: string): string | null {
+  const words = query.toLowerCase().split(/\s+/);
+  for (const word of words) {
+    if (colorSynonymMap[word]) return word;
+    for (const [primary, synonyms] of Object.entries(colorSynonymMap)) {
+      if (synonyms.includes(word)) return primary;
+    }
+  }
+
+  for (const [primary, synonyms] of Object.entries(colorSynonymMap)) {
+    const lq = query.toLowerCase();
+    if (lq.includes(primary)) return primary;
+    for (const syn of synonyms) {
+      if (lq.includes(syn)) return primary;
+    }
+  }
+
+  return null;
 }

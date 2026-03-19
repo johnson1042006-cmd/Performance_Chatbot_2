@@ -1,11 +1,16 @@
 import { db } from "@/lib/db";
-import { products, productPairings } from "@/lib/db/schema";
+import { productPairings } from "@/lib/db/schema";
 import { eq, or } from "drizzle-orm";
-import type { Product, ProductPairing } from "@/lib/db/schema";
+import type { ProductPairing } from "@/lib/db/schema";
+import {
+  getProductBySKU,
+  formatProductForPrompt,
+  type BCProduct,
+} from "@/lib/bigcommerce/client";
 
 interface PairingResult {
   pairing: ProductPairing;
-  product: Product | null;
+  product: BCProduct | null;
 }
 
 export async function findPairings(sku: string): Promise<PairingResult[]> {
@@ -25,16 +30,14 @@ export async function findPairings(sku: string): Promise<PairingResult[]> {
     const pairedSku =
       pairing.primarySku === sku ? pairing.pairedSku : pairing.primarySku;
 
-    const [product] = await db
-      .select()
-      .from(products)
-      .where(eq(products.sku, pairedSku))
-      .limit(1);
+    const product = await getProductBySKU(pairedSku);
 
-    if (product && !product.isDiscontinued) {
+    if (product && product.is_visible && product.availability !== "disabled") {
       results.push({ pairing, product });
     }
   }
 
   return results;
 }
+
+export { formatProductForPrompt };
