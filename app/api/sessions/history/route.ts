@@ -5,6 +5,8 @@ import { db } from "@/lib/db";
 import { sessions } from "@/lib/db/schema";
 import { desc, sql } from "drizzle-orm";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
