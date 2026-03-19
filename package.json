@@ -1,0 +1,44 @@
+{
+  "name": "performance-chatbot",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "db:push": "npx drizzle-kit push",
+    "db:seed": "npx tsx scripts/seed-users.ts",
+    "db:seed:knowledge": "npx tsx scripts/seed-knowledge.ts",
+    "db:seed:products": "npx tsx scripts/seed-products.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.80.0",
+    "@auth/drizzle-adapter": "^1.11.1",
+    "@neondatabase/serverless": "^1.0.2",
+    "bcryptjs": "^3.0.3",
+    "drizzle-orm": "^0.45.1",
+    "fuse.js": "^7.1.0",
+    "lucide-react": "^0.577.0",
+    "next": "14.2.35",
+    "next-auth": "^4.24.13",
+    "pusher": "^5.3.3",
+    "pusher-js": "^8.4.3",
+    "react": "^18",
+    "react-dom": "^18",
+    "recharts": "^3.8.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "drizzle-kit": "^0.31.10",
+    "eslint": "^8",
+    "eslint-config-next": "14.2.35",
+    "postcss": "^8",
+    "tailwindcss": "^3.4.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5"
+  }
+}

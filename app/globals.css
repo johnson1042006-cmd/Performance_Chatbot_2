@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-primary: #1a1a2e;
+  --color-accent: #e63946;
+  --color-success: #2dc653;
+  --color-warning: #f4a261;
+  --color-background: #f8f9fb;
+  --color-surface: #ffffff;
+  --color-border: #e8eaed;
+  --color-text-primary: #111827;
+  --color-text-secondary: #6b7280;
+  --color-ai-badge: #7c3aed;
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --radius-card: 10px;
+  --radius-button: 6px;
+  --radius-badge: 999px;
+}
+
+body {
+  color: var(--color-text-primary);
+  background: var(--color-background);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+}
