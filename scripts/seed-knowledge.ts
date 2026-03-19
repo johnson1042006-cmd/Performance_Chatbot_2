@@ -1,3 +1,6 @@
+import { config } from "dotenv";
+config({ path: ".env.local" });
+
 import { seedKnowledge } from "../lib/knowledge/seedKnowledge";
 
 seedKnowledge()
