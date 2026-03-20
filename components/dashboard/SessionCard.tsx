@@ -57,7 +57,7 @@ export default function SessionCard({
       <div className="flex items-start justify-between mb-2">
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-text-primary truncate">
-            {session.customerIdentifier.substring(0, 16)}...
+            {session.customerIdentifier}
           </p>
           <div className="flex items-center gap-2 mt-1">
             <Badge variant={statusBadge.variant} dot>

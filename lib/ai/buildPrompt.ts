@@ -26,18 +26,27 @@ interface PromptResult {
   conversationMessages: { role: "user" | "assistant"; content: string }[];
 }
 
+async function safeFetch<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await fn();
+  } catch (error) {
+    console.error("Non-fatal fetch error in buildPrompt:", error);
+    return fallback;
+  }
+}
+
 async function fetchContextProduct(
   pageContext?: PageContext | null
 ): Promise<BCProduct | null> {
   if (!pageContext) return null;
 
   if (pageContext.productSku) {
-    const product = await getProductBySKU(pageContext.productSku);
+    const product = await safeFetch(() => getProductBySKU(pageContext.productSku!), null);
     if (product) return product;
   }
 
   if (pageContext.productName) {
-    const products = await getProductByName(pageContext.productName);
+    const products = await safeFetch(() => getProductByName(pageContext.productName!), []);
     if (products.length > 0) return products[0];
   }
 
@@ -57,14 +66,14 @@ export async function buildPrompt(
         .where(eq(messages.sessionId, sessionId))
         .orderBy(asc(messages.sentAt)),
       db.select().from(knowledgeBase),
-      searchProducts(latestMessage),
+      safeFetch(() => searchProducts(latestMessage), []),
       fetchContextProduct(pageContext),
       pageContext?.productSku
-        ? findPairings(pageContext.productSku)
+        ? safeFetch(() => findPairings(pageContext.productSku!), [])
         : Promise.resolve([]),
     ]);
 
-  let system = `You are the Performance Cycle live chat assistant. Performance Cycle is a motorcycle gear, parts, and accessories retailer. You help customers find products, answer questions about inventory, returns, service, and provide expert advice on motorcycle gear.
+  let system = `You are the Performance Cycle live chat assistant. Performance Cycle is a motorcycle gear, parts, and accessories retailer located in Centennial, Colorado. You help customers find products, answer questions about inventory, returns, service, and provide expert advice on motorcycle gear.
 
 Be friendly, knowledgeable, and concise. Use a conversational tone. Format product details clearly.
 
@@ -136,10 +145,9 @@ Even then, ALWAYS offer alternatives in the same category. Never leave the custo
 
   conversationMessages.push({ role: "user", content: latestMessage });
 
-  // If the message itself contains a SKU, do an inline lookup and append context
   const inlineSKU = extractSKUFromText(latestMessage);
   if (inlineSKU && (!contextProduct || contextProduct.sku !== inlineSKU)) {
-    const inlineProduct = await getProductBySKU(inlineSKU);
+    const inlineProduct = await safeFetch(() => getProductBySKU(inlineSKU), null);
     if (inlineProduct) {
       system += `\n## PRODUCT MENTIONED IN MESSAGE (SKU: ${inlineSKU})\n\n`;
       system += formatProductForPrompt(inlineProduct);

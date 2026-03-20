@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import SessionCard from "./SessionCard";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { MessageSquare } from "lucide-react";
@@ -27,6 +27,7 @@ export default function SessionQueue({
 }: SessionQueueProps) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
+  const pollRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -44,6 +45,7 @@ export default function SessionQueue({
     fetchSessions();
   }, [fetchSessions]);
 
+  // Pusher real-time updates
   useEffect(() => {
     let cleanup = () => {};
     import("@/lib/pusher/client").then(({ getPusherClient }) => {
@@ -59,8 +61,18 @@ export default function SessionQueue({
         channel.unbind_all();
         pusher.unsubscribe("dashboard");
       };
+    }).catch(() => {
+      // Pusher unavailable — handled by polling below
     });
     return () => cleanup();
+  }, [fetchSessions]);
+
+  // Polling fallback — refresh session list every 5 seconds
+  useEffect(() => {
+    pollRef.current = setInterval(fetchSessions, 5000);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
   }, [fetchSessions]);
 
   if (loading) {

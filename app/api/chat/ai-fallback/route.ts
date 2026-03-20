@@ -6,6 +6,8 @@ import { buildPrompt } from "@/lib/ai/buildPrompt";
 import { callClaude } from "@/lib/ai/callClaude";
 import { getPusher } from "@/lib/pusher/server";
 
+export const maxDuration = 30;
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -84,7 +86,7 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error("AI fallback error:", error);
     return NextResponse.json(
-      { error: "AI fallback failed" },
+      { error: "AI fallback failed", details: String(error) },
       { status: 500 }
     );
   }

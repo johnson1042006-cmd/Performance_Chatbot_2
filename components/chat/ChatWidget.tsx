@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import ChatHeader from "./ChatHeader";
 import MessageBubble from "./MessageBubble";
-import { Send } from "lucide-react";
+import { Send, Loader2 } from "lucide-react";
 
 interface Message {
   id: string;
@@ -23,6 +23,8 @@ interface PageContext {
   searchQuery: string | null;
 }
 
+const AI_FALLBACK_DELAY = 8000;
+
 export default function ChatWidget() {
   const searchParams = useSearchParams();
   const customerIdentifier = searchParams.get("sessionId") || "";
@@ -30,6 +32,7 @@ export default function ChatWidget() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [waitingForReply, setWaitingForReply] = useState(false);
   const [pageContext, setPageContext] = useState<PageContext | null>(null);
   const [agentClaimed, setAgentClaimed] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -46,14 +49,12 @@ export default function ChatWidget() {
     return () => window.removeEventListener("message", handler);
   }, []);
 
-  // Create or resume the DB session on mount
   useEffect(() => {
     if (!customerIdentifier || initialized.current) return;
     initialized.current = true;
 
     async function initSession() {
       try {
-        // Create or find existing session
         const res = await fetch("/api/sessions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -62,8 +63,6 @@ export default function ChatWidget() {
         const data = await res.json();
         if (data.session?.id) {
           setDbSessionId(data.session.id);
-
-          // Load existing messages
           const msgRes = await fetch(`/api/sessions/${data.session.id}/messages`);
           if (msgRes.ok) {
             const msgData = await msgRes.json();
@@ -88,6 +87,9 @@ export default function ChatWidget() {
           if (prev.some((m) => m.id === data.id)) return prev;
           return [...prev, data];
         });
+        if (data.role === "ai" || data.role === "agent") {
+          setWaitingForReply(false);
+        }
       });
       channel.bind("session-claimed", () => {
         setAgentClaimed(true);
@@ -117,20 +119,27 @@ export default function ChatWidget() {
     });
   }, [messages]);
 
-  const triggerAIFallback = async (latestMessage: string) => {
-    if (!dbSessionId) return;
+  const triggerAIFallback = async (latestMessage: string, sid: string) => {
     try {
-      await fetch("/api/chat/ai-fallback", {
+      const res = await fetch("/api/chat/ai-fallback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          sessionId: dbSessionId,
+          sessionId: sid,
           latestMessage,
           pageContext,
         }),
       });
+      const data = await res.json();
+      if (data.message) {
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === data.message.id)) return prev;
+          return [...prev, data.message];
+        });
+        setWaitingForReply(false);
+      }
     } catch {
-      // AI fallback will be retried on next message
+      setWaitingForReply(false);
     }
   };
 
@@ -139,6 +148,7 @@ export default function ChatWidget() {
     const content = input.trim();
     setInput("");
     setSending(true);
+    setWaitingForReply(true);
 
     window.parent.postMessage({ type: "pc-chat-send" }, "*");
 
@@ -151,7 +161,6 @@ export default function ChatWidget() {
     setMessages((prev) => [...prev, tempMsg]);
 
     try {
-      // Ensure we have a DB session
       let sid = dbSessionId;
       if (!sid) {
         const sRes = await fetch("/api/sessions", {
@@ -168,6 +177,7 @@ export default function ChatWidget() {
 
       if (!sid) {
         setSending(false);
+        setWaitingForReply(false);
         return;
       }
 
@@ -190,11 +200,11 @@ export default function ChatWidget() {
       if (data.sessionStatus !== "active_human" && !agentClaimed) {
         if (fallbackTimerRef.current) clearTimeout(fallbackTimerRef.current);
         fallbackTimerRef.current = setTimeout(() => {
-          triggerAIFallback(content);
-        }, 60000);
+          triggerAIFallback(content, sid!);
+        }, AI_FALLBACK_DELAY);
       }
     } catch {
-      // keep temp message visible
+      setWaitingForReply(false);
     } finally {
       setSending(false);
     }
@@ -226,6 +236,14 @@ export default function ChatWidget() {
             agentName={msg.agentName}
           />
         ))}
+        {waitingForReply && (
+          <div className="flex items-center gap-2 py-2 px-1">
+            <div className="w-7 h-7 bg-surface-elevated rounded-full flex items-center justify-center">
+              <Loader2 size={14} className="animate-spin text-text-secondary" />
+            </div>
+            <span className="text-xs text-text-secondary">Typing...</span>
+          </div>
+        )}
       </div>
       <div className="border-t border-border bg-surface px-3 py-3 shrink-0">
         <div className="flex items-center gap-2">

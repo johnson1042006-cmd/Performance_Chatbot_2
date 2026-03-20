@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
 import MessageThread from "./MessageThread";
 import PageContextBadge from "./PageContextBadge";
@@ -36,6 +36,7 @@ export default function ChatPanel({
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const pollRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchMessages = useCallback(async () => {
     try {
@@ -51,6 +52,7 @@ export default function ChatPanel({
     fetchMessages();
   }, [fetchMessages]);
 
+  // Pusher real-time subscription
   useEffect(() => {
     let cleanup = () => {};
     import("@/lib/pusher/client").then(({ getPusherClient }) => {
@@ -66,9 +68,19 @@ export default function ChatPanel({
         channel.unbind_all();
         pusher.unsubscribe(`session-${sessionId}`);
       };
+    }).catch(() => {
+      // Pusher unavailable — handled by polling below
     });
     return () => cleanup();
   }, [sessionId]);
+
+  // Polling fallback — refresh messages every 3 seconds
+  useEffect(() => {
+    pollRef.current = setInterval(fetchMessages, 3000);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [fetchMessages]);
 
   const sendAgentMessage = async () => {
     if (!input.trim() || sending) return;
@@ -87,6 +99,7 @@ export default function ChatPanel({
           agentName: authSession?.user?.name,
         }),
       });
+      await fetchMessages();
     } catch (error) {
       console.error("Failed to send:", error);
     } finally {

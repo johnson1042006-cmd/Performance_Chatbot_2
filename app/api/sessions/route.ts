@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { sessions } from "@/lib/db/schema";
-import { desc, eq, ne } from "drizzle-orm";
+import { desc, eq, ne, sql } from "drizzle-orm";
 
 export async function GET() {
   try {
@@ -21,6 +21,13 @@ export async function GET() {
   }
 }
 
+async function getNextCustomerNumber(): Promise<number> {
+  const result = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(sessions);
+  return (result[0]?.count || 0) + 1;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -37,10 +44,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ session: existing[0] });
     }
 
+    const customerNum = await getNextCustomerNumber();
+    const displayName = `Customer #${customerNum}`;
+
     const [session] = await db
       .insert(sessions)
       .values({
-        customerIdentifier,
+        customerIdentifier: displayName,
         pageContext,
         status: "waiting",
       })
