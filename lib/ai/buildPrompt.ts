@@ -58,7 +58,7 @@ export async function buildPrompt(
   latestMessage: string,
   pageContext?: PageContext | null
 ): Promise<PromptResult> {
-  const [history, knowledge, productResults, contextProduct, pairingResults] =
+  const [history, knowledge, contextProduct] =
     await Promise.all([
       db
         .select()
@@ -66,12 +66,21 @@ export async function buildPrompt(
         .where(eq(messages.sessionId, sessionId))
         .orderBy(asc(messages.sentAt)),
       db.select().from(knowledgeBase),
-      safeFetch(() => searchProducts(latestMessage), []),
       fetchContextProduct(pageContext),
-      pageContext?.productSku
-        ? safeFetch(() => findPairings(pageContext.productSku!), [])
-        : Promise.resolve([]),
     ]);
+
+  const conversationKeywords = history
+    .filter((m: Message) => m.role === "customer")
+    .map((m: Message) => m.content)
+    .join(" ");
+  const searchQuery = `${conversationKeywords} ${latestMessage}`.trim();
+
+  const [productResults, pairingResults] = await Promise.all([
+    safeFetch(() => searchProducts(searchQuery), []),
+    pageContext?.productSku
+      ? safeFetch(() => findPairings(pageContext.productSku!), [])
+      : Promise.resolve([]),
+  ]);
 
   let system = `You are a live chat support agent at Performance Cycle — Colorado's largest independent motorcycle gear, parts, and accessories retailer in Centennial, CO.
 
@@ -83,6 +92,8 @@ export async function buildPrompt(
 - When you have product results, present them naturally: "We've got a few great options..." not "Here are the search results..."
 - Use product names, prices, and "in stock" / "out of stock" naturally in conversation.
 - If you genuinely can't find what they're looking for, say so simply and suggest alternatives. Don't narrate your search process.
+- CRITICAL: When the customer has given you enough info to make a recommendation (product type, budget, preferences), you MUST recommend specific products by name and price from the RELEVANT PRODUCTS section below. NEVER say "let me check" or "give me a second" — you already have the data, so just present it.
+- It is fine to ask 1 qualifying question early on, but once the customer gives specifics, respond with actual product names and prices immediately. Do not stall or promise a follow-up.
 
 ## BEHAVIOR RULES
 
