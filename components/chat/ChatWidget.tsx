@@ -25,7 +25,8 @@ interface PageContext {
 
 export default function ChatWidget() {
   const searchParams = useSearchParams();
-  const sessionId = searchParams.get("sessionId") || "";
+  const customerIdentifier = searchParams.get("sessionId") || "";
+  const [dbSessionId, setDbSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -45,23 +46,43 @@ export default function ChatWidget() {
     return () => window.removeEventListener("message", handler);
   }, []);
 
+  // Create or resume the DB session on mount
   useEffect(() => {
-    if (!sessionId || initialized.current) return;
+    if (!customerIdentifier || initialized.current) return;
     initialized.current = true;
 
-    fetch(`/api/sessions/${sessionId}/messages`)
-      .then((res) => (res.ok ? res.json() : { messages: [] }))
-      .then((data) => {
-        if (data.messages?.length) setMessages(data.messages);
-      })
-      .catch(() => {});
-  }, [sessionId]);
+    async function initSession() {
+      try {
+        // Create or find existing session
+        const res = await fetch("/api/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ customerIdentifier }),
+        });
+        const data = await res.json();
+        if (data.session?.id) {
+          setDbSessionId(data.session.id);
+
+          // Load existing messages
+          const msgRes = await fetch(`/api/sessions/${data.session.id}/messages`);
+          if (msgRes.ok) {
+            const msgData = await msgRes.json();
+            if (msgData.messages?.length) setMessages(msgData.messages);
+          }
+        }
+      } catch {
+        // Will retry on next message send
+      }
+    }
+    initSession();
+  }, [customerIdentifier]);
 
   const subscribeToChannel = useCallback(() => {
+    if (!dbSessionId) return () => {};
     let cleanup = () => {};
     import("@/lib/pusher/client").then(({ getPusherClient }) => {
       const pusher = getPusherClient();
-      const channel = pusher.subscribe(`session-${sessionId}`);
+      const channel = pusher.subscribe(`session-${dbSessionId}`);
       channel.bind("new-message", (data: Message) => {
         setMessages((prev) => {
           if (prev.some((m) => m.id === data.id)) return prev;
@@ -77,17 +98,17 @@ export default function ChatWidget() {
       });
       cleanup = () => {
         channel.unbind_all();
-        pusher.unsubscribe(`session-${sessionId}`);
+        pusher.unsubscribe(`session-${dbSessionId}`);
       };
     });
     return cleanup;
-  }, [sessionId]);
+  }, [dbSessionId]);
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!dbSessionId) return;
     const cleanup = subscribeToChannel();
     return () => cleanup();
-  }, [sessionId, subscribeToChannel]);
+  }, [dbSessionId, subscribeToChannel]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -97,12 +118,13 @@ export default function ChatWidget() {
   }, [messages]);
 
   const triggerAIFallback = async (latestMessage: string) => {
+    if (!dbSessionId) return;
     try {
       await fetch("/api/chat/ai-fallback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          sessionId,
+          sessionId: dbSessionId,
           latestMessage,
           pageContext,
         }),
@@ -129,12 +151,32 @@ export default function ChatWidget() {
     setMessages((prev) => [...prev, tempMsg]);
 
     try {
+      // Ensure we have a DB session
+      let sid = dbSessionId;
+      if (!sid) {
+        const sRes = await fetch("/api/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ customerIdentifier, pageContext }),
+        });
+        const sData = await sRes.json();
+        if (sData.session?.id) {
+          sid = sData.session.id;
+          setDbSessionId(sid);
+        }
+      }
+
+      if (!sid) {
+        setSending(false);
+        return;
+      }
+
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: content,
-          sessionId,
+          sessionId: sid,
           pageContext,
         }),
       });
