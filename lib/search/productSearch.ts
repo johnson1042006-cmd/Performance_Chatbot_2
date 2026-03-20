@@ -21,12 +21,14 @@ const STOP_WORDS = new Set([
   "all", "each", "every", "any", "some", "such", "only", "also", "both",
   "here", "there", "when", "where", "why", "see", "show", "get", "got",
   "want", "looking", "look", "find", "please", "thanks", "thank", "hey",
-  "hi", "hello", "yeah", "yes", "yep", "nope", "okay", "ok",
+  "hi", "hello", "yeah", "yes", "yep", "nope", "okay", "ok", "much",
+  "many", "still", "right", "thing", "things", "come", "something",
 ]);
 
 function extractKeywords(query: string): string[] {
   return query
     .toLowerCase()
+    .replace(/[?!.,;:'"()]/g, "")
     .split(/\s+/)
     .filter((w) => w.length > 1 && !STOP_WORDS.has(w));
 }
@@ -48,70 +50,60 @@ export async function searchProducts(query: string): Promise<BCProduct[]> {
     }
   }
 
-  // 2. Search with extracted keywords joined (e.g. "shoei helmets")
+  // 2. Full smart search (keyword + brand + name:like + fallbacks)
   const keywordQuery = keywords.join(" ");
   let results = await searchProductsBC(keywordQuery);
 
-  // 3. If no results, search each keyword individually (longest first for relevance)
-  if (results.length === 0) {
-    const sorted = [...keywords].sort((a, b) => b.length - a.length);
-    for (const word of sorted) {
-      results = await searchProductsBC(word);
-      if (results.length > 0) break;
-    }
-  }
-
-  // 4. Color-expanded search if initial results are sparse
+  // 3. Color-expanded search if initial results are sparse
   if (results.length < 3) {
     const colorTerms = expandColorQuery(keywordQuery);
     if (colorTerms.length > 1) {
-      const colorSearches = colorTerms
-        .slice(0, 5)
-        .map((term) => searchProductsBC(term));
-      const colorResults = await Promise.all(colorSearches);
       const seen = new Set(results.map((p) => p.id));
-      for (const batch of colorResults) {
-        for (const p of batch) {
+      for (const term of colorTerms.slice(0, 3)) {
+        const colorResults = await searchProductsBC(term);
+        for (const p of colorResults) {
           if (!seen.has(p.id)) {
             seen.add(p.id);
             results.push(p);
           }
         }
+        if (results.length >= 5) break;
       }
     }
   }
 
-  // 5. If still not enough, try category-based alternatives
+  // 4. Category-based alternatives to fill out results
   if (results.length < 3 && results.length > 0) {
     const categoryIds = Array.from(new Set(results.flatMap((p) => p.categories)));
-    for (const catId of categoryIds.slice(0, 3)) {
-      if (results.length >= 3) break;
+    const seen = new Set(results.map((p) => p.id));
+    for (const catId of categoryIds.slice(0, 2)) {
+      if (results.length >= 5) break;
       const catProducts = await getProductsByCategory(catId);
-      const seen = new Set(results.map((p) => p.id));
       for (const p of catProducts) {
         if (!seen.has(p.id)) {
           seen.add(p.id);
           results.push(p);
         }
-        if (results.length >= 6) break;
+        if (results.length >= 8) break;
       }
     }
   }
 
+  // Filter inactive
   results = results.filter(
     (p) => p.is_visible && p.availability !== "disabled"
   );
 
-  // Fuzzy re-rank
+  // Fuzzy re-rank to put the most relevant results first
   if (results.length > 1) {
     const color = extractColorFromQuery(normalizedQuery);
     const fuse = new Fuse(results, {
       keys: [
-        { name: "name", weight: 0.4 },
-        { name: "description", weight: 0.3 },
-        { name: "sku", weight: 0.2 },
+        { name: "name", weight: 0.5 },
+        { name: "description", weight: 0.25 },
+        { name: "sku", weight: 0.25 },
       ],
-      threshold: 0.5,
+      threshold: 0.6,
       includeScore: true,
     });
 

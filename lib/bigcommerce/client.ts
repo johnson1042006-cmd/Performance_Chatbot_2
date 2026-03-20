@@ -81,14 +81,34 @@ export interface BCCategory {
   parent_id: number;
 }
 
-export async function getProductByName(name: string): Promise<BCProduct[]> {
+export interface BCBrand {
+  id: number;
+  name: string;
+}
+
+// --- Core product fetchers ---
+
+export async function getProductByKeyword(keyword: string, limit = 25): Promise<BCProduct[]> {
   const results = await bcFetch<BCProduct[]>({
     path: "/catalog/products",
     params: {
-      "keyword": name,
-      "is_visible": 1,
-      "include": "variants,images",
-      "limit": 10,
+      keyword,
+      is_visible: 1,
+      include: "variants,images",
+      limit,
+    },
+  });
+  return results || [];
+}
+
+export async function getProductByNameLike(name: string, limit = 25): Promise<BCProduct[]> {
+  const results = await bcFetch<BCProduct[]>({
+    path: "/catalog/products",
+    params: {
+      "name:like": name,
+      is_visible: 1,
+      include: "variants,images",
+      limit,
     },
   });
   return results || [];
@@ -98,9 +118,9 @@ export async function getProductBySKU(sku: string): Promise<BCProduct | null> {
   const results = await bcFetch<BCProduct[]>({
     path: "/catalog/products",
     params: {
-      "sku": sku,
-      "include": "variants,images",
-      "limit": 1,
+      sku,
+      include: "variants,images",
+      limit: 1,
     },
   });
   return results?.[0] || null;
@@ -109,22 +129,69 @@ export async function getProductBySKU(sku: string): Promise<BCProduct | null> {
 export async function getProductById(id: number): Promise<BCProduct | null> {
   return bcFetch<BCProduct>({
     path: `/catalog/products/${id}`,
-    params: { "include": "variants,images" },
+    params: { include: "variants,images" },
   });
 }
 
-export async function getProductsByCategory(categoryId: number): Promise<BCProduct[]> {
+export async function getProductsByCategory(categoryId: number, limit = 25): Promise<BCProduct[]> {
   const results = await bcFetch<BCProduct[]>({
     path: "/catalog/products",
     params: {
       "categories:in": categoryId,
-      "is_visible": 1,
-      "include": "variants,images",
-      "limit": 20,
+      is_visible: 1,
+      include: "variants,images",
+      limit,
     },
   });
   return results || [];
 }
+
+export async function getProductsByBrand(brandId: number, limit = 25): Promise<BCProduct[]> {
+  const results = await bcFetch<BCProduct[]>({
+    path: "/catalog/products",
+    params: {
+      brand_id: brandId,
+      is_visible: 1,
+      include: "variants,images",
+      limit,
+    },
+  });
+  return results || [];
+}
+
+// --- Brand search ---
+
+export async function getBrands(): Promise<BCBrand[]> {
+  const results = await bcFetch<BCBrand[]>({
+    path: "/catalog/brands",
+    params: { limit: 250 },
+  });
+  return results || [];
+}
+
+let _brandCache: BCBrand[] | null = null;
+let _brandCacheTime = 0;
+const BRAND_CACHE_TTL = 5 * 60 * 1000;
+
+async function getCachedBrands(): Promise<BCBrand[]> {
+  if (_brandCache && Date.now() - _brandCacheTime < BRAND_CACHE_TTL) {
+    return _brandCache;
+  }
+  _brandCache = await getBrands();
+  _brandCacheTime = Date.now();
+  return _brandCache;
+}
+
+export async function findBrandByName(name: string): Promise<BCBrand | null> {
+  const brands = await getCachedBrands();
+  const lower = name.toLowerCase();
+  return brands.find((b) => b.name.toLowerCase() === lower)
+    || brands.find((b) => b.name.toLowerCase().includes(lower))
+    || brands.find((b) => lower.includes(b.name.toLowerCase()))
+    || null;
+}
+
+// --- Inventory ---
 
 export async function checkInventory(productId: number): Promise<{
   inStock: boolean;
@@ -153,19 +220,62 @@ export async function getProductVariants(productId: number): Promise<BCVariant[]
   return results || [];
 }
 
-export async function searchProductsBC(query: string): Promise<BCProduct[]> {
-  let results = await getProductByName(query);
+// --- Combined smart search ---
 
-  if (results.length === 0) {
-    const words = query.split(/\s+/).filter((w) => w.length > 2);
-    const sorted = [...words].sort((a, b) => b.length - a.length);
-    for (const word of sorted) {
-      results = await getProductByName(word);
-      if (results.length > 0) break;
+export async function searchProductsBC(query: string): Promise<BCProduct[]> {
+  const deduped = new Map<number, BCProduct>();
+
+  function addResults(products: BCProduct[]) {
+    for (const p of products) {
+      if (p.is_visible && p.availability !== "disabled" && !deduped.has(p.id)) {
+        deduped.set(p.id, p);
+      }
     }
   }
 
-  return results.filter((p) => p.is_visible && p.availability !== "disabled");
+  // 1. Keyword search (searches name + description + sku)
+  const keywordResults = await getProductByKeyword(query);
+  addResults(keywordResults);
+
+  // 2. Brand search — check if any word in the query matches a brand
+  const words = query.split(/\s+/);
+  for (const word of words) {
+    if (word.length < 2) continue;
+    const brand = await findBrandByName(word);
+    if (brand) {
+      const otherWords = words.filter((w) => w.toLowerCase() !== word.toLowerCase()).join(" ");
+      if (otherWords.length > 0) {
+        const brandKeyword = await getProductByKeyword(otherWords);
+        const brandFiltered = brandKeyword.filter((p) => p.brand_id === brand.id);
+        if (brandFiltered.length > 0) {
+          addResults(brandFiltered);
+        } else {
+          addResults(await getProductsByBrand(brand.id));
+        }
+      } else {
+        addResults(await getProductsByBrand(brand.id));
+      }
+      break;
+    }
+  }
+
+  // 3. name:like fallback if keyword search missed things
+  if (deduped.size < 3) {
+    const nameLike = await getProductByNameLike(query);
+    addResults(nameLike);
+  }
+
+  // 4. Single-word fallback (longest first)
+  if (deduped.size === 0 && words.length > 1) {
+    const sorted = [...words].filter((w) => w.length > 2).sort((a, b) => b.length - a.length);
+    for (const word of sorted) {
+      const wordResults = await getProductByKeyword(word);
+      addResults(wordResults);
+      if (deduped.size > 0) break;
+    }
+  }
+
+  return Array.from(deduped.values());
 }
 
 export async function getCategories(): Promise<BCCategory[]> {
@@ -175,6 +285,12 @@ export async function getCategories(): Promise<BCCategory[]> {
   });
   return results || [];
 }
+
+// --- Aliases for backward compat ---
+
+export const getProductByName = getProductByKeyword;
+
+// --- Formatting ---
 
 export function formatProductForPrompt(product: BCProduct): string {
   const price = product.sale_price || product.calculated_price || product.price;
@@ -188,6 +304,7 @@ export function formatProductForPrompt(product: BCProduct): string {
   const variants = product.variants || [];
   const variantInfo = variants.length > 0
     ? variants
+        .slice(0, 15)
         .map((v) => {
           const opts = v.option_values.map((o) => `${o.option_display_name}: ${o.label}`).join(", ");
           const vStock = v.inventory_level > 0 ? `${v.inventory_level} in stock` : "out of stock";
@@ -197,7 +314,7 @@ export function formatProductForPrompt(product: BCProduct): string {
     : "  No variant data available";
 
   const desc = product.description
-    ? product.description.replace(/<[^>]*>/g, "").substring(0, 500)
+    ? product.description.replace(/<[^>]*>/g, "").substring(0, 300)
     : "No description";
 
   return `**${product.name}**
