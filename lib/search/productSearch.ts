@@ -9,10 +9,35 @@ import {
 
 const SKU_PATTERN = /\b[A-Z0-9]{2,}[-_]?[A-Z0-9]{2,}[-_]?[A-Z0-9]*\b/i;
 
+const STOP_WORDS = new Set([
+  "i", "me", "my", "we", "our", "you", "your", "it", "its", "the", "a", "an",
+  "is", "are", "was", "were", "be", "been", "am", "do", "does", "did", "have",
+  "has", "had", "can", "could", "will", "would", "shall", "should", "may",
+  "might", "must", "need", "dare", "to", "of", "in", "for", "on", "with",
+  "at", "by", "from", "as", "into", "about", "like", "through", "after",
+  "over", "between", "out", "up", "down", "off", "then", "than", "too",
+  "very", "just", "so", "not", "no", "nor", "and", "but", "or", "if",
+  "that", "this", "these", "those", "what", "which", "who", "whom", "how",
+  "all", "each", "every", "any", "some", "such", "only", "also", "both",
+  "here", "there", "when", "where", "why", "see", "show", "get", "got",
+  "want", "looking", "look", "find", "please", "thanks", "thank", "hey",
+  "hi", "hello", "yeah", "yes", "yep", "nope", "okay", "ok",
+]);
+
+function extractKeywords(query: string): string[] {
+  return query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((w) => w.length > 1 && !STOP_WORDS.has(w));
+}
+
 export async function searchProducts(query: string): Promise<BCProduct[]> {
   if (!query || query.trim().length === 0) return [];
 
   const normalizedQuery = query.trim();
+  const keywords = extractKeywords(normalizedQuery);
+
+  if (keywords.length === 0) return [];
 
   // 1. Exact SKU lookup
   const skuMatch = normalizedQuery.match(SKU_PATTERN);
@@ -23,12 +48,22 @@ export async function searchProducts(query: string): Promise<BCProduct[]> {
     }
   }
 
-  // 2. Exact name/keyword search via BC API
-  let results = await searchProductsBC(normalizedQuery);
+  // 2. Search with extracted keywords joined (e.g. "shoei helmets")
+  const keywordQuery = keywords.join(" ");
+  let results = await searchProductsBC(keywordQuery);
 
-  // 3. Color-expanded search if initial results are sparse
+  // 3. If no results, search each keyword individually (longest first for relevance)
+  if (results.length === 0) {
+    const sorted = [...keywords].sort((a, b) => b.length - a.length);
+    for (const word of sorted) {
+      results = await searchProductsBC(word);
+      if (results.length > 0) break;
+    }
+  }
+
+  // 4. Color-expanded search if initial results are sparse
   if (results.length < 3) {
-    const colorTerms = expandColorQuery(normalizedQuery);
+    const colorTerms = expandColorQuery(keywordQuery);
     if (colorTerms.length > 1) {
       const colorSearches = colorTerms
         .slice(0, 5)
@@ -41,22 +76,6 @@ export async function searchProducts(query: string): Promise<BCProduct[]> {
             seen.add(p.id);
             results.push(p);
           }
-        }
-      }
-    }
-  }
-
-  // 4. Partial keyword search — split query into words and search each
-  if (results.length < 3) {
-    const words = normalizedQuery.split(/\s+/).filter((w) => w.length > 2);
-    for (const word of words) {
-      if (results.length >= 3) break;
-      const wordResults = await searchProductsBC(word);
-      const seen = new Set(results.map((p) => p.id));
-      for (const p of wordResults) {
-        if (!seen.has(p.id)) {
-          seen.add(p.id);
-          results.push(p);
         }
       }
     }
@@ -79,12 +98,11 @@ export async function searchProducts(query: string): Promise<BCProduct[]> {
     }
   }
 
-  // Filter out inactive/invisible products
   results = results.filter(
     (p) => p.is_visible && p.availability !== "disabled"
   );
 
-  // Client-side fuzzy re-rank if we have results
+  // Fuzzy re-rank
   if (results.length > 1) {
     const color = extractColorFromQuery(normalizedQuery);
     const fuse = new Fuse(results, {
@@ -98,8 +116,8 @@ export async function searchProducts(query: string): Promise<BCProduct[]> {
     });
 
     const searchTerm = color
-      ? `${normalizedQuery} ${expandColorQuery(color).join(" ")}`
-      : normalizedQuery;
+      ? `${keywordQuery} ${expandColorQuery(color).join(" ")}`
+      : keywordQuery;
 
     const ranked = fuse.search(searchTerm);
     if (ranked.length > 0) {

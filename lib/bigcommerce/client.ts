@@ -158,7 +158,8 @@ export async function searchProductsBC(query: string): Promise<BCProduct[]> {
 
   if (results.length === 0) {
     const words = query.split(/\s+/).filter((w) => w.length > 2);
-    for (const word of words) {
+    const sorted = [...words].sort((a, b) => b.length - a.length);
+    for (const word of sorted) {
       results = await getProductByName(word);
       if (results.length > 0) break;
     }
