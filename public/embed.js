@@ -1,5 +1,5 @@
 (function () {
-  var PC_CHAT_URL = "{{CHAT_URL}}";
+  var PC_CHAT_URL = "https://performance-chatbot-2.vercel.app";
 
   var style = document.createElement("style");
   style.textContent =
