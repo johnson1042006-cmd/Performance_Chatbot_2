@@ -85,6 +85,12 @@ export default function ChatWidget() {
       channel.bind("new-message", (data: Message) => {
         setMessages((prev) => {
           if (prev.some((m) => m.id === data.id)) return prev;
+          const tempMatch = prev.find(
+            (m) => m.id.startsWith("temp-") && m.content === data.content && m.role === data.role
+          );
+          if (tempMatch) {
+            return prev.map((m) => (m.id === tempMatch.id ? data : m));
+          }
           return [...prev, data];
         });
         if (data.role === "ai" || data.role === "agent") {

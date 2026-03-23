@@ -22,39 +22,36 @@ const entries = [
     topic: "ebike_info",
     content: `E-Bike Information:
 
-Performance Cycle carries a full selection of e-bikes and e-bike parts and accessories.
+Performance Cycle carries e-bikes.
 
-Available categories:
+Available:
 - Electric motorcycles and scooters
-- E-bike conversion kits
 - E-bike batteries (lithium-ion, various voltages)
-- E-bike motors and controllers
 - E-bike chargers and accessories
-- Pedal-assist and throttle systems
 
-We offer in-store demos for select e-bike models. All e-bikes come with manufacturer warranty.
+All e-bikes come with manufacturer warranty.
 E-bike service and repair is available through our service department.
-Battery recycling program available for old e-bike batteries.`,
+Battery recycling program available for old e-bike batteries.
+
+NOTE: We do NOT carry e-bike conversion kits. We do NOT offer in-store demos for e-bikes.`,
   },
   {
     topic: "service_info",
     content: `Service Department Information:
 
-Performance Cycle offers full-service motorcycle and powersport vehicle maintenance and repair.
+Performance Cycle offers motorcycle and powersport vehicle maintenance and repair.
 
 Services available:
-- Oil changes and fluid services
 - Tire mounting and balancing
 - Brake service and replacement
 - Chain and sprocket replacement
 - Suspension setup and service
 - Electrical diagnostics
-- Full engine rebuilds
-- Custom exhaust installation
-- Dyno tuning
 - Pre-purchase inspections
 - Winterization and spring prep
 - E-bike service and repair
+
+NOTE: We do NOT offer oil changes, fluid services, engine rebuilds, custom exhaust installation, or dyno tuning.
 
 Appointments:
 - Service appointments can be scheduled by calling the store or visiting in person.
@@ -66,8 +63,12 @@ All service work comes with a 90-day warranty on parts and labor.`,
   },
   {
     topic: "store_hours",
-    content: `Performance Cycle Store Hours:
+    content: `Performance Cycle Store Hours & Location:
 
+Location: Centennial, CO (Denver metro area)
+Website: performancecycle.com
+
+Hours:
 Monday: 9:00 AM - 7:00 PM
 Tuesday: 9:00 AM - 7:00 PM
 Wednesday: 9:00 AM - 7:00 PM
@@ -77,7 +78,9 @@ Saturday: 9:00 AM - 6:00 PM
 Sunday: 10:00 AM - 5:00 PM
 
 Holiday hours may vary. Check our website or social media for holiday schedule updates.
-Service department closes 1 hour before the store.`,
+Service department closes 1 hour before the store.
+
+IMPORTANT: For the exact street address and phone number, direct customers to performancecycle.com/contact. Do NOT guess or make up an address.`,
   },
 ];
 

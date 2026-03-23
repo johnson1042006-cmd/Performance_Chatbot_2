@@ -19,6 +19,13 @@ interface SessionCardProps {
   onSelect?: (sessionId: string) => void;
 }
 
+function getDisplayName(identifier: string): string {
+  if (identifier.startsWith("Customer #")) return identifier;
+  // Generate a short friendly name from non-standard identifiers
+  const hash = identifier.slice(-4).toUpperCase();
+  return `Customer ${hash}`;
+}
+
 function getWaitTime(startedAt: string): { text: string; variant: "success" | "warning" | "danger" } {
   const seconds = Math.floor(
     (Date.now() - new Date(startedAt).getTime()) / 1000
@@ -57,7 +64,7 @@ export default function SessionCard({
       <div className="flex items-start justify-between mb-2">
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-text-primary truncate">
-            {session.customerIdentifier}
+            {getDisplayName(session.customerIdentifier)}
           </p>
           <div className="flex items-center gap-2 mt-1">
             <Badge variant={statusBadge.variant} dot>

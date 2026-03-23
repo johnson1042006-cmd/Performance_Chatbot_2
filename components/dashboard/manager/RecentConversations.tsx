@@ -50,7 +50,7 @@ export default function RecentConversations({
             >
               <div className="flex items-center gap-3 min-w-0">
                 <span className="text-sm text-text-primary truncate max-w-[120px]">
-                  {s.customerIdentifier.substring(0, 12)}...
+                  {s.customerIdentifier.startsWith("Customer #") ? s.customerIdentifier : `Customer ${s.customerIdentifier.slice(-4).toUpperCase()}`}
                 </span>
                 <PageContextBadge
                   pageContext={s.pageContext as Parameters<typeof PageContextBadge>[0]["pageContext"]}

@@ -23,6 +23,11 @@ const STOP_WORDS = new Set([
   "want", "looking", "look", "find", "please", "thanks", "thank", "hey",
   "hi", "hello", "yeah", "yes", "yep", "nope", "okay", "ok", "much",
   "many", "still", "right", "thing", "things", "come", "something",
+  "carry", "sell", "available", "stock", "interested", "recommend",
+  "suggest", "prefer", "budget", "price", "cost", "cheap", "expensive",
+  "affordable", "best", "popular", "favorite", "options", "selection",
+  "range", "need", "buy", "purchase", "order", "shop", "store", "guys",
+  "motorcycle", "bike", "riding", "rider", "ride",
 ]);
 
 function extractKeywords(query: string): string[] {
@@ -32,6 +37,9 @@ function extractKeywords(query: string): string[] {
     .split(/\s+/)
     .filter((w) => w.length > 1 && !STOP_WORDS.has(w));
 }
+
+const EBIKE_PATTERNS = /\b(e-?bike|ebike|electric\s*(bike|scooter|motorcycle))\b/i;
+const EBIKE_SEARCH_TERMS = ["electric", "e-bike", "pedal assist", "ebike"];
 
 export async function searchProducts(query: string): Promise<BCProduct[]> {
   if (!query || query.trim().length === 0) return [];
@@ -50,8 +58,26 @@ export async function searchProducts(query: string): Promise<BCProduct[]> {
     }
   }
 
+  // 1b. E-bike special handling: "e-bike" keyword returns toy bikes from BC,
+  // so we use multiple targeted sub-queries instead.
+  if (EBIKE_PATTERNS.test(normalizedQuery)) {
+    const deduped = new Map<number, BCProduct>();
+    for (const term of EBIKE_SEARCH_TERMS) {
+      const hits = await searchProductsBC(term);
+      for (const p of hits) {
+        if (!deduped.has(p.id)) deduped.set(p.id, p);
+      }
+      if (deduped.size >= 10) break;
+    }
+    const results = [...deduped.values()].filter(
+      (p) => p.is_visible && p.availability !== "disabled"
+    );
+    if (results.length > 0) return results;
+  }
+
   // 2. Full smart search (keyword + brand + name:like + fallbacks)
-  const keywordQuery = keywords.join(" ");
+  // Limit to 6 most important keywords to avoid overwhelming BigCommerce API
+  const keywordQuery = keywords.slice(0, 6).join(" ");
   let results = await searchProductsBC(keywordQuery);
 
   // 3. Color-expanded search if initial results are sparse

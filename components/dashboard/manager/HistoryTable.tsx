@@ -152,7 +152,7 @@ export default function HistoryTable({ onSelectSession }: HistoryTableProps) {
                       })}
                     </td>
                     <td className="px-6 py-3 font-medium truncate max-w-[150px]">
-                      {s.customerIdentifier.substring(0, 16)}...
+                      {s.customerIdentifier.startsWith("Customer #") ? s.customerIdentifier : `Customer ${s.customerIdentifier.slice(-4).toUpperCase()}`}
                     </td>
                     <td className="px-6 py-3">
                       <Badge variant={statusVariant(s.status)} dot>

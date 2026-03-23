@@ -1,10 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { sessions } from "@/lib/db/schema";
-import { desc, eq, ne, sql } from "drizzle-orm";
+import { and, desc, eq, lt, ne, sql } from "drizzle-orm";
+
+const STALE_SESSION_HOURS = 24;
 
 export async function GET() {
   try {
+    // Auto-close sessions that have been open for more than 24 hours
+    const staleThreshold = new Date(Date.now() - STALE_SESSION_HOURS * 60 * 60 * 1000);
+    await db
+      .update(sessions)
+      .set({ status: "closed", closedAt: new Date() })
+      .where(
+        and(
+          ne(sessions.status, "closed"),
+          lt(sessions.startedAt, staleThreshold)
+        )
+      );
+
     const allSessions = await db
       .select()
       .from(sessions)

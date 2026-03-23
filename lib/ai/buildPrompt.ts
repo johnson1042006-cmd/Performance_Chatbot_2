@@ -69,18 +69,73 @@ export async function buildPrompt(
       fetchContextProduct(pageContext),
     ]);
 
-  const conversationKeywords = history
+  const customerMessages = history
     .filter((m: Message) => m.role === "customer")
-    .map((m: Message) => m.content)
-    .join(" ");
-  const searchQuery = `${conversationKeywords} ${latestMessage}`.trim();
+    .map((m: Message) => m.content);
 
-  const [productResults, pairingResults] = await Promise.all([
+  // Build a focused search query: use the latest message as the primary source,
+  // then extract only product-relevant terms (brands, product types) from history.
+  // This prevents sending an overly long query to BigCommerce that returns nothing.
+  const PRODUCT_TERMS = new Set([
+    // Product types
+    "helmet", "helmets", "jacket", "jackets", "gloves", "boots", "pants",
+    "vest", "visor", "shield", "airbag", "protection", "armor", "goggles",
+    "jersey", "gear", "tire", "tires", "brake", "brakes", "exhaust", "chain",
+    "sprocket", "oil", "filter", "battery", "light", "lights", "mirror",
+    "grip", "grips", "handlebar", "seat", "cover", "bag", "luggage", "rack",
+    "communicator", "intercom", "saddlebag", "heated", "suit", "camera",
+    "lock", "tools", "accessories", "windshield", "fairing", "suspension",
+    "pads", "wrap", "bars", "charger", "cable", "mount", "guards",
+    // Brands
+    "shoei", "arai", "bell", "hjc", "agv", "icon", "alpinestars", "dainese",
+    "rev'it", "revit", "klim", "fox", "fly", "scorpion", "sedici", "sena",
+    "cardo", "nolan", "schuberth", "gmax", "biltwell", "tourmaster",
+    "firstgear", "cortech", "forma", "tcx", "gaerne", "highway", "ebc",
+    "hiflo", "dunlop", "pirelli", "bridgestone", "continental", "michelin",
+    "ohlins", "kriega", "sidi", "thor", "leatt", "ogio", "nelson-rigg",
+    "kuryakyn", "vance", "cobra", "yuasa", "acerbis", "renthal",
+    // Riding styles / helmet types
+    "full-face", "modular", "half", "open-face", "adventure",
+    "sport", "touring", "cruiser", "dirt", "motocross", "dual-sport",
+    "street", "off-road",
+    // Style / material terms
+    "matte", "glossy", "carbon", "fiber", "bluetooth",
+    "rain", "waterproof", "leather", "textile", "mesh", "vented",
+    "hi-viz", "reflective", "armored", "perforated", "insulated",
+  ]);
+
+  const historyTerms = customerMessages
+    .slice(0, -1) // exclude the latest (we already have it)
+    .join(" ")
+    .toLowerCase()
+    .replace(/[?!.,;:'"()$]/g, "")
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && PRODUCT_TERMS.has(w));
+
+  const uniqueHistoryTerms = [...new Set(historyTerms)].slice(0, 5);
+  const searchQuery = [latestMessage, ...uniqueHistoryTerms].join(" ").trim();
+
+  // Run two searches in parallel: the focused query + just the latest message
+  // to maximize chances of hitting BigCommerce results.
+  const [primaryResults, latestResults, pairingResults] = await Promise.all([
     safeFetch(() => searchProducts(searchQuery), []),
+    searchQuery !== latestMessage
+      ? safeFetch(() => searchProducts(latestMessage), [])
+      : Promise.resolve([]),
     pageContext?.productSku
       ? safeFetch(() => findPairings(pageContext.productSku!), [])
       : Promise.resolve([]),
   ]);
+
+  // Merge and deduplicate results
+  const seen = new Set(primaryResults.map((p) => p.id));
+  const productResults = [...primaryResults];
+  for (const p of latestResults) {
+    if (!seen.has(p.id)) {
+      seen.add(p.id);
+      productResults.push(p);
+    }
+  }
 
   let system = `You are a live chat support agent at Performance Cycle — Colorado's largest independent motorcycle gear, parts, and accessories retailer in Centennial, CO.
 
@@ -133,6 +188,9 @@ ${AI_BEHAVIOR_RULES.map((r, i) => `${i + 1}. ${r.rule}`).join("\n\n")}
       system += formatProductForPrompt(p);
       system += `\n\n`;
     }
+  } else {
+    system += `\n## NO PRODUCTS FOUND FOR THIS QUERY\n`;
+    system += `The product search returned no results for this message. This does NOT mean the store doesn't carry the item — it may just mean the search terms didn't match. DO NOT tell the customer to call the store or visit in person. Instead, ask them to be more specific (brand, product type, size, etc.) so you can search again. Performance Cycle carries over 5,000 products across helmets, jackets, boots, gloves, tires, parts, accessories, and more.\n`;
   }
 
   if (pairingResults.length > 0) {

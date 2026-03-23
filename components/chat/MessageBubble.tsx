@@ -1,3 +1,5 @@
+import { renderMarkdown } from "@/lib/utils/renderMarkdown";
+
 interface MessageBubbleProps {
   role: "customer" | "agent" | "ai";
   content: string;
@@ -38,7 +40,7 @@ export default function MessageBubble({
               : "bg-white border border-border rounded-2xl rounded-bl-md"
           }`}
         >
-          {content}
+          <span dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }} />
         </div>
         {sentAt && (
           <span

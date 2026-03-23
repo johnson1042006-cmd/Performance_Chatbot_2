@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { sessions } from "@/lib/db/schema";
-import { desc, sql } from "drizzle-orm";
+import { sessions, messages } from "@/lib/db/schema";
+import { desc, eq, sql, and } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
@@ -20,21 +20,7 @@ export async function GET(req: NextRequest) {
     const offset = (page - 1) * limit;
 
     const allSessions = await db
-      .select({
-        id: sessions.id,
-        customerIdentifier: sessions.customerIdentifier,
-        pageContext: sessions.pageContext,
-        startedAt: sessions.startedAt,
-        closedAt: sessions.closedAt,
-        status: sessions.status,
-        claimedByUserId: sessions.claimedByUserId,
-        messageCount: sql<number>`(
-          SELECT count(*)::int FROM messages WHERE messages.session_id = ${sessions.id}
-        )`,
-        aiMessageCount: sql<number>`(
-          SELECT count(*)::int FROM messages WHERE messages.session_id = ${sessions.id} AND messages.role = 'ai'
-        )`,
-      })
+      .select()
       .from(sessions)
       .orderBy(desc(sessions.startedAt))
       .limit(limit)
@@ -44,8 +30,28 @@ export async function GET(req: NextRequest) {
       .select({ count: sql<number>`count(*)::int` })
       .from(sessions);
 
+    const sessionsWithCounts = await Promise.all(
+      allSessions.map(async (s) => {
+        const [msgCount] = await db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(messages)
+          .where(eq(messages.sessionId, s.id));
+
+        const [aiCount] = await db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(messages)
+          .where(and(eq(messages.sessionId, s.id), eq(messages.role, "ai")));
+
+        return {
+          ...s,
+          messageCount: msgCount?.count || 0,
+          aiMessageCount: aiCount?.count || 0,
+        };
+      })
+    );
+
     return NextResponse.json({
-      sessions: allSessions,
+      sessions: sessionsWithCounts,
       total: total?.count || 0,
       page,
       totalPages: Math.ceil((total?.count || 0) / limit),

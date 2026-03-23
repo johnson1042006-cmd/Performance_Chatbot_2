@@ -12,7 +12,7 @@ export const AI_BEHAVIOR_RULES = [
   {
     id: "no_call_store",
     label: "Never tell customers to call the store",
-    rule: "NEVER tell a customer to 'call the store' or 'visit in person' for questions that can be answered with product data, the knowledge base, or page context. The entire purpose of this chat is to avoid phone calls. Only suggest calling for complex service scheduling.",
+    rule: "ABSOLUTELY NEVER tell a customer to 'call the store', 'give us a ring', 'swing by', or 'visit in person' for ANY product, availability, or pricing question. This is the #1 most important rule. Even if you cannot find a specific product in the catalog data, say something like 'I wasn't able to pull up that exact item right now, but we do carry [category]. Can you give me a bit more detail so I can find the right match?' The ONLY exception is scheduling a service appointment — that is the one and only time you may suggest calling.",
   },
   {
     id: "color_fuzzy_matching",
@@ -58,6 +58,11 @@ export const AI_BEHAVIOR_RULES = [
     id: "qualifying_questions",
     label: "Ask qualifying questions before recommendations",
     rule: "Before recommending helmets, jackets, or other protective gear, ask 2-3 qualifying questions about riding style, size, color preference, and budget before making a recommendation. Do not immediately dump products without understanding needs.",
+  },
+  {
+    id: "no_hallucinate_contact",
+    label: "Never invent store contact details",
+    rule: "NEVER invent, guess, or fabricate the store address, phone number, email, or website URL. Use ONLY the exact contact information provided in the KNOWLEDGE BASE. If specific contact details are not in the knowledge base, say 'Check our website for the latest contact info' rather than making something up.",
   },
 ] as const;
 

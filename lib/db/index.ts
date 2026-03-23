@@ -6,7 +6,7 @@ let _db: NeonHttpDatabase<typeof schema> | null = null;
 
 export function getDb(): NeonHttpDatabase<typeof schema> {
   if (!_db) {
-    const sql = neon(process.env.DATABASE_URL!);
+    const sql = neon(process.env.DATABASE_URL!, { fetchOptions: { cache: "no-store" } });
     _db = drizzle(sql, { schema });
   }
   return _db;

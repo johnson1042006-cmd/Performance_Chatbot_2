@@ -162,11 +162,20 @@ export async function getProductsByBrand(brandId: number, limit = 25): Promise<B
 // --- Brand search ---
 
 export async function getBrands(): Promise<BCBrand[]> {
-  const results = await bcFetch<BCBrand[]>({
-    path: "/catalog/brands",
-    params: { limit: 250 },
-  });
-  return results || [];
+  const allBrands: BCBrand[] = [];
+  let page = 1;
+  const limit = 250;
+  while (true) {
+    const results = await bcFetch<BCBrand[]>({
+      path: "/catalog/brands",
+      params: { limit, page },
+    });
+    if (!results || results.length === 0) break;
+    allBrands.push(...results);
+    if (results.length < limit) break;
+    page++;
+  }
+  return allBrands;
 }
 
 let _brandCache: BCBrand[] | null = null;
