@@ -330,7 +330,7 @@ export function formatProductForPrompt(product: BCProduct): string {
   SKU: ${product.sku}
   Price: $${price.toFixed(2)}
   Stock: ${stockStatus}
-  URL: https://performancecycle.com${product.custom_url?.url || `/${product.name.toLowerCase().replace(/&/g, "-").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")}/`}
+  URL: ${product.custom_url?.url ? `https://performancecycle.com${product.custom_url.url}` : "N/A"}
   Description: ${desc}
   Variants:
 ${variantInfo}`;

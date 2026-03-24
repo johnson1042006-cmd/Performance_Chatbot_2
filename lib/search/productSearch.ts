@@ -38,31 +38,20 @@ function extractKeywords(query: string): string[] {
     .filter((w) => w.length > 1 && !STOP_WORDS.has(w));
 }
 
-function nameToSlug(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/&/g, "-")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "")
-    .replace(/-+/g, "-");
-}
-
 /**
  * Fetch full BigCommerce product details for a local catalog match.
- * Tries multiple strategies: full name, then progressively shorter prefixes.
+ * Tries multiple strategies: full name, then first 3 words.
  */
 async function enrichLocalMatch(match: LocalMatch): Promise<BCProduct | null> {
   try {
     const nameLower = match.name.toLowerCase();
 
-    // Strategy 1: Full name (truncated to 60 chars for BC API)
     const searchName = match.name.length > 60
       ? match.name.substring(0, 60)
       : match.name;
 
     let products = await getProductByNameLike(searchName, 10);
 
-    // Strategy 2: First 3 words of the name (more likely to match)
     if (products.length === 0) {
       const words = match.name.split(/\s+/);
       if (words.length > 2) {
@@ -73,13 +62,11 @@ async function enrichLocalMatch(match: LocalMatch): Promise<BCProduct | null> {
 
     if (products.length === 0) return null;
 
-    // Find exact match by name
     const exact = products.find(
       (p) => p.name.toLowerCase() === nameLower
     );
     if (exact) return exact;
 
-    // Fuzzy match
     const fuse = new Fuse(products, {
       keys: ["name"],
       threshold: 0.4,
@@ -109,7 +96,7 @@ export async function searchProducts(query: string): Promise<BCProduct[]> {
     }
   }
 
-  // 2. LOCAL CATALOG SEARCH — fuzzy search across all 5,622 products
+  // 2. LOCAL CATALOG SEARCH — fuzzy search across all products
   const keywordsForLocal = keywords.join(" ");
   const localMatches = await searchLocalCatalog(keywordsForLocal, 10);
 
@@ -127,8 +114,7 @@ export async function searchProducts(query: string): Promise<BCProduct[]> {
       return results;
     }
 
-    // Enrichment failed — create minimal product objects with slug-based URLs
-    // (BigCommerce product URLs follow the pattern /product-name-slug/)
+    // Enrichment failed — use stored URLs from local catalog as fallback
     const fallbackResults: BCProduct[] = localMatches.slice(0, 5).map((m) => ({
       id: 0,
       name: m.name,
@@ -146,7 +132,7 @@ export async function searchProducts(query: string): Promise<BCProduct[]> {
       brand_id: 0,
       variants: [],
       images: [],
-      custom_url: { url: `/${nameToSlug(m.name)}/`, is_customized: false },
+      custom_url: { url: m.url || "", is_customized: false },
     }));
     if (fallbackResults.length > 0) return fallbackResults;
   }

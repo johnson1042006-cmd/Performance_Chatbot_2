@@ -104,6 +104,8 @@ export const localCatalog = pgTable("local_catalog", {
   name: text("name").notNull(),
   nameLower: text("name_lower").notNull(),
   price: decimal("price", { precision: 10, scale: 2 }),
+  url: text("url"),
+  bcProductId: integer("bc_product_id"),
 });
 
 export type User = typeof users.$inferSelect;
