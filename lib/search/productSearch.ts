@@ -69,7 +69,7 @@ export async function searchProducts(query: string): Promise<BCProduct[]> {
       }
       if (deduped.size >= 10) break;
     }
-    const results = [...deduped.values()].filter(
+    const results = Array.from(deduped.values()).filter(
       (p) => p.is_visible && p.availability !== "disabled"
     );
     if (results.length > 0) return results;
