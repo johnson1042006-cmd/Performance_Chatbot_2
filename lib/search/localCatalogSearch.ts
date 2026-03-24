@@ -67,7 +67,7 @@ export async function searchLocalCatalog(
   }
 
   const words = q
-    .replace(/[?!.,;:'"()]/g, "")
+    .replace(/[?!.,;:"()]/g, "")
     .split(/\s+/)
     .filter((w) => w.length > 1);
 

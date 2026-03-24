@@ -34,15 +34,27 @@ const STOP_WORDS = new Set([
   "someone", "anything", "everything", "lot", "lots", "bit", "sure", "well",
 ]);
 
+const PHRASE_SYNONYMS: [RegExp, string][] = [
+  [/brain bucket/gi, "helmet"],
+  [/rain suit/gi, "rain gear"],
+];
+
 const QUERY_SYNONYMS: Record<string, string> = {
   kid: "youth", kids: "youth", children: "youth", child: "youth",
   womens: "women", mens: "men",
   motocross: "mx", dirtbike: "dirt",
+  lid: "helmet", lids: "helmet",
+  pipe: "exhaust", pipes: "exhaust",
+  revit: "rev'it",
 };
 
 export function extractKeywords(query: string): string[] {
-  const words = query
-    .toLowerCase()
+  let processed = query.toLowerCase();
+  for (const [pattern, replacement] of PHRASE_SYNONYMS) {
+    processed = processed.replace(pattern, replacement);
+  }
+
+  const words = processed
     .replace(/[?!.,;:'"()]/g, "")
     .split(/\s+/)
     .filter((w) => {
