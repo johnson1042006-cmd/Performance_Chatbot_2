@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Widget Test – Performance Cycle</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; color: #333; }
+    header { background: #1a1a2e; color: white; padding: 16px 32px; display: flex; align-items: center; gap: 12px; }
+    header h1 { font-size: 20px; font-weight: 700; }
+    header span { font-size: 13px; opacity: 0.6; }
+    nav { background: #16213e; padding: 10px 32px; display: flex; gap: 20px; }
+    nav a { color: #ccc; text-decoration: none; font-size: 14px; }
+    nav a:hover { color: white; }
+    main { max-width: 1100px; margin: 32px auto; padding: 0 24px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 20px; margin-top: 24px; }
+    .card { background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    .card .img { height: 180px; background: #e0e0e0; display: flex; align-items: center; justify-content: center; color: #999; font-size: 14px; }
+    .card .info { padding: 14px; }
+    .card .info h3 { font-size: 15px; margin-bottom: 6px; }
+    .card .info .price { color: #e63946; font-weight: 700; font-size: 16px; }
+    h2 { font-size: 22px; color: #1a1a2e; }
+    .banner { background: linear-gradient(135deg, #e63946, #c62828); color: white; padding: 48px 32px; text-align: center; border-radius: 12px; margin-bottom: 32px; }
+    .banner h2 { color: white; font-size: 28px; margin-bottom: 8px; }
+    .banner p { opacity: 0.9; font-size: 15px; }
+    footer { margin-top: 60px; padding: 24px 32px; background: #1a1a2e; color: #999; text-align: center; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Performance Cycle</h1>
+    <span>Widget Test Page</span>
+  </header>
+  <nav>
+    <a href="#">Home</a>
+    <a href="#">Motorcycles</a>
+    <a href="#">Helmets</a>
+    <a href="#">Gear</a>
+    <a href="#">Parts</a>
+    <a href="#">Contact</a>
+  </nav>
+  <main>
+    <div class="banner">
+      <h2>This is a test page for the chat widget</h2>
+      <p>Click the red chat bubble in the bottom-right corner to open the widget. Use the X button to close it.</p>
+    </div>
+    <h2>Sample Products</h2>
+    <div class="grid">
+      <div class="card"><div class="img">Product Image</div><div class="info"><h3>Shoei RF-1400 Helmet</h3><div class="price">$549.99</div></div></div>
+      <div class="card"><div class="img">Product Image</div><div class="info"><h3>Alpinestars GP Pro Gloves</h3><div class="price">$179.99</div></div></div>
+      <div class="card"><div class="img">Product Image</div><div class="info"><h3>Rev'It! Eclipse Jacket</h3><div class="price">$249.99</div></div></div>
+      <div class="card"><div class="img">Product Image</div><div class="info"><h3>Sidi Mag-1 Boots</h3><div class="price">$449.99</div></div></div>
+      <div class="card"><div class="img">Product Image</div><div class="info"><h3>K&N Oil Filter</h3><div class="price">$12.99</div></div></div>
+      <div class="card"><div class="img">Product Image</div><div class="info"><h3>Barkbusters Hand Guards</h3><div class="price">$89.99</div></div></div>
+    </div>
+  </main>
+  <footer>
+    &copy; 2026 Performance Cycle – Widget Test Page
+  </footer>
+
+  <script src="/embed.js"></script>
+</body>
+</html>
