@@ -90,10 +90,10 @@ export async function searchProducts(query: string): Promise<BCProduct[]> {
   }
 
   // 2. LOCAL CATALOG SEARCH — fuzzy search across all 5,622 products
-  const localMatches = await searchLocalCatalog(normalizedQuery, 10);
+  const keywordsForLocal = keywords.join(" ");
+  const localMatches = await searchLocalCatalog(keywordsForLocal, 10);
 
   if (localMatches.length > 0) {
-    // Enrich top local matches with full BigCommerce data (inventory, variants, images)
     const enrichPromises = localMatches
       .slice(0, 8)
       .map((m) => enrichLocalMatch(m));
@@ -104,11 +104,31 @@ export async function searchProducts(query: string): Promise<BCProduct[]> {
     );
 
     if (results.length > 0) {
-      // Local search already returns results in best-match order (ILIKE > FTS > trigram).
-      // Enrichment preserves that order. No Fuse re-ranking needed — it only corrupts
-      // the ordering by matching conversational words to irrelevant products.
       return results;
     }
+
+    // Enrichment failed for all matches — create minimal product objects so the
+    // AI still has names and prices to work with instead of "no products found".
+    const fallbackResults: BCProduct[] = localMatches.slice(0, 5).map((m) => ({
+      id: 0,
+      name: m.name,
+      sku: "",
+      price: m.price ? parseFloat(m.price) : 0,
+      sale_price: 0,
+      retail_price: 0,
+      calculated_price: m.price ? parseFloat(m.price) : 0,
+      description: "",
+      is_visible: true,
+      availability: "available" as const,
+      inventory_level: -1,
+      inventory_tracking: "none" as const,
+      categories: [],
+      brand_id: 0,
+      variants: [],
+      images: [],
+      custom_url: { url: `/search.php?search_query=${encodeURIComponent(m.name)}`, is_customized: false },
+    }));
+    if (fallbackResults.length > 0) return fallbackResults;
   }
 
   // 3. FALLBACK: BigCommerce API direct search (in case local catalog is stale)

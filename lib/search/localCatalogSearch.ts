@@ -54,65 +54,68 @@ export async function searchLocalCatalog(
     }
   }
 
-  // 1. ILIKE substring — catches exact product name fragments like "yagyo"
-  const ilikeRaw = await db.execute(
-    sql`SELECT name, price FROM local_catalog WHERE name_lower LIKE ${`%${q}%`} LIMIT 20`
-  );
-  const ilikeRows = getRows<NamePrice>(ilikeRaw);
-  for (const r of ilikeRows) {
-    add(r.name, r.price, 1.0);
+  // 1. ILIKE substring — catches exact product name fragments
+  try {
+    const ilikeRaw = await db.execute(
+      sql`SELECT name, price FROM local_catalog WHERE name_lower LIKE ${`%${q}%`} LIMIT 20`
+    );
+    for (const r of getRows<NamePrice>(ilikeRaw)) {
+      add(r.name, r.price, 1.0);
+    }
+  } catch (e) {
+    console.error("ILIKE search failed:", e);
   }
 
-  // 2. Full-text search (handles stemming: "folding" → "fold")
-  const ftsRaw = await db.execute(
-    sql`SELECT name, price, ts_rank(to_tsvector('english', name_lower), plainto_tsquery('english', ${q})) as rank
-        FROM local_catalog
-        WHERE to_tsvector('english', name_lower) @@ plainto_tsquery('english', ${q})
-        ORDER BY rank DESC
-        LIMIT 20`
-  );
-  const ftsRows = getRows<NamePriceRank>(ftsRaw);
-  for (const r of ftsRows) {
-    add(r.name, r.price, 0.8 + Math.min(Number(r.rank), 0.2));
-  }
-
-  // 3. Trigram similarity (fuzzy — catches typos and partial matches)
-  const trigramRaw = await db.execute(
-    sql`SELECT name, price, similarity(name_lower, ${q}) as sim
-        FROM local_catalog
-        WHERE similarity(name_lower, ${q}) > 0.08
-        ORDER BY sim DESC
-        LIMIT 20`
-  );
-  const trigramRows = getRows<NamePriceSim>(trigramRaw);
-  for (const r of trigramRows) {
-    add(r.name, r.price, Number(r.sim));
-  }
-
-  // 4. Per-word ILIKE fallback — if the full query is multi-word and
-  //    returned few results, search each significant word individually.
-  if (seen.size < 5) {
+  // 2. Per-word ILIKE — search each keyword independently (most reliable strategy)
+  try {
     const words = q
       .replace(/[?!.,;:'"()]/g, "")
       .split(/\s+/)
       .filter((w) => w.length > 2);
 
-    const stopWords = new Set([
-      "the", "and", "for", "are", "you", "have", "with", "this", "that",
-      "from", "your", "can", "does", "what", "any", "how", "our",
-    ]);
-
-    const significantWords = words.filter((w) => !stopWords.has(w));
-
-    for (const word of significantWords) {
+    for (const word of words) {
       if (seen.size >= limit) break;
       const wordRaw = await db.execute(
-        sql`SELECT name, price FROM local_catalog WHERE name_lower LIKE ${`%${word}%`} LIMIT 10`
+        sql`SELECT name, price FROM local_catalog WHERE name_lower LIKE ${`%${word}%`} LIMIT 15`
       );
       for (const r of getRows<NamePrice>(wordRaw)) {
-        add(r.name, r.price, 0.3);
+        add(r.name, r.price, 0.5);
       }
     }
+  } catch (e) {
+    console.error("Per-word ILIKE search failed:", e);
+  }
+
+  // 3. Full-text search (handles stemming: "ramps" → "ramp")
+  try {
+    const ftsRaw = await db.execute(
+      sql`SELECT name, price, ts_rank(to_tsvector('english', name_lower), plainto_tsquery('english', ${q})) as rank
+          FROM local_catalog
+          WHERE to_tsvector('english', name_lower) @@ plainto_tsquery('english', ${q})
+          ORDER BY rank DESC
+          LIMIT 20`
+    );
+    for (const r of getRows<NamePriceRank>(ftsRaw)) {
+      add(r.name, r.price, 0.8 + Math.min(Number(r.rank), 0.2));
+    }
+  } catch (e) {
+    console.error("FTS search failed:", e);
+  }
+
+  // 4. Trigram similarity (fuzzy — catches typos and partial matches)
+  try {
+    const trigramRaw = await db.execute(
+      sql`SELECT name, price, similarity(name_lower, ${q}) as sim
+          FROM local_catalog
+          WHERE similarity(name_lower, ${q}) > 0.08
+          ORDER BY sim DESC
+          LIMIT 20`
+    );
+    for (const r of getRows<NamePriceSim>(trigramRaw)) {
+      add(r.name, r.price, Number(r.sim));
+    }
+  } catch (e) {
+    console.error("Trigram search failed:", e);
   }
 
   return Array.from(seen.values())
