@@ -1,9 +1,9 @@
 import Fuse from "fuse.js";
-import { expandColorQuery, extractColorFromQuery } from "./colorSynonyms";
+import { searchLocalCatalog, type LocalMatch } from "./localCatalogSearch";
 import {
   searchProductsBC,
   getProductBySKU,
-  getProductsByCategory,
+  getProductByNameLike,
   type BCProduct,
 } from "@/lib/bigcommerce/client";
 
@@ -38,8 +38,39 @@ function extractKeywords(query: string): string[] {
     .filter((w) => w.length > 1 && !STOP_WORDS.has(w));
 }
 
-const EBIKE_PATTERNS = /\b(e-?bike|ebike|electric\s*(bike|scooter|motorcycle))\b/i;
-const EBIKE_SEARCH_TERMS = ["electric", "e-bike", "pedal assist", "ebike"];
+/**
+ * Fetch full BigCommerce product details for a local catalog match.
+ * Uses name:like to find the product, then returns the best match.
+ */
+async function enrichLocalMatch(match: LocalMatch): Promise<BCProduct | null> {
+  try {
+    // Use a distinctive portion of the name for the name:like query.
+    // Take the first 60 chars to stay within BC API's comfort zone.
+    const searchName = match.name.length > 60
+      ? match.name.substring(0, 60)
+      : match.name;
+
+    const products = await getProductByNameLike(searchName, 5);
+    if (products.length === 0) return null;
+
+    // Find the exact match by name (case-insensitive)
+    const exact = products.find(
+      (p) => p.name.toLowerCase() === match.name.toLowerCase()
+    );
+    if (exact) return exact;
+
+    // Fall back to closest match
+    const fuse = new Fuse(products, {
+      keys: ["name"],
+      threshold: 0.4,
+      includeScore: true,
+    });
+    const ranked = fuse.search(match.name);
+    return ranked.length > 0 ? ranked[0].item : products[0];
+  } catch {
+    return null;
+  }
+}
 
 export async function searchProducts(query: string): Promise<BCProduct[]> {
   if (!query || query.trim().length === 0) return [];
@@ -49,7 +80,7 @@ export async function searchProducts(query: string): Promise<BCProduct[]> {
 
   if (keywords.length === 0) return [];
 
-  // 1. Exact SKU lookup
+  // 1. Exact SKU lookup (fastest path)
   const skuMatch = normalizedQuery.match(SKU_PATTERN);
   if (skuMatch) {
     const skuProduct = await getProductBySKU(skuMatch[0]);
@@ -58,92 +89,33 @@ export async function searchProducts(query: string): Promise<BCProduct[]> {
     }
   }
 
-  // 1b. E-bike special handling: "e-bike" keyword returns toy bikes from BC,
-  // so we use multiple targeted sub-queries instead.
-  if (EBIKE_PATTERNS.test(normalizedQuery)) {
-    const deduped = new Map<number, BCProduct>();
-    for (const term of EBIKE_SEARCH_TERMS) {
-      const hits = await searchProductsBC(term);
-      for (const p of hits) {
-        if (!deduped.has(p.id)) deduped.set(p.id, p);
-      }
-      if (deduped.size >= 10) break;
-    }
-    const results = Array.from(deduped.values()).filter(
-      (p) => p.is_visible && p.availability !== "disabled"
+  // 2. LOCAL CATALOG SEARCH — fuzzy search across all 5,622 products
+  const localMatches = await searchLocalCatalog(normalizedQuery, 10);
+
+  if (localMatches.length > 0) {
+    // Enrich top local matches with full BigCommerce data (inventory, variants, images)
+    const enrichPromises = localMatches
+      .slice(0, 8)
+      .map((m) => enrichLocalMatch(m));
+    const enriched = await Promise.all(enrichPromises);
+
+    const results = enriched.filter(
+      (p): p is BCProduct => p !== null && p.is_visible
     );
-    if (results.length > 0) return results;
+
+    if (results.length > 0) {
+      // Local search already returns results in best-match order (ILIKE > FTS > trigram).
+      // Enrichment preserves that order. No Fuse re-ranking needed — it only corrupts
+      // the ordering by matching conversational words to irrelevant products.
+      return results;
+    }
   }
 
-  // 2. Full smart search (keyword + brand + name:like + fallbacks)
-  // Limit to 6 most important keywords to avoid overwhelming BigCommerce API
+  // 3. FALLBACK: BigCommerce API direct search (in case local catalog is stale)
   const keywordQuery = keywords.slice(0, 6).join(" ");
-  let results = await searchProductsBC(keywordQuery);
+  const bcResults = await searchProductsBC(keywordQuery);
 
-  // 3. Color-expanded search if initial results are sparse
-  if (results.length < 3) {
-    const colorTerms = expandColorQuery(keywordQuery);
-    if (colorTerms.length > 1) {
-      const seen = new Set(results.map((p) => p.id));
-      for (const term of colorTerms.slice(0, 3)) {
-        const colorResults = await searchProductsBC(term);
-        for (const p of colorResults) {
-          if (!seen.has(p.id)) {
-            seen.add(p.id);
-            results.push(p);
-          }
-        }
-        if (results.length >= 5) break;
-      }
-    }
-  }
-
-  // 4. Category-based alternatives to fill out results
-  if (results.length < 3 && results.length > 0) {
-    const categoryIds = Array.from(new Set(results.flatMap((p) => p.categories)));
-    const seen = new Set(results.map((p) => p.id));
-    for (const catId of categoryIds.slice(0, 2)) {
-      if (results.length >= 5) break;
-      const catProducts = await getProductsByCategory(catId);
-      for (const p of catProducts) {
-        if (!seen.has(p.id)) {
-          seen.add(p.id);
-          results.push(p);
-        }
-        if (results.length >= 8) break;
-      }
-    }
-  }
-
-  // Filter inactive
-  results = results.filter(
-    (p) => p.is_visible && p.availability !== "disabled"
-  );
-
-  // Fuzzy re-rank to put the most relevant results first
-  if (results.length > 1) {
-    const color = extractColorFromQuery(normalizedQuery);
-    const fuse = new Fuse(results, {
-      keys: [
-        { name: "name", weight: 0.5 },
-        { name: "description", weight: 0.25 },
-        { name: "sku", weight: 0.25 },
-      ],
-      threshold: 0.6,
-      includeScore: true,
-    });
-
-    const searchTerm = color
-      ? `${keywordQuery} ${expandColorQuery(color).join(" ")}`
-      : keywordQuery;
-
-    const ranked = fuse.search(searchTerm);
-    if (ranked.length > 0) {
-      return ranked.map((r) => r.item);
-    }
-  }
-
-  return results;
+  return bcResults.filter((p) => p.is_visible);
 }
 
 export function extractSKUFromText(text: string): string | null {

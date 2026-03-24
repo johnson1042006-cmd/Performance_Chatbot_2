@@ -1,6 +1,6 @@
 /**
  * Lightweight markdown-to-HTML for chat messages.
- * Handles: **bold**, *italic*, numbered lists, and line breaks.
+ * Handles: [text](url) links, **bold**, *italic*, numbered lists, and line breaks.
  * Returns a sanitized HTML string safe for dangerouslySetInnerHTML.
  */
 export function renderMarkdown(text: string): string {
@@ -8,6 +8,12 @@ export function renderMarkdown(text: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+
+  // Links: [text](url) — process BEFORE bold so **bold** inside link text works
+  html = html.replace(
+    /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener noreferrer" class="underline text-blue-600 hover:text-blue-800">$1</a>'
+  );
 
   // Bold: **text**
   html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");

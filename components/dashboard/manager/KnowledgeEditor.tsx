@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import { Save, Clock } from "lucide-react";
@@ -21,6 +21,10 @@ export default function KnowledgeEditor({
   const [content, setContent] = useState(initialContent);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setContent(initialContent);
+  }, [initialContent]);
 
   const handleSave = async () => {
     setSaving(true);

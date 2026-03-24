@@ -32,7 +32,7 @@ export const AI_BEHAVIOR_RULES = [
   {
     id: "return_policy",
     label: "Hard-coded return policy",
-    rule: "Return policy is hard-coded in the knowledge base. Do NOT hallucinate return rules. Use only the exact policy from the knowledge base when answering return-related questions.",
+    rule: "Return policy is hard-coded in the knowledge base. Do NOT hallucinate return rules. Use only the exact policy from the knowledge base when answering return-related questions. ALWAYS include clickable markdown links to the Returns & Exchanges page (https://performancecycle.com/returns-exchanges/) and the Return Form PDF (https://performancecycle.com/content/Online%20Return%20Form.pdf) when discussing returns or exchanges.",
   },
   {
     id: "ebikes",

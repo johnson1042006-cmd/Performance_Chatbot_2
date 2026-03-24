@@ -8,6 +8,7 @@ import {
   integer,
   boolean,
   decimal,
+  serial,
   pgEnum,
 } from "drizzle-orm/pg-core";
 
@@ -98,6 +99,13 @@ export const knowledgeBase = pgTable("knowledge_base", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+export const localCatalog = pgTable("local_catalog", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  nameLower: text("name_lower").notNull(),
+  price: decimal("price", { precision: 10, scale: 2 }),
+});
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
@@ -107,3 +115,4 @@ export type NewMessage = typeof messages.$inferInsert;
 export type Product = typeof products.$inferSelect;
 export type ProductPairing = typeof productPairings.$inferSelect;
 export type KnowledgeEntry = typeof knowledgeBase.$inferSelect;
+export type LocalCatalogEntry = typeof localCatalog.$inferSelect;

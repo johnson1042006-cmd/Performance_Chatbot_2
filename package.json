@@ -10,7 +10,8 @@
     "db:push": "npx drizzle-kit push",
     "db:seed": "npx tsx scripts/seed-users.ts",
     "db:seed:knowledge": "npx tsx scripts/seed-knowledge.ts",
-    "db:seed:products": "npx tsx scripts/seed-products.ts"
+    "db:seed:products": "npx tsx scripts/seed-products.ts",
+    "db:seed:catalog": "npx tsx scripts/seed-catalog.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
@@ -27,7 +28,8 @@
     "pusher-js": "^8.4.3",
     "react": "^18",
     "react-dom": "^18",
-    "recharts": "^3.8.0"
+    "recharts": "^3.8.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

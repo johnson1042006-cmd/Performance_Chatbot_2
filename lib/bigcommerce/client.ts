@@ -330,7 +330,7 @@ export function formatProductForPrompt(product: BCProduct): string {
   SKU: ${product.sku}
   Price: $${price.toFixed(2)}
   Stock: ${stockStatus}
-  URL: ${product.custom_url?.url || "N/A"}
+  URL: ${product.custom_url?.url ? `https://performancecycle.com${product.custom_url.url}` : `https://performancecycle.com/search.php?search_query=${encodeURIComponent(product.name)}`}
   Description: ${desc}
   Variants:
 ${variantInfo}`;

@@ -1,14 +1,20 @@
 (function () {
   var PC_CHAT_URL = "https://performance-chatbot-2.vercel.app";
 
+  var path = window.location.pathname.toLowerCase();
+  var excludedPaths = ["/checkout", "/finishorder", "/order-confirmation", "/manage-account/payment"];
+  for (var i = 0; i < excludedPaths.length; i++) {
+    if (path.indexOf(excludedPaths[i]) === 0) return;
+  }
+
   var style = document.createElement("style");
   style.textContent =
-    "#pc-chat-bubble{position:fixed;bottom:20px;right:20px;width:60px;height:60px;border-radius:50%;background:#e63946;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,0.15);z-index:99999;transition:transform 0.2s}" +
+    "#pc-chat-bubble{position:fixed;bottom:20px;right:20px;width:60px;height:60px;border-radius:50%;background:#e63946;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,0.15);z-index:9999;transition:transform 0.2s}" +
     "#pc-chat-bubble:hover{transform:scale(1.05)}" +
     "#pc-chat-bubble svg{width:28px;height:28px;fill:white}" +
-    "#pc-chat-frame{position:fixed;bottom:90px;right:20px;width:380px;height:560px;border:none;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.15);z-index:99999;display:none;overflow:hidden}" +
+    "#pc-chat-frame{position:fixed;bottom:90px;right:20px;width:380px;height:560px;border:none;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.15);z-index:9999;display:none;overflow:hidden}" +
     "#pc-chat-frame.open{display:block}" +
-    "@media(max-width:480px){#pc-chat-frame{width:calc(100vw - 20px);height:calc(100vh - 120px);right:10px;bottom:80px}}";
+    "@media(max-width:480px){#pc-chat-frame{width:calc(100vw - 20px);right:10px;bottom:80px;height:min(500px,70vh)}}";
   document.head.appendChild(style);
 
   var sessionId = localStorage.getItem("pc_chat_session") || generateId();
@@ -28,21 +34,21 @@
       searchQuery: null,
     };
 
-    var path = window.location.pathname;
+    var p = window.location.pathname;
 
     if (typeof window.BCData !== "undefined" && window.BCData.product_attributes) {
       ctx.pageType = "product";
       ctx.productName = window.BCData.product_attributes.name || null;
       ctx.productSku = window.BCData.product_attributes.sku || null;
-    } else if (path === "/" || path === "") {
+    } else if (p === "/" || p === "") {
       ctx.pageType = "home";
-    } else if (path.includes("/cart")) {
+    } else if (p.includes("/cart")) {
       ctx.pageType = "cart";
-    } else if (path.includes("/search")) {
+    } else if (p.includes("/search")) {
       ctx.pageType = "search";
       var params = new URLSearchParams(window.location.search);
       ctx.searchQuery = params.get("search_query") || params.get("q") || null;
-    } else if (path.includes("/categories/") || path.includes("/category/")) {
+    } else if (p.includes("/categories/") || p.includes("/category/")) {
       ctx.pageType = "category";
     }
 
@@ -89,6 +95,10 @@
         { type: "pc-page-context", context: ctx },
         "*"
       );
+    }
+    if (event.data && event.data.type === "pc-chat-close") {
+      open = false;
+      iframe.classList.remove("open");
     }
   });
 })();
