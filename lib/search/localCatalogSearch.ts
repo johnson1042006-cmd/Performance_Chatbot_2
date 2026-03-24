@@ -56,7 +56,28 @@ export async function searchLocalCatalog(
     }
   }
 
-  // 1. ILIKE substring — catches exact product name fragments
+  const words = q
+    .replace(/[?!.,;:'"()]/g, "")
+    .split(/\s+/)
+    .filter((w) => w.length > 1);
+
+  // 1. Multi-word AND — find products containing ALL keywords (highest precision).
+  if (words.length >= 2) {
+    try {
+      const likeConditions = words.map((w) => sql`name_lower LIKE ${`%${w}%`}`);
+      const combined = likeConditions.reduce((acc, cond) => sql`${acc} AND ${cond}`);
+      const andRaw = await db.execute(
+        sql`SELECT name, price, url FROM local_catalog WHERE ${combined} LIMIT 20`
+      );
+      for (const r of getRows<Row>(andRaw)) {
+        add(r.name, r.price, r.url, 1.0);
+      }
+    } catch (e) {
+      console.error("Multi-word AND search failed:", e);
+    }
+  }
+
+  // 2. ILIKE full substring — catches exact phrases
   try {
     const ilikeRaw = await db.execute(
       sql`SELECT name, price, url FROM local_catalog WHERE name_lower LIKE ${`%${q}%`} LIMIT 20`
@@ -68,18 +89,12 @@ export async function searchLocalCatalog(
     console.error("ILIKE search failed:", e);
   }
 
-  // 2. Per-word ILIKE — search each keyword independently, then boost multi-matches.
-  //    Longest words searched first (more distinctive = fewer false positives).
+  // 3. Per-word ILIKE — search each keyword independently, boost multi-matches.
   try {
-    const words = q
-      .replace(/[?!.,;:'"()]/g, "")
-      .split(/\s+/)
-      .filter((w) => w.length > 2)
-      .sort((a, b) => b.length - a.length);
-
+    const sortedWords = [...words].filter((w) => w.length > 2).sort((a, b) => b.length - a.length);
     const wordHits = new Map<string, number>();
 
-    for (const word of words) {
+    for (const word of sortedWords) {
       const wordRaw = await db.execute(
         sql`SELECT name, price, url FROM local_catalog WHERE name_lower LIKE ${`%${word}%`} LIMIT 20`
       );
@@ -90,7 +105,6 @@ export async function searchLocalCatalog(
       }
     }
 
-    // Boost products that matched multiple keywords
     for (const [key, hitCount] of Array.from(wordHits.entries())) {
       if (hitCount > 1) {
         const existing = seen.get(key);
