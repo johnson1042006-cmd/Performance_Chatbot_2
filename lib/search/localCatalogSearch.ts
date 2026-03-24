@@ -18,10 +18,6 @@ interface RowRank extends Row {
   rank: number;
 }
 
-interface RowSim extends Row {
-  sim: number;
-}
-
 function getRows<T>(result: unknown): T[] {
   if (Array.isArray(result)) return result;
   if (result && typeof result === "object" && "rows" in result) {
@@ -30,14 +26,16 @@ function getRows<T>(result: unknown): T[] {
   return [];
 }
 
+function destem(word: string): string {
+  if (word.endsWith("ies")) return word.slice(0, -3) + "y";
+  if (word.endsWith("es") && word.length > 4) return word.slice(0, -2);
+  if (word.endsWith("s") && !word.endsWith("ss") && word.length > 3) return word.slice(0, -1);
+  return word;
+}
+
 /**
- * Multi-strategy local search across the full product catalog.
- *
- * Strategy order:
- *   1. ILIKE exact substring (highest confidence)
- *   2. Per-word ILIKE (most reliable for multi-word queries)
- *   3. Full-text search via tsvector/plainto_tsquery
- *   4. Trigram similarity (fuzzy)
+ * Multi-strategy local search. Strategies run in order of reliability
+ * and the function returns early when enough good results are found.
  */
 export async function searchLocalCatalog(
   query: string,
@@ -56,15 +54,41 @@ export async function searchLocalCatalog(
     }
   }
 
+  function results() {
+    return Array.from(seen.values())
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
+  }
+
   const words = q
     .replace(/[?!.,;:'"()]/g, "")
     .split(/\s+/)
     .filter((w) => w.length > 1);
 
-  // 1. Multi-word AND — find products containing ALL keywords (highest precision).
+  // Strategy 1: FTS (handles stemming — "ramps" matches "ramp", most reliable)
+  try {
+    const ftsRaw = await db.execute(
+      sql`SELECT name, price, url, ts_rank(to_tsvector('english', name_lower), plainto_tsquery('english', ${q})) as rank
+          FROM local_catalog
+          WHERE to_tsvector('english', name_lower) @@ plainto_tsquery('english', ${q})
+          ORDER BY rank DESC
+          LIMIT 20`
+    );
+    for (const r of getRows<RowRank>(ftsRaw)) {
+      add(r.name, r.price, r.url, 0.9 + Math.min(Number(r.rank), 0.1));
+    }
+  } catch (e) {
+    console.error("FTS search failed:", e);
+  }
+
+  // If FTS found good results, return early (saves DB round-trips)
+  if (seen.size >= 3) return results();
+
+  // Strategy 2: Multi-word AND with basic de-stemming
   if (words.length >= 2) {
     try {
-      const likeConditions = words.map((w) => sql`name_lower LIKE ${`%${w}%`}`);
+      const stemmedWords = words.map((w) => destem(w));
+      const likeConditions = stemmedWords.map((w) => sql`name_lower LIKE ${`%${w}%`}`);
       const combined = likeConditions.reduce((acc, cond) => sql`${acc} AND ${cond}`);
       const andRaw = await db.execute(
         sql`SELECT name, price, url FROM local_catalog WHERE ${combined} LIMIT 20`
@@ -77,7 +101,9 @@ export async function searchLocalCatalog(
     }
   }
 
-  // 2. ILIKE full substring — catches exact phrases
+  if (seen.size >= 3) return results();
+
+  // Strategy 3: ILIKE full substring
   try {
     const ilikeRaw = await db.execute(
       sql`SELECT name, price, url FROM local_catalog WHERE name_lower LIKE ${`%${q}%`} LIMIT 20`
@@ -89,14 +115,19 @@ export async function searchLocalCatalog(
     console.error("ILIKE search failed:", e);
   }
 
-  // 3. Per-word ILIKE — search each keyword independently, boost multi-matches.
+  if (seen.size >= 3) return results();
+
+  // Strategy 4: Per-word ILIKE (longest words first, with multi-match boost)
   try {
-    const sortedWords = [...words].filter((w) => w.length > 2).sort((a, b) => b.length - a.length);
+    const sortedWords = [...words]
+      .filter((w) => w.length > 2)
+      .sort((a, b) => b.length - a.length);
     const wordHits = new Map<string, number>();
 
     for (const word of sortedWords) {
+      const stemmed = destem(word);
       const wordRaw = await db.execute(
-        sql`SELECT name, price, url FROM local_catalog WHERE name_lower LIKE ${`%${word}%`} LIMIT 20`
+        sql`SELECT name, price, url FROM local_catalog WHERE name_lower LIKE ${`%${stemmed}%`} LIMIT 20`
       );
       for (const r of getRows<Row>(wordRaw)) {
         const key = r.name.toLowerCase();
@@ -120,39 +151,5 @@ export async function searchLocalCatalog(
     console.error("Per-word ILIKE search failed:", e);
   }
 
-  // 3. Full-text search (handles stemming: "ramps" → "ramp")
-  try {
-    const ftsRaw = await db.execute(
-      sql`SELECT name, price, url, ts_rank(to_tsvector('english', name_lower), plainto_tsquery('english', ${q})) as rank
-          FROM local_catalog
-          WHERE to_tsvector('english', name_lower) @@ plainto_tsquery('english', ${q})
-          ORDER BY rank DESC
-          LIMIT 20`
-    );
-    for (const r of getRows<RowRank>(ftsRaw)) {
-      add(r.name, r.price, r.url, 0.8 + Math.min(Number(r.rank), 0.2));
-    }
-  } catch (e) {
-    console.error("FTS search failed:", e);
-  }
-
-  // 4. Trigram similarity (fuzzy — catches typos and partial matches)
-  try {
-    const trigramRaw = await db.execute(
-      sql`SELECT name, price, url, similarity(name_lower, ${q}) as sim
-          FROM local_catalog
-          WHERE similarity(name_lower, ${q}) > 0.08
-          ORDER BY sim DESC
-          LIMIT 20`
-    );
-    for (const r of getRows<RowSim>(trigramRaw)) {
-      add(r.name, r.price, r.url, Number(r.sim));
-    }
-  } catch (e) {
-    console.error("Trigram search failed:", e);
-  }
-
-  return Array.from(seen.values())
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
+  return results();
 }
