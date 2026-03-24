@@ -112,7 +112,7 @@ export async function buildPrompt(
     .split(/\s+/)
     .filter((w) => w.length > 2 && PRODUCT_TERMS.has(w));
 
-  const uniqueHistoryTerms = [...new Set(historyTerms)].slice(0, 5);
+  const uniqueHistoryTerms = Array.from(new Set(historyTerms)).slice(0, 5);
   const searchQuery = [latestMessage, ...uniqueHistoryTerms].join(" ").trim();
 
   // Run two searches in parallel: the focused query + just the latest message
