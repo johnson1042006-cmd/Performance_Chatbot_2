@@ -68,20 +68,38 @@ export async function searchLocalCatalog(
     console.error("ILIKE search failed:", e);
   }
 
-  // 2. Per-word ILIKE — search each keyword independently
+  // 2. Per-word ILIKE — search each keyword independently, then boost multi-matches.
+  //    Longest words searched first (more distinctive = fewer false positives).
   try {
     const words = q
       .replace(/[?!.,;:'"()]/g, "")
       .split(/\s+/)
-      .filter((w) => w.length > 2);
+      .filter((w) => w.length > 2)
+      .sort((a, b) => b.length - a.length);
+
+    const wordHits = new Map<string, number>();
 
     for (const word of words) {
-      if (seen.size >= limit) break;
       const wordRaw = await db.execute(
-        sql`SELECT name, price, url FROM local_catalog WHERE name_lower LIKE ${`%${word}%`} LIMIT 15`
+        sql`SELECT name, price, url FROM local_catalog WHERE name_lower LIKE ${`%${word}%`} LIMIT 20`
       );
       for (const r of getRows<Row>(wordRaw)) {
-        add(r.name, r.price, r.url, 0.5);
+        const key = r.name.toLowerCase();
+        wordHits.set(key, (wordHits.get(key) || 0) + 1);
+        add(r.name, r.price, r.url, 0.3);
+      }
+    }
+
+    // Boost products that matched multiple keywords
+    for (const [key, hitCount] of wordHits) {
+      if (hitCount > 1) {
+        const existing = seen.get(key);
+        if (existing && existing.score < 1.0) {
+          const boosted = Math.min(0.3 + hitCount * 0.25, 0.95);
+          if (boosted > existing.score) {
+            seen.set(key, { ...existing, score: boosted });
+          }
+        }
       }
     }
   } catch (e) {

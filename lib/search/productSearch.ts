@@ -35,7 +35,11 @@ function extractKeywords(query: string): string[] {
     .toLowerCase()
     .replace(/[?!.,;:'"()]/g, "")
     .split(/\s+/)
-    .filter((w) => w.length > 1 && !STOP_WORDS.has(w));
+    .filter((w) => {
+      if (STOP_WORDS.has(w)) return false;
+      if (/^\d+$/.test(w)) return true; // keep numbers like "5", "1200"
+      return w.length > 1;
+    });
 }
 
 /**
