@@ -213,12 +213,14 @@ export async function checkInventory(productId: number): Promise<{
   }
 
   const qty = product.inventory_level;
+  const noTracking = product.inventory_tracking === "none";
   let status: "in_stock" | "low_stock" | "out_of_stock";
-  if (qty <= 0) status = "out_of_stock";
+  if (noTracking) status = "in_stock";
+  else if (qty <= 0) status = "out_of_stock";
   else if (qty <= 5) status = "low_stock";
   else status = "in_stock";
 
-  return { inStock: qty > 0, quantity: qty, status };
+  return { inStock: noTracking || qty > 0, quantity: noTracking ? -1 : qty, status };
 }
 
 export async function getProductVariants(productId: number): Promise<BCVariant[]> {
@@ -303,12 +305,18 @@ export const getProductByName = getProductByKeyword;
 
 export function formatProductForPrompt(product: BCProduct): string {
   const price = product.sale_price || product.calculated_price || product.price;
-  const stockStatus =
-    product.inventory_level <= 0
-      ? "OUT OF STOCK"
-      : product.inventory_level <= 5
-      ? `LOW STOCK (${product.inventory_level} left)`
-      : `IN STOCK (${product.inventory_level} available)`;
+  // inventory_tracking "none" means the store doesn't track stock — always available
+  const noTracking = product.inventory_tracking === "none";
+  let stockStatus: string;
+  if (noTracking) {
+    stockStatus = "IN STOCK";
+  } else if (product.inventory_level <= 0) {
+    stockStatus = "OUT OF STOCK";
+  } else if (product.inventory_level <= 5) {
+    stockStatus = `LOW STOCK (${product.inventory_level} left)`;
+  } else {
+    stockStatus = `IN STOCK (${product.inventory_level} available)`;
+  }
 
   const variants = product.variants || [];
   const variantInfo = variants.length > 0
@@ -316,7 +324,9 @@ export function formatProductForPrompt(product: BCProduct): string {
         .slice(0, 15)
         .map((v) => {
           const opts = v.option_values.map((o) => `${o.option_display_name}: ${o.label}`).join(", ");
-          const vStock = v.inventory_level > 0 ? `${v.inventory_level} in stock` : "out of stock";
+          const vStock = noTracking
+            ? "in stock"
+            : v.inventory_level > 0 ? `${v.inventory_level} in stock` : "out of stock";
           return `  - ${opts} (${v.sku}) — ${vStock}`;
         })
         .join("\n")
