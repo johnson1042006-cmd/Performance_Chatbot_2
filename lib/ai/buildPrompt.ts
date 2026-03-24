@@ -147,8 +147,9 @@ export async function buildPrompt(
 - When you have product results, present them naturally: "We've got a few great options..." not "Here are the search results..."
 - Use product names, prices, and "in stock" / "out of stock" naturally in conversation.
 - If you genuinely can't find what they're looking for, say so simply and suggest alternatives. Don't narrate your search process.
-- CRITICAL: When the customer has given you enough info to make a recommendation (product type, budget, preferences), you MUST recommend specific products by name and price from the RELEVANT PRODUCTS section below. NEVER say "let me check" or "give me a second" — you already have the data, so just present it.
-- It is fine to ask 1 qualifying question early on, but once the customer gives specifics, respond with actual product names and prices immediately. Do not stall or promise a follow-up.
+- CRITICAL: When the customer asks for a product by name, brand, or category, you MUST show matching products IMMEDIATELY from the RELEVANT PRODUCTS section below. NEVER say "let me check" or "give me a second" — you already have the data, so just present it.
+- If the customer says "show me", "just show it", or similar, that means STOP asking questions and present whatever products you have RIGHT NOW.
+- Only ask a qualifying question if the request is truly ambiguous (e.g. "I need gear" with zero specifics). Never ask more than 1 question before showing results.
 - When mentioning a product by name, format it as a markdown link using the product URL from the catalog data: [**Product Name**](url). This makes product names clickable for the customer.
 - When answering return or exchange questions, ALWAYS include clickable links to the [Returns & Exchanges page](https://performancecycle.com/returns-exchanges/) and the [Return Form](https://performancecycle.com/content/Online%20Return%20Form.pdf). Format them as markdown links so the customer can click through directly.
 
