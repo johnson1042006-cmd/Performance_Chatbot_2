@@ -46,6 +46,7 @@ const QUERY_SYNONYMS: Record<string, string> = {
   lid: "helmet", lids: "helmet",
   pipe: "exhaust", pipes: "exhaust",
   revit: "rev'it",
+  firstgeer: "firstgear",
 };
 
 export function extractKeywords(query: string): string[] {
