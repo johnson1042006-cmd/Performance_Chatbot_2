@@ -38,28 +38,48 @@ function extractKeywords(query: string): string[] {
     .filter((w) => w.length > 1 && !STOP_WORDS.has(w));
 }
 
+function nameToSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/&/g, "-")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")
+    .replace(/-+/g, "-");
+}
+
 /**
  * Fetch full BigCommerce product details for a local catalog match.
- * Uses name:like to find the product, then returns the best match.
+ * Tries multiple strategies: full name, then progressively shorter prefixes.
  */
 async function enrichLocalMatch(match: LocalMatch): Promise<BCProduct | null> {
   try {
-    // Use a distinctive portion of the name for the name:like query.
-    // Take the first 60 chars to stay within BC API's comfort zone.
+    const nameLower = match.name.toLowerCase();
+
+    // Strategy 1: Full name (truncated to 60 chars for BC API)
     const searchName = match.name.length > 60
       ? match.name.substring(0, 60)
       : match.name;
 
-    const products = await getProductByNameLike(searchName, 5);
+    let products = await getProductByNameLike(searchName, 10);
+
+    // Strategy 2: First 3 words of the name (more likely to match)
+    if (products.length === 0) {
+      const words = match.name.split(/\s+/);
+      if (words.length > 2) {
+        const shortName = words.slice(0, 3).join(" ");
+        products = await getProductByNameLike(shortName, 10);
+      }
+    }
+
     if (products.length === 0) return null;
 
-    // Find the exact match by name (case-insensitive)
+    // Find exact match by name
     const exact = products.find(
-      (p) => p.name.toLowerCase() === match.name.toLowerCase()
+      (p) => p.name.toLowerCase() === nameLower
     );
     if (exact) return exact;
 
-    // Fall back to closest match
+    // Fuzzy match
     const fuse = new Fuse(products, {
       keys: ["name"],
       threshold: 0.4,
@@ -107,8 +127,8 @@ export async function searchProducts(query: string): Promise<BCProduct[]> {
       return results;
     }
 
-    // Enrichment failed for all matches — create minimal product objects so the
-    // AI still has names and prices to work with instead of "no products found".
+    // Enrichment failed — create minimal product objects with slug-based URLs
+    // (BigCommerce product URLs follow the pattern /product-name-slug/)
     const fallbackResults: BCProduct[] = localMatches.slice(0, 5).map((m) => ({
       id: 0,
       name: m.name,
@@ -126,7 +146,7 @@ export async function searchProducts(query: string): Promise<BCProduct[]> {
       brand_id: 0,
       variants: [],
       images: [],
-      custom_url: { url: `/search.php?search_query=${encodeURIComponent(m.name)}`, is_customized: false },
+      custom_url: { url: `/${nameToSlug(m.name)}/`, is_customized: false },
     }));
     if (fallbackResults.length > 0) return fallbackResults;
   }
