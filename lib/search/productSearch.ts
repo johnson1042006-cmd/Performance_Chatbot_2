@@ -30,7 +30,7 @@ const STOP_WORDS = new Set([
   "motorcycle", "bike", "riding", "rider", "ride",
 ]);
 
-function extractKeywords(query: string): string[] {
+export function extractKeywords(query: string): string[] {
   return query
     .toLowerCase()
     .replace(/[?!.,;:'"()]/g, "")

@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { messages, knowledgeBase } from "@/lib/db/schema";
 import { eq, asc } from "drizzle-orm";
-import { searchProducts, extractSKUFromText } from "@/lib/search/productSearch";
+import { searchProducts, extractSKUFromText, extractKeywords } from "@/lib/search/productSearch";
 import { findPairings } from "@/lib/search/pairingSearch";
 import { AI_BEHAVIOR_RULES } from "./rules";
 import type { Message } from "@/lib/db/schema";
@@ -73,46 +73,12 @@ export async function buildPrompt(
     .filter((m: Message) => m.role === "customer")
     .map((m: Message) => m.content);
 
-  // Build a focused search query: use the latest message as the primary source,
-  // then extract only product-relevant terms (brands, product types) from history.
-  // This prevents sending an overly long query to BigCommerce that returns nothing.
-  const PRODUCT_TERMS = new Set([
-    // Product types
-    "helmet", "helmets", "jacket", "jackets", "gloves", "boots", "pants",
-    "vest", "visor", "shield", "airbag", "protection", "armor", "goggles",
-    "jersey", "gear", "tire", "tires", "brake", "brakes", "exhaust", "chain",
-    "sprocket", "oil", "filter", "battery", "light", "lights", "mirror",
-    "grip", "grips", "handlebar", "seat", "cover", "bag", "luggage", "rack",
-    "communicator", "intercom", "saddlebag", "heated", "suit", "camera",
-    "lock", "tools", "accessories", "windshield", "fairing", "suspension",
-    "pads", "wrap", "bars", "charger", "cable", "mount", "guards",
-    // Brands
-    "shoei", "arai", "bell", "hjc", "agv", "icon", "alpinestars", "dainese",
-    "rev'it", "revit", "klim", "fox", "fly", "scorpion", "sedici", "sena",
-    "cardo", "nolan", "schuberth", "gmax", "biltwell", "tourmaster",
-    "firstgear", "cortech", "forma", "tcx", "gaerne", "highway", "ebc",
-    "hiflo", "dunlop", "pirelli", "bridgestone", "continental", "michelin",
-    "ohlins", "kriega", "sidi", "thor", "leatt", "ogio", "nelson-rigg",
-    "kuryakyn", "vance", "cobra", "yuasa", "acerbis", "renthal",
-    // Riding styles / helmet types
-    "full-face", "modular", "half", "open-face", "adventure",
-    "sport", "touring", "cruiser", "dirt", "motocross", "dual-sport",
-    "street", "off-road",
-    // Style / material terms
-    "matte", "glossy", "carbon", "fiber", "bluetooth",
-    "rain", "waterproof", "leather", "textile", "mesh", "vented",
-    "hi-viz", "reflective", "armored", "perforated", "insulated",
-  ]);
-
-  const historyTerms = customerMessages
-    .slice(0, -1) // exclude the latest (we already have it)
-    .join(" ")
-    .toLowerCase()
-    .replace(/[?!.,;:'"()$]/g, "")
-    .split(/\s+/)
-    .filter((w) => w.length > 2 && PRODUCT_TERMS.has(w));
-
-  const uniqueHistoryTerms = Array.from(new Set(historyTerms)).slice(0, 5);
+  // Extract product-relevant keywords from recent history so that multi-turn
+  // conversations preserve model names, colorways, and niche terms (e.g. "yagyo")
+  // that a hardcoded allowlist would miss.
+  const recentHistory = customerMessages.slice(0, -1).slice(-3);
+  const historyKeywords = recentHistory.flatMap((msg) => extractKeywords(msg));
+  const uniqueHistoryTerms = Array.from(new Set(historyKeywords)).slice(0, 8);
   const searchQuery = [latestMessage, ...uniqueHistoryTerms].join(" ").trim();
 
   // Run two searches in parallel: the focused query + just the latest message
