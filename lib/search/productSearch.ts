@@ -28,18 +28,35 @@ const STOP_WORDS = new Set([
   "affordable", "best", "popular", "favorite", "options", "selection",
   "range", "need", "buy", "purchase", "order", "shop", "store", "guys",
   "motorcycle", "bike", "riding", "rider", "ride",
+  "whats", "good", "great", "nice", "decent", "solid", "quality", "really",
+  "pretty", "kind", "type", "pair", "one", "two", "ones", "new", "old",
+  "big", "small", "little", "gonna", "wanna", "gotta", "maybe", "probably",
+  "someone", "anything", "everything", "lot", "lots", "bit", "sure", "well",
 ]);
 
+const QUERY_SYNONYMS: Record<string, string> = {
+  kid: "youth", kids: "youth", children: "youth", child: "youth",
+  womens: "women", mens: "men",
+  motocross: "mx", dirtbike: "dirt",
+};
+
 export function extractKeywords(query: string): string[] {
-  return query
+  const words = query
     .toLowerCase()
     .replace(/[?!.,;:'"()]/g, "")
     .split(/\s+/)
     .filter((w) => {
       if (STOP_WORDS.has(w)) return false;
-      if (/^\d+$/.test(w)) return true; // keep numbers like "5", "1200"
+      if (/^\d+$/.test(w)) return true;
       return w.length > 1;
     });
+
+  const expanded: string[] = [];
+  for (const w of words) {
+    expanded.push(w);
+    if (QUERY_SYNONYMS[w]) expanded.push(QUERY_SYNONYMS[w]);
+  }
+  return expanded;
 }
 
 /**
@@ -106,7 +123,7 @@ export async function searchProducts(query: string): Promise<BCProduct[]> {
 
   if (localMatches.length > 0) {
     const enrichPromises = localMatches
-      .slice(0, 8)
+      .slice(0, 12)
       .map((m) => enrichLocalMatch(m));
     const enriched = await Promise.all(enrichPromises);
 
@@ -119,7 +136,7 @@ export async function searchProducts(query: string): Promise<BCProduct[]> {
     }
 
     // Enrichment failed — use stored URLs from local catalog as fallback
-    const fallbackResults: BCProduct[] = localMatches.slice(0, 5).map((m) => ({
+    const fallbackResults: BCProduct[] = localMatches.slice(0, 10).map((m) => ({
       id: 0,
       name: m.name,
       sku: "",

@@ -56,7 +56,13 @@ export async function searchLocalCatalog(
 
   function results() {
     return Array.from(seen.values())
-      .sort((a, b) => b.score - a.score)
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        // Tiebreaker: prefer products whose names contain more query words
+        const aHits = words.filter((w) => a.name.toLowerCase().includes(destem(w))).length;
+        const bHits = words.filter((w) => b.name.toLowerCase().includes(destem(w))).length;
+        return bHits - aHits;
+      })
       .slice(0, limit);
   }
 
@@ -99,6 +105,42 @@ export async function searchLocalCatalog(
     } catch (e) {
       console.error("Multi-word AND search failed:", e);
     }
+
+    // Relaxed AND: if full AND returned nothing and we have 3+ words,
+    // try all unique pairs so partial matches surface (e.g. "mx" + "helmet").
+    // Products matching more pairs rank higher.
+    if (seen.size === 0 && words.length >= 3) {
+      try {
+        const stemmedWords = words.map((w) => destem(w));
+        const topWords = stemmedWords.slice(0, 5);
+        const pairHits = new Map<string, { name: string; price: string | null; url: string | null; count: number }>();
+
+        for (let i = 0; i < topWords.length; i++) {
+          for (let j = i + 1; j < topWords.length; j++) {
+            const pairCond = sql`name_lower LIKE ${`%${topWords[i]}%`} AND name_lower LIKE ${`%${topWords[j]}%`}`;
+            const pairRaw = await db.execute(
+              sql`SELECT name, price, url FROM local_catalog WHERE ${pairCond} LIMIT 10`
+            );
+            for (const r of getRows<Row>(pairRaw)) {
+              const key = r.name.toLowerCase();
+              const existing = pairHits.get(key);
+              if (existing) {
+                existing.count++;
+              } else {
+                pairHits.set(key, { name: r.name, price: r.price, url: r.url, count: 1 });
+              }
+            }
+          }
+        }
+
+        for (const [, hit] of Array.from(pairHits.entries())) {
+          const score = Math.min(0.7 + hit.count * 0.1, 0.95);
+          add(hit.name, hit.price, hit.url, score);
+        }
+      } catch (e) {
+        console.error("Relaxed AND search failed:", e);
+      }
+    }
   }
 
   if (seen.size >= 3) return results();
@@ -120,7 +162,7 @@ export async function searchLocalCatalog(
   // Strategy 4: Per-word ILIKE (longest words first, with multi-match boost)
   try {
     const sortedWords = [...words]
-      .filter((w) => w.length > 2)
+      .filter((w) => w.length > 1)
       .sort((a, b) => b.length - a.length);
     const wordHits = new Map<string, number>();
 
