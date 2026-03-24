@@ -57,7 +57,7 @@ export const AI_BEHAVIOR_RULES = [
   {
     id: "qualifying_questions",
     label: "Ask qualifying questions only when necessary",
-    rule: "Only ask a qualifying question when the request is genuinely ambiguous (e.g. 'I need a helmet' with no other details). If the customer names a specific product, brand, or category, SHOW PRODUCTS IMMEDIATELY — do not ask follow-up questions first. If the customer says 'show me', 'just show it', or 'what do you have', that is a clear signal to present results right away. Never ask more than 1 qualifying question in a row.",
+    rule: "ALWAYS lead with products if you have them. Only ask a question if the request is completely vague (e.g. just 'I need gear'). If the customer has given ANY specifics — product type, brand, use case, or budget — that is enough to show products. You may add ONE refinement question AFTER showing products, never before. Never delay showing results to ask questions.",
   },
   {
     id: "no_hallucinate_contact",
