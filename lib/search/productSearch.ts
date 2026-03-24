@@ -37,6 +37,8 @@ const STOP_WORDS = new Set([
 const PHRASE_SYNONYMS: [RegExp, string][] = [
   [/brain bucket/gi, "helmet"],
   [/rain suit/gi, "rain gear"],
+  [/dirt bike plastics/gi, "fender number plate side panel"],
+  [/dirtbike plastics/gi, "fender number plate side panel"],
 ];
 
 const QUERY_SYNONYMS: Record<string, string> = {
@@ -47,6 +49,9 @@ const QUERY_SYNONYMS: Record<string, string> = {
   pipe: "exhaust", pipes: "exhaust",
   revit: "rev'it",
   firstgeer: "firstgear",
+  plastics: "fender",
+  panniers: "pannier",
+  cans: "exhaust",
 };
 
 export function extractKeywords(query: string): string[] {
