@@ -91,7 +91,7 @@ export async function searchLocalCatalog(
     }
 
     // Boost products that matched multiple keywords
-    for (const [key, hitCount] of wordHits) {
+    for (const [key, hitCount] of Array.from(wordHits.entries())) {
       if (hitCount > 1) {
         const existing = seen.get(key);
         if (existing && existing.score < 1.0) {
