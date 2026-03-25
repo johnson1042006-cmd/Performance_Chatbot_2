@@ -118,7 +118,17 @@ export default function ChatWidget() {
     return () => cleanup();
   }, [dbSessionId, subscribeToChannel]);
 
+  const userScrolledUp = useRef(false);
+
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    userScrolledUp.current = distFromBottom > 80;
+  }, []);
+
   useEffect(() => {
+    if (userScrolledUp.current) return;
     scrollRef.current?.scrollTo({
       top: scrollRef.current.scrollHeight,
       behavior: "smooth",
@@ -221,6 +231,7 @@ export default function ChatWidget() {
       <ChatHeader />
       <div
         ref={scrollRef}
+        onScroll={handleScroll}
         className="flex-1 overflow-y-auto px-4 py-3 space-y-1"
       >
         {messages.length === 0 && (
