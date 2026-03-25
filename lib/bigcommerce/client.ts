@@ -1,4 +1,6 @@
-const BASE_URL = `https://api.bigcommerce.com/stores/${process.env.BIGCOMMERCE_STORE_HASH}/v3`;
+function getBaseUrl() {
+  return `https://api.bigcommerce.com/stores/${process.env.BIGCOMMERCE_STORE_HASH}/v3`;
+}
 
 interface BCRequestOptions {
   path: string;
@@ -6,7 +8,7 @@ interface BCRequestOptions {
 }
 
 async function bcFetch<T>(options: BCRequestOptions): Promise<T | null> {
-  const url = new URL(`${BASE_URL}${options.path}`);
+  const url = new URL(`${getBaseUrl()}${options.path}`);
   if (options.params) {
     for (const [key, value] of Object.entries(options.params)) {
       url.searchParams.set(key, String(value));
