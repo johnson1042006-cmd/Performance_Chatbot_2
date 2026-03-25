@@ -44,7 +44,7 @@ const PHRASE_SYNONYMS: [RegExp, string][] = [
 const QUERY_SYNONYMS: Record<string, string> = {
   kid: "youth", kids: "youth", children: "youth", child: "youth",
   womens: "women", mens: "men",
-  motocross: "mx", dirtbike: "dirt",
+  motocross: "mx", dirtbike: "dirt", offroad: "mx",
   lid: "helmet", lids: "helmet",
   pipe: "exhaust", pipes: "exhaust",
   revit: "rev'it",

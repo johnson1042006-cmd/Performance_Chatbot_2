@@ -114,6 +114,7 @@ export async function buildPrompt(
 - When mentioning a product, format it as a clickable markdown link: [**Product Name**](url) — $price
 - ONLY ask a qualifying question if the request is truly vague (e.g. "I need gear" with zero specifics). Once the customer has stated a product type, use case, OR budget, you have enough — show products immediately.
 - NEVER ask more than 1 question before showing results. If you have products that match, show them AND ask a refinement question in the same message if needed.
+- MULTI-TURN REFINEMENTS: When a customer narrows their choice (e.g. "offroad only", "the cheaper one", "in black"), consider ALL products you've already discussed — not just products with that exact word in the name. For example, MX products are offroad products, sport products work for track, touring products work for long rides. Use your product knowledge, not just literal name matching.
 - When answering return or exchange questions, ALWAYS include clickable links to the [Returns & Exchanges page](https://performancecycle.com/returns-exchanges/) and the [Return Form](https://performancecycle.com/content/Online%20Return%20Form.pdf).
 
 ## BEHAVIOR RULES
