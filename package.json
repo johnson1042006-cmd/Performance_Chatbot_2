@@ -11,7 +11,8 @@
     "db:seed": "npx tsx scripts/seed-users.ts",
     "db:seed:knowledge": "npx tsx scripts/seed-knowledge.ts",
     "db:seed:products": "npx tsx scripts/seed-products.ts",
-    "db:seed:catalog": "npx tsx scripts/seed-catalog.ts"
+    "db:seed:catalog": "npx tsx scripts/seed-catalog.ts",
+    "db:seed:colorways": "npx tsx scripts/seed-colorways.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",

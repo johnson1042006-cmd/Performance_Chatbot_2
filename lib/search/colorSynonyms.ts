@@ -5,7 +5,7 @@ export const colorSynonymMap: Record<string, string[]> = {
   ],
   white: [
     "pearl", "ivory", "cream", "gloss white", "matte white",
-    "arctic", "ghost", "snow", "frost", "alabaster",
+    "arctic", "ghost", "alabaster",
   ],
   blue: [
     "navy", "cobalt", "royal", "royal blue", "azure", "sapphire", "midnight",

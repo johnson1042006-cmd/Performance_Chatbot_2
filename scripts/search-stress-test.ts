@@ -296,6 +296,47 @@ const categories: Record<string, TestCase[]> = {
     { query: "stacyc electric bike", expect: ["stacyc"] },
     { query: "vp race fuel", expect: ["vp", "fuel", "race"] },
   ],
+
+  // ═══════════════════════════════════════════════════════════════
+  //  11. COLOR + PRODUCT TYPE COMBOS (~35)
+  // ═══════════════════════════════════════════════════════════════
+  "Color + Product Type": [
+    { query: "white mx helmets", expect: ["helmet"] },
+    { query: "white street helmet", expect: ["helmet"] },
+    { query: "white adventure helmet", expect: ["helmet"] },
+    { query: "black street helmet", expect: ["helmet"] },
+    { query: "black mx helmet", expect: ["helmet"] },
+    { query: "matte black helmet", expect: ["helmet"] },
+    { query: "red helmet", expect: ["helmet"] },
+    { query: "blue adventure helmet", expect: ["helmet"] },
+    { query: "hi-viz helmet", expect: ["helmet"] },
+    { query: "orange dirt bike helmet", expect: ["helmet"] },
+    { query: "black leather jacket", expect: ["jacket"] },
+    { query: "red racing jacket", expect: ["jacket"] },
+    { query: "hi-viz adventure jacket", expect: ["jacket"] },
+    { query: "white jacket", expect: ["jacket"] },
+    { query: "black gloves", expect: ["glove"] },
+    { query: "red gloves", expect: ["glove"] },
+    { query: "white gloves", expect: ["glove"] },
+    { query: "yellow gloves", expect: ["glove"] },
+    { query: "black boots", expect: ["boot"] },
+    { query: "white mx boots", expect: ["boot"] },
+    { query: "brown leather boots", expect: ["boot"] },
+    { query: "black riding boots", expect: ["boot"] },
+    { query: "pink womens gloves", expect: ["glove"] },
+    { query: "red fox jersey", expect: ["jersey", "fox"] },
+    { query: "blue troy lee jersey", expect: ["jersey", "troy lee"] },
+    { query: "black mx pants", expect: ["pant"] },
+    { query: "white mx pants", expect: ["pant"] },
+    { query: "blue goggles", expect: ["goggle"] },
+    { query: "red goggles", expect: ["goggle"] },
+    { query: "orange ktm gloves", expect: ["glove"] },
+    { query: "grey modular helmet", expect: ["helmet", "modular"] },
+    { query: "green kawasaki jersey", expect: ["jersey"] },
+    { query: "carbon fiber black helmet", expect: ["helmet"] },
+    { query: "pearl white shoei helmet", expect: ["shoei", "helmet"] },
+    { query: "stealth black alpinestars jacket", expect: ["alpinestars", "jacket"] },
+  ],
 };
 
 async function runTests() {
@@ -314,7 +355,8 @@ async function runTests() {
       const keywords = extractKeywords(t.query);
       let products: { name: string }[];
       try {
-        products = await searchProducts(t.query);
+        const result = await searchProducts(t.query);
+        products = result.products;
       } catch {
         products = [];
       }

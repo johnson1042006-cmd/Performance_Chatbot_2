@@ -23,7 +23,10 @@ interface PageContext {
   searchQuery: string | null;
 }
 
-const AI_FALLBACK_DELAY = 8000;
+interface BotSettings {
+  aiEnabled: boolean;
+  fallbackTimerSeconds: number;
+}
 
 export default function ChatWidget() {
   const searchParams = useSearchParams();
@@ -35,6 +38,10 @@ export default function ChatWidget() {
   const [waitingForReply, setWaitingForReply] = useState(false);
   const [pageContext, setPageContext] = useState<PageContext | null>(null);
   const [agentClaimed, setAgentClaimed] = useState(false);
+  const [botSettings, setBotSettings] = useState<BotSettings>({
+    aiEnabled: true,
+    fallbackTimerSeconds: 60,
+  });
   const scrollRef = useRef<HTMLDivElement>(null);
   const initialized = useRef(false);
   const fallbackTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -47,6 +54,13 @@ export default function ChatWidget() {
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/chat/settings")
+      .then((res) => res.json())
+      .then((data) => setBotSettings(data))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -213,11 +227,15 @@ export default function ChatWidget() {
         );
       }
 
-      if (data.sessionStatus !== "active_human" && !agentClaimed) {
+      if (
+        botSettings.aiEnabled &&
+        data.sessionStatus !== "active_human" &&
+        !agentClaimed
+      ) {
         if (fallbackTimerRef.current) clearTimeout(fallbackTimerRef.current);
         fallbackTimerRef.current = setTimeout(() => {
           triggerAIFallback(content, sid!);
-        }, AI_FALLBACK_DELAY);
+        }, botSettings.fallbackTimerSeconds * 1000);
       }
     } catch {
       setWaitingForReply(false);

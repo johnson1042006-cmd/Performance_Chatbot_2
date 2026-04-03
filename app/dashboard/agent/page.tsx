@@ -1,117 +1,70 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useEffect } from "react";
+import { useSession } from "next-auth/react";
 import TopBar from "@/components/ui/TopBar";
 import Badge from "@/components/ui/Badge";
-import SessionQueue from "@/components/dashboard/SessionQueue";
-import ChatPanel from "@/components/dashboard/ChatPanel";
-import EmptyState from "@/components/dashboard/EmptyState";
-import { MessageSquare } from "lucide-react";
+import MetricCard from "@/components/dashboard/manager/MetricCard";
+import RecentConversations from "@/components/dashboard/manager/RecentConversations";
 
-interface SessionData {
-  id: string;
-  status: string;
-  pageContext: Record<string, unknown> | null;
+interface Analytics {
+  queueSize: number;
+  chatsToday: number;
+  openChats: number;
+  recentSessions: Array<{
+    id: string;
+    customerIdentifier: string;
+    pageContext: Record<string, unknown> | null;
+    startedAt: string;
+    status: string;
+  }>;
 }
 
 export default function AgentDashboard() {
-  const [activeSession, setActiveSession] = useState<SessionData | null>(null);
+  const { data: session } = useSession();
+  const [analytics, setAnalytics] = useState<Analytics | null>(null);
 
-  const handleSelectSession = useCallback(async (sessionId: string) => {
-    try {
-      const res = await fetch(`/api/sessions/${sessionId}`);
-      const data = await res.json();
-      if (data.session) {
-        setActiveSession(data.session);
-      }
-    } catch (error) {
-      console.error("Failed to load session:", error);
-    }
+  useEffect(() => {
+    fetch("/api/analytics")
+      .then((res) => res.json())
+      .then((data) => setAnalytics(data))
+      .catch(console.error);
   }, []);
 
-  const handleClaimSession = useCallback(async (sessionId: string) => {
-    try {
-      const res = await fetch("/api/sessions/claim", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId }),
-      });
-      const data = await res.json();
-      if (data.session) {
-        setActiveSession(data.session);
-      }
-    } catch (error) {
-      console.error("Failed to claim session:", error);
-    }
-  }, []);
-
-  const handleReleaseSession = useCallback(async (sessionId: string) => {
-    try {
-      await fetch("/api/sessions/release", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId }),
-      });
-      setActiveSession((prev) =>
-        prev?.id === sessionId ? { ...prev, status: "active_ai" } : prev
-      );
-    } catch (error) {
-      console.error("Failed to release session:", error);
-    }
-  }, []);
-
-  const handleCloseSession = useCallback(async (sessionId: string) => {
-    try {
-      await fetch("/api/sessions/close", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId }),
-      });
-      setActiveSession(null);
-    } catch (error) {
-      console.error("Failed to close session:", error);
-    }
-  }, []);
+  const firstName = session?.user?.name?.split(" ")[0] || "Agent";
 
   return (
     <>
-      <TopBar title="Live Chats">
+      <TopBar title="Hub">
         <Badge variant="success" dot>
           Online
         </Badge>
       </TopBar>
-      <div className="flex-1 flex overflow-hidden">
-        <div className="w-[360px] border-r border-border bg-surface shrink-0 flex flex-col">
-          <div className="px-4 py-3 border-b border-border">
-            <h2 className="text-sm font-semibold text-text-primary">
-              Chat Queue
-            </h2>
-          </div>
-          <SessionQueue
-            activeSessionId={activeSession?.id || null}
-            onSelectSession={handleSelectSession}
-            onClaimSession={handleClaimSession}
+      <div className="flex-1 overflow-y-auto p-6">
+        <h2 className="text-lg font-semibold text-text-primary mb-4">
+          Welcome back, {firstName}
+        </h2>
+
+        <div className="grid grid-cols-3 gap-4 mb-6">
+          <MetricCard
+            title="Queue Size"
+            value={analytics?.queueSize ?? 0}
+            subtitle="Waiting for an agent"
+            accent
+          />
+          <MetricCard
+            title="Chats Today"
+            value={analytics?.chatsToday ?? 0}
+            subtitle="Total sessions"
+          />
+          <MetricCard
+            title="Open Chats"
+            value={analytics?.openChats ?? 0}
+            subtitle="Active sessions"
           />
         </div>
 
-        <div className="flex-1 bg-surface">
-          {activeSession ? (
-            <ChatPanel
-              sessionId={activeSession.id}
-              sessionStatus={activeSession.status}
-              pageContext={activeSession.pageContext}
-              onRelease={handleReleaseSession}
-              onClaim={handleClaimSession}
-              onClose={handleCloseSession}
-            />
-          ) : (
-            <EmptyState
-              icon={MessageSquare}
-              title="Select a conversation"
-              description="Choose a chat from the queue to view the conversation and respond to customers."
-            />
-          )}
-        </div>
+        <RecentConversations sessions={analytics?.recentSessions || []} />
       </div>
     </>
   );

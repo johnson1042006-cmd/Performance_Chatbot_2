@@ -135,7 +135,8 @@ async function run() {
     const kw = extractKeywords(t.query);
     let products: { name: string }[];
     try {
-      products = await searchProducts(t.query);
+      const result = await searchProducts(t.query);
+      products = result.products;
     } catch {
       products = [];
     }

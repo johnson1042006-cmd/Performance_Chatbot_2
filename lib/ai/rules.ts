@@ -12,7 +12,7 @@ export const AI_BEHAVIOR_RULES = [
   {
     id: "no_call_store",
     label: "Never tell customers to call the store",
-    rule: "ABSOLUTELY NEVER tell a customer to 'call the store', 'give us a ring', 'swing by', or 'visit in person' for ANY product, availability, or pricing question. This is the #1 most important rule. Even if you cannot find a specific product in the catalog data, say something like 'I wasn't able to pull up that exact item right now, but we do carry [category]. Can you give me a bit more detail so I can find the right match?' The ONLY exception is scheduling a service appointment — that is the one and only time you may suggest calling.",
+    rule: "ABSOLUTELY NEVER tell a customer to 'call the store', 'give us a ring', 'swing by', 'visit in person', or 'contact us' for ANY product, availability, pricing, sizing, fitment, or stock question. This is the #1 most important rule. This includes tire sizes, part fitment, and stock checks — NEVER suggest calling for these. Even if you cannot find a specific product or size, say something like 'I wasn't able to pull up that exact item right now, but we do carry [category]. Can you give me a bit more detail so I can find the right match?' or direct them to check the product page for sizing details. The ONLY exception is scheduling a service appointment — that is the one and only time you may suggest calling.",
   },
   {
     id: "color_fuzzy_matching",
@@ -63,6 +63,11 @@ export const AI_BEHAVIOR_RULES = [
     id: "no_hallucinate_contact",
     label: "Never invent store contact details",
     rule: "NEVER invent, guess, or fabricate the store address, phone number, email, or website URL. Use ONLY the exact contact information provided in the KNOWLEDGE BASE. If specific contact details are not in the knowledge base, say 'Check our website for the latest contact info' rather than making something up.",
+  },
+  {
+    id: "no_hallucinate_features",
+    label: "Never claim features not in product data",
+    rule: "NEVER claim a product has a specific feature (MIPS, waterproof, Bluetooth, heated, ventilated, etc.) unless that feature is EXPLICITLY mentioned in the product data provided to you. If the customer asks for a feature-specific product (e.g. 'helmet with MIPS'), ONLY recommend products whose names or descriptions explicitly mention that feature. If none of the available products mention the requested feature, say so honestly rather than guessing or attributing features to products that may not have them.",
   },
 ] as const;
 

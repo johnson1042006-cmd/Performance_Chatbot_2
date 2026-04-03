@@ -81,22 +81,26 @@ export async function buildPrompt(
   const uniqueHistoryTerms = Array.from(new Set(historyKeywords)).slice(0, 8);
   const searchQuery = [latestMessage, ...uniqueHistoryTerms].join(" ").trim();
 
+  const emptySearch = { products: [] as BCProduct[], detectedColor: null as string | null };
+
   // Run two searches in parallel: the focused query + just the latest message
   // to maximize chances of hitting BigCommerce results.
-  const [primaryResults, latestResults, pairingResults] = await Promise.all([
-    safeFetch(() => searchProducts(searchQuery), []),
+  const [primarySearch, latestSearch, pairingResults] = await Promise.all([
+    safeFetch(() => searchProducts(searchQuery), emptySearch),
     searchQuery !== latestMessage
-      ? safeFetch(() => searchProducts(latestMessage), [])
-      : Promise.resolve([]),
+      ? safeFetch(() => searchProducts(latestMessage), emptySearch)
+      : Promise.resolve(emptySearch),
     pageContext?.productSku
       ? safeFetch(() => findPairings(pageContext.productSku!), [])
       : Promise.resolve([]),
   ]);
 
+  const detectedColor = primarySearch.detectedColor ?? latestSearch.detectedColor;
+
   // Merge and deduplicate results
-  const seen = new Set(primaryResults.map((p) => p.id));
-  const productResults = [...primaryResults];
-  for (const p of latestResults) {
+  const seen = new Set(primarySearch.products.map((p) => p.id));
+  const productResults = [...primarySearch.products];
+  for (const p of latestSearch.products) {
     if (!seen.has(p.id)) {
       seen.add(p.id);
       productResults.push(p);
@@ -116,7 +120,7 @@ export async function buildPrompt(
 - NEVER ask more than 1 question before showing results. If you have products that match, show them AND ask a refinement question in the same message if needed.
 - MULTI-TURN REFINEMENTS: When a customer narrows their choice (e.g. "offroad only", "the cheaper one", "in black"), consider ALL products you've already discussed — not just products with that exact word in the name. For example, MX products are offroad products, sport products work for track, touring products work for long rides. Use your product knowledge, not just literal name matching.
 - MATCH PRODUCTS TO USE CASE: When the customer has stated a riding style, bike type, or use case, ONLY recommend products that genuinely fit. Do NOT show touring tires to a track rider, or dual-sport tires for a supersport bike. If the available products don't match the stated need, say so honestly and suggest they contact the shop for specific fitment.
-- NEVER GUESS SIZES OR FITMENT: Do NOT guess, assume, or recommend specific tire sizes, wheel dimensions, part fitment numbers, or compatibility with specific bike models unless that info is explicitly in the product data you have. Instead, ask the customer what size or fitment they need, then recommend the right product type/model. Our catalog lists tire models but not individual sizes — recommend by model and let the customer confirm sizing on the product page or by calling the shop at (303) 755-4387.
+- NEVER GUESS SIZES OR FITMENT: Do NOT guess, assume, or recommend specific tire sizes, wheel dimensions, part fitment numbers, or compatibility with specific bike models unless that info is explicitly in the product data you have. Instead, ask the customer what size or fitment they need, then recommend the right product type/model. Our catalog lists tire models but not individual sizes — recommend by model and let the customer confirm sizing on the product page.
 - When answering return or exchange questions, ALWAYS include clickable links to the [Returns & Exchanges page](https://performancecycle.com/returns-exchanges/) and the [Return Form](https://performancecycle.com/content/Online%20Return%20Form.pdf).
 
 ## BEHAVIOR RULES
@@ -136,6 +140,11 @@ ${AI_BEHAVIOR_RULES.map((r, i) => `${i + 1}. ${r.rule}`).join("\n\n")}
     if (pageContext.searchQuery)
       system += `Search query: ${pageContext.searchQuery}\n`;
     system += `\nWhen the customer says "this" or "it", they are referring to the product/page above.\n`;
+  }
+
+  if (detectedColor) {
+    system += `\n## COLOR PREFERENCE DETECTED\n`;
+    system += `The customer is looking for products in **${detectedColor.toUpperCase()}**. Products matching this color have been boosted to the top of the results. When presenting products, highlight which ones are available in ${detectedColor} by checking their variant/option data. If few or none match the exact color, be upfront and mention what colors ARE available.\n`;
   }
 
   if (contextProduct) {

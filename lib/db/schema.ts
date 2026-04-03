@@ -108,6 +108,19 @@ export const localCatalog = pgTable("local_catalog", {
   bcProductId: integer("bc_product_id"),
 });
 
+export const productColorways = pgTable("product_colorways", {
+  id: serial("id").primaryKey(),
+  bcProductId: integer("bc_product_id").notNull(),
+  productName: text("product_name").notNull(),
+  category: text("category").notNull(),
+  brand: text("brand"),
+  colorway: text("colorway").notNull(),
+  colorwayLower: text("colorway_lower").notNull(),
+  baseSku: text("base_sku"),
+  price: decimal("price", { precision: 10, scale: 2 }),
+  url: text("url"),
+});
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
@@ -118,3 +131,4 @@ export type Product = typeof products.$inferSelect;
 export type ProductPairing = typeof productPairings.$inferSelect;
 export type KnowledgeEntry = typeof knowledgeBase.$inferSelect;
 export type LocalCatalogEntry = typeof localCatalog.$inferSelect;
+export type ProductColorway = typeof productColorways.$inferSelect;

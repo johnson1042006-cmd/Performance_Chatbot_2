@@ -37,6 +37,11 @@ export async function GET() {
       .from(sessions)
       .where(ne(sessions.status, "closed"));
 
+    const [queueCount] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(sessions)
+      .where(eq(sessions.status, "waiting"));
+
     const [totalMessages] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(messages)
@@ -90,6 +95,7 @@ export async function GET() {
       chatsToday: totalChats,
       aiPercent,
       openChats: openChats?.count || 0,
+      queueSize: queueCount?.count || 0,
       totalMessages: totalMessages?.count || 0,
       aiMessages: aiMessages[0]?.count || 0,
       agentMessages: agentMessages[0]?.count || 0,

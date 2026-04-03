@@ -278,13 +278,13 @@ export async function searchProductsBC(query: string): Promise<BCProduct[]> {
     addResults(nameLike);
   }
 
-  // 4. Single-word fallback (longest first)
-  if (deduped.size === 0 && words.length > 1) {
+  // 4. Single-word fallback (longest first) — also fires when we have <3 results
+  if (deduped.size < 3 && words.length > 1) {
     const sorted = [...words].filter((w) => w.length > 2).sort((a, b) => b.length - a.length);
     for (const word of sorted) {
       const wordResults = await getProductByKeyword(word);
       addResults(wordResults);
-      if (deduped.size > 0) break;
+      if (deduped.size >= 3) break;
     }
   }
 
@@ -292,11 +292,43 @@ export async function searchProductsBC(query: string): Promise<BCProduct[]> {
 }
 
 export async function getCategories(): Promise<BCCategory[]> {
-  const results = await bcFetch<BCCategory[]>({
-    path: "/catalog/categories",
-    params: { limit: 50 },
-  });
-  return results || [];
+  const allCategories: BCCategory[] = [];
+  let page = 1;
+  const limit = 250;
+  while (true) {
+    const results = await bcFetch<BCCategory[]>({
+      path: "/catalog/categories",
+      params: { limit, page },
+    });
+    if (!results || results.length === 0) break;
+    allCategories.push(...results);
+    if (results.length < limit) break;
+    page++;
+  }
+  return allCategories;
+}
+
+let _categoryCache: BCCategory[] | null = null;
+let _categoryCacheTime = 0;
+const CATEGORY_CACHE_TTL = 5 * 60 * 1000;
+
+async function getCachedCategories(): Promise<BCCategory[]> {
+  if (_categoryCache && Date.now() - _categoryCacheTime < CATEGORY_CACHE_TTL) {
+    return _categoryCache;
+  }
+  _categoryCache = await getCategories();
+  _categoryCacheTime = Date.now();
+  return _categoryCache;
+}
+
+export async function findCategoryByName(name: string): Promise<BCCategory | null> {
+  const categories = await getCachedCategories();
+  const lower = name.toLowerCase();
+  return (
+    categories.find((c) => c.name.toLowerCase() === lower) ||
+    categories.find((c) => c.name.toLowerCase().includes(lower)) ||
+    null
+  );
 }
 
 // --- Aliases for backward compat ---

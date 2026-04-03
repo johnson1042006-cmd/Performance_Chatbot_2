@@ -4,8 +4,19 @@ import {
   searchProductsBC,
   getProductBySKU,
   getProductByNameLike,
+  getProductById,
+  getProductsByCategory,
+  findCategoryByName,
   type BCProduct,
 } from "@/lib/bigcommerce/client";
+import {
+  extractColorFromQuery,
+  expandColorQuery,
+  colorSynonymMap,
+} from "./colorSynonyms";
+import { db } from "@/lib/db";
+import { productColorways } from "@/lib/db/schema";
+import { sql } from "drizzle-orm";
 
 const SKU_PATTERN = /\b[A-Z0-9]{2,}[-_]?[A-Z0-9]{2,}[-_]?[A-Z0-9]*\b/i;
 
@@ -36,9 +47,15 @@ const STOP_WORDS = new Set([
 
 const PHRASE_SYNONYMS: [RegExp, string][] = [
   [/brain bucket/gi, "helmet"],
-  [/rain suit/gi, "rain gear"],
+  [/rain suit/gi, "rain gear waterproof"],
+  [/\brain gear\b/gi, "rain waterproof"],
   [/dirt bike plastics/gi, "fender number plate side panel"],
   [/dirtbike plastics/gi, "fender number plate side panel"],
+  [/\bdirt\s+bike\b/gi, "dirtbike offroad mx"],
+  [/\bhi[\s-]?vis\b/gi, "high visibility fluorescent"],
+  [/\bhivis\b/gi, "high visibility fluorescent"],
+  [/\bexhaust system/gi, "exhaust pipe muffler"],
+  [/\bexhaust systems/gi, "exhaust pipe muffler"],
 ];
 
 const QUERY_SYNONYMS: Record<string, string> = {
@@ -52,7 +69,56 @@ const QUERY_SYNONYMS: Record<string, string> = {
   plastics: "fender",
   panniers: "pannier",
   cans: "exhaust",
+  mirror: "mirrors", mirrors: "mirror",
+  sprockets: "sprocket",
+  visor: "shield",
+  shield: "visor",
 };
+
+const ALL_COLOR_WORDS: Set<string> = (() => {
+  const s = new Set<string>();
+  for (const [primary, synonyms] of Object.entries(colorSynonymMap)) {
+    s.add(primary);
+    for (const syn of synonyms) {
+      if (!syn.includes(" ")) s.add(syn);
+    }
+  }
+  return s;
+})();
+
+function productHasColor(product: BCProduct, expandedColors: Set<string>): boolean {
+  if (!product.variants || product.variants.length === 0) return true;
+
+  return product.variants.some((v) =>
+    v.option_values.some((ov) => {
+      const displayName = ov.option_display_name.toLowerCase();
+      if (!displayName.includes("color") && !displayName.includes("colour"))
+        return false;
+      const label = ov.label.toLowerCase();
+      for (const c of expandedColors) {
+        if (label === c || label.includes(c) || c.includes(label)) return true;
+      }
+      return false;
+    })
+  );
+}
+
+function boostColorMatches(products: BCProduct[], color: string): BCProduct[] {
+  const expanded = new Set(expandColorQuery(color).map((c) => c.toLowerCase()));
+
+  const matching: BCProduct[] = [];
+  const rest: BCProduct[] = [];
+
+  for (const p of products) {
+    if (productHasColor(p, expanded)) {
+      matching.push(p);
+    } else {
+      rest.push(p);
+    }
+  }
+
+  return [...matching, ...rest];
+}
 
 export function extractKeywords(query: string): string[] {
   let processed = query.toLowerCase();
@@ -118,69 +184,225 @@ async function enrichLocalMatch(match: LocalMatch): Promise<BCProduct | null> {
   }
 }
 
-export async function searchProducts(query: string): Promise<BCProduct[]> {
-  if (!query || query.trim().length === 0) return [];
+const CATEGORY_SYNONYMS: Record<string, string[]> = {
+  mx: ["moto"],
+  motocross: ["moto"],
+  dirt: ["moto", "offroad"],
+  offroad: ["moto"],
+  "dual sport": ["adventure", "dual sport"],
+  "dual-sport": ["adventure", "dual sport"],
+  adv: ["adventure"],
+  "full face": ["street", "full face", "race"],
+  "open face": ["open face"],
+  modular: ["modular"],
+  flip: ["modular"],
+  snow: ["snow"],
+  kids: ["kids"],
+  youth: ["kids"],
+};
+
+function expandCategoryTerms(keywords: string[]): string[] {
+  const expanded = new Set<string>();
+  for (const kw of keywords) {
+    expanded.add(kw);
+    const synonyms = CATEGORY_SYNONYMS[kw.toLowerCase()];
+    if (synonyms) {
+      for (const s of synonyms) expanded.add(s);
+    }
+  }
+  // Also try two-word combinations for multi-word synonyms
+  for (let i = 0; i < keywords.length - 1; i++) {
+    const pair = `${keywords[i]} ${keywords[i + 1]}`.toLowerCase();
+    const synonyms = CATEGORY_SYNONYMS[pair];
+    if (synonyms) {
+      for (const s of synonyms) expanded.add(s);
+    }
+  }
+  return Array.from(expanded);
+}
+
+async function searchByCategory(keywords: string[]): Promise<BCProduct[]> {
+  const expandedTerms = expandCategoryTerms(keywords);
+
+  const phrases = [
+    expandedTerms.join(" "),
+    ...expandedTerms.filter((w) => w.length > 2),
+  ];
+
+  for (const phrase of phrases) {
+    try {
+      const cat = await findCategoryByName(phrase);
+      if (cat) {
+        return getProductsByCategory(cat.id, 50);
+      }
+    } catch {
+      /* continue */
+    }
+  }
+  return [];
+}
+
+async function searchByColorway(
+  color: string,
+  keywords: string[]
+): Promise<BCProduct[]> {
+  try {
+    const colorTerms = expandColorQuery(color);
+
+    const colorConditions = colorTerms.map(
+      (c) => sql`colorway_lower LIKE ${`%${c.toLowerCase()}%`}`
+    );
+    const colorWhere = colorConditions.reduce(
+      (acc, cond) => sql`${acc} OR ${cond}`
+    );
+
+    const expandedCatTerms = expandCategoryTerms(keywords);
+    const catKeywords = expandedCatTerms.filter(
+      (w) => w.length > 1 && !ALL_COLOR_WORDS.has(w.toLowerCase())
+    );
+
+    let query;
+    if (catKeywords.length > 0) {
+      const catConditions = catKeywords.map(
+        (w) => sql`(category ILIKE ${`%${w}%`} OR product_name ILIKE ${`%${w}%`})`
+      );
+      const catWhere = catConditions.reduce(
+        (acc, cond) => sql`${acc} OR ${cond}`
+      );
+      query = sql`SELECT DISTINCT bc_product_id FROM product_colorways WHERE (${colorWhere}) AND (${catWhere}) LIMIT 15`;
+    } else {
+      query = sql`SELECT DISTINCT bc_product_id FROM product_colorways WHERE (${colorWhere}) LIMIT 15`;
+    }
+
+    const rows = await db.execute(query);
+    const ids: number[] = [];
+    const rawRows = Array.isArray(rows) ? rows : (rows as { rows: { bc_product_id: number }[] }).rows || [];
+    for (const r of rawRows) {
+      const id = (r as { bc_product_id: number }).bc_product_id;
+      if (id) ids.push(id);
+    }
+
+    if (ids.length === 0) return [];
+
+    const products = await Promise.all(
+      ids.map((id) => getProductById(id).catch(() => null))
+    );
+    return products.filter((p): p is BCProduct => p !== null && p.is_visible);
+  } catch (e) {
+    console.error("Colorway search error:", e);
+    return [];
+  }
+}
+
+export async function searchProducts(
+  query: string
+): Promise<{ products: BCProduct[]; detectedColor: string | null }> {
+  if (!query || query.trim().length === 0)
+    return { products: [], detectedColor: null };
 
   const normalizedQuery = query.trim();
-  const keywords = extractKeywords(normalizedQuery);
 
-  if (keywords.length === 0) return [];
+  const detectedColor = extractColorFromQuery(normalizedQuery);
+
+  const allKeywords = extractKeywords(normalizedQuery);
+  let keywords = detectedColor
+    ? allKeywords.filter((kw) => !ALL_COLOR_WORDS.has(kw.toLowerCase()))
+    : allKeywords;
+  if (keywords.length === 0) keywords = allKeywords;
+  if (keywords.length === 0) return { products: [], detectedColor };
+
+  const applyColor = (results: BCProduct[]) =>
+    detectedColor && results.length > 0
+      ? boostColorMatches(results, detectedColor)
+      : results;
 
   // 1. Exact SKU lookup (fastest path)
   const skuMatch = normalizedQuery.match(SKU_PATTERN);
   if (skuMatch) {
     const skuProduct = await getProductBySKU(skuMatch[0]);
     if (skuProduct && skuProduct.is_visible && skuProduct.availability !== "disabled") {
-      return [skuProduct];
+      return { products: [skuProduct], detectedColor };
     }
   }
 
-  // 2. LOCAL CATALOG SEARCH — fuzzy search across all products
+  // 2. Run ALL search sources in parallel — local catalog, BC keyword, category, and colorway index
   const keywordsForLocal = keywords.join(" ");
-  const localMatches = await searchLocalCatalog(keywordsForLocal, 10);
+  const keywordQuery = keywords.slice(0, 6).join(" ");
 
+  const [localMatches, bcKeywordResults, categoryResults, colorwayResults] = await Promise.all([
+    searchLocalCatalog(keywordsForLocal, 10).catch(() => [] as LocalMatch[]),
+    searchProductsBC(keywordQuery).catch(() => [] as BCProduct[]),
+    searchByCategory(keywords).catch(() => [] as BCProduct[]),
+    detectedColor
+      ? searchByColorway(detectedColor, keywords).catch(() => [] as BCProduct[])
+      : Promise.resolve([] as BCProduct[]),
+  ]);
+
+  const deduped = new Map<number, BCProduct>();
+  function addProducts(products: BCProduct[]) {
+    for (const p of products) {
+      if (p.is_visible && p.availability !== "disabled" && !deduped.has(p.id)) {
+        deduped.set(p.id, p);
+      }
+    }
+  }
+
+  // Colorway index results are highest priority for color+type queries
+  addProducts(colorwayResults);
+
+  // Category results are the most relevant for type-based queries like "street helmets"
+  addProducts(categoryResults);
+
+  // BC keyword results search descriptions, so they catch category terms too
+  addProducts(bcKeywordResults);
+
+  // Enrich local catalog matches with full BC data
   if (localMatches.length > 0) {
     const enrichPromises = localMatches
       .slice(0, 12)
       .map((m) => enrichLocalMatch(m));
     const enriched = await Promise.all(enrichPromises);
-
-    const results = enriched.filter(
+    const localProducts = enriched.filter(
       (p): p is BCProduct => p !== null && p.is_visible
     );
+    addProducts(localProducts);
 
-    if (results.length > 0) {
-      return results;
+    // If enrichment failed for all, add raw local catalog entries
+    if (localProducts.length === 0 && deduped.size === 0) {
+      const fallback: BCProduct[] = localMatches.slice(0, 10).map((m) => ({
+        id: 0,
+        name: m.name,
+        sku: "",
+        price: m.price ? parseFloat(m.price) : 0,
+        sale_price: 0,
+        retail_price: 0,
+        calculated_price: m.price ? parseFloat(m.price) : 0,
+        description: "",
+        is_visible: true,
+        availability: "available" as const,
+        inventory_level: -1,
+        inventory_tracking: "none" as const,
+        categories: [],
+        brand_id: 0,
+        variants: [],
+        images: [],
+        custom_url: { url: m.url || "", is_customized: false },
+      }));
+      const results = applyColor(fallback);
+      return { products: results, detectedColor };
     }
-
-    // Enrichment failed — use stored URLs from local catalog as fallback
-    const fallbackResults: BCProduct[] = localMatches.slice(0, 10).map((m) => ({
-      id: 0,
-      name: m.name,
-      sku: "",
-      price: m.price ? parseFloat(m.price) : 0,
-      sale_price: 0,
-      retail_price: 0,
-      calculated_price: m.price ? parseFloat(m.price) : 0,
-      description: "",
-      is_visible: true,
-      availability: "available" as const,
-      inventory_level: -1,
-      inventory_tracking: "none" as const,
-      categories: [],
-      brand_id: 0,
-      variants: [],
-      images: [],
-      custom_url: { url: m.url || "", is_customized: false },
-    }));
-    if (fallbackResults.length > 0) return fallbackResults;
   }
 
-  // 3. FALLBACK: BigCommerce API direct search (in case local catalog is stale)
-  const keywordQuery = keywords.slice(0, 6).join(" ");
-  const bcResults = await searchProductsBC(keywordQuery);
+  let results = Array.from(deduped.values());
 
-  return bcResults.filter((p) => p.is_visible);
+  // If still too few results, retry with the full natural-language query
+  if (results.length < 3 && keywordQuery !== normalizedQuery) {
+    const rawResults = await searchProductsBC(normalizedQuery).catch(() => []);
+    addProducts(rawResults);
+    results = Array.from(deduped.values());
+  }
+
+  return { products: applyColor(results), detectedColor };
 }
 
 export function extractSKUFromText(text: string): string | null {
