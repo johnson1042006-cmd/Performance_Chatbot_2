@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { messages, sessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -16,6 +18,13 @@ export async function POST(req: NextRequest) {
         { error: "message and sessionId are required" },
         { status: 400 }
       );
+    }
+
+    if (role === "agent") {
+      const authSession = await getServerSession(authOptions);
+      if (!authSession?.user) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      }
     }
 
     const [session] = await db

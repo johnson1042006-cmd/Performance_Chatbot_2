@@ -34,6 +34,7 @@ export const pairingTypeEnum = pgEnum("pairing_type", [
   "matching_pants",
   "matching_jacket",
   "accessory",
+  "frequently_bought",
 ]);
 
 export const users = pgTable("users", {

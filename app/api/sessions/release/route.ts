@@ -23,6 +23,30 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const [chatSession] = await db
+      .select()
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .limit(1);
+
+    if (!chatSession) {
+      return NextResponse.json(
+        { error: "Session not found" },
+        { status: 404 }
+      );
+    }
+
+    if (
+      chatSession.claimedByUserId &&
+      chatSession.claimedByUserId !== session.user.id &&
+      session.user.role !== "store_manager"
+    ) {
+      return NextResponse.json(
+        { error: "Only the claiming agent or a manager can release this session" },
+        { status: 403 }
+      );
+    }
+
     const [updated] = await db
       .update(sessions)
       .set({
@@ -32,13 +56,6 @@ export async function POST(req: NextRequest) {
       })
       .where(eq(sessions.id, sessionId))
       .returning();
-
-    if (!updated) {
-      return NextResponse.json(
-        { error: "Session not found" },
-        { status: 404 }
-      );
-    }
 
     try {
       const pusher = getPusher();

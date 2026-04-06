@@ -109,6 +109,7 @@ export default function PairingsTable() {
               <option value="matching_pants">Matching Pants</option>
               <option value="matching_jacket">Matching Jacket</option>
               <option value="accessory">Accessory</option>
+              <option value="frequently_bought">Frequently Bought Together</option>
             </select>
           </div>
           <div className="flex gap-2 mt-3">
