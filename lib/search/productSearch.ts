@@ -15,7 +15,6 @@ import {
   colorSynonymMap,
 } from "./colorSynonyms";
 import { db } from "@/lib/db";
-import { productColorways } from "@/lib/db/schema";
 import { sql } from "drizzle-orm";
 
 const SKU_PATTERN = /\b[A-Z0-9]{2,}[-_]?[A-Z0-9]{2,}[-_]?[A-Z0-9]*\b/i;
@@ -95,7 +94,7 @@ function productHasColor(product: BCProduct, expandedColors: Set<string>): boole
       if (!displayName.includes("color") && !displayName.includes("colour"))
         return false;
       const label = ov.label.toLowerCase();
-      for (const c of expandedColors) {
+      for (const c of Array.from(expandedColors)) {
         if (label === c || label.includes(c) || c.includes(label)) return true;
       }
       return false;
@@ -276,7 +275,7 @@ async function searchByColorway(
 
     const rows = await db.execute(query);
     const ids: number[] = [];
-    const rawRows = Array.isArray(rows) ? rows : (rows as { rows: { bc_product_id: number }[] }).rows || [];
+    const rawRows = Array.isArray(rows) ? rows : ((rows as unknown as { rows: { bc_product_id: number }[] }).rows || []);
     for (const r of rawRows) {
       const id = (r as { bc_product_id: number }).bc_product_id;
       if (id) ids.push(id);
