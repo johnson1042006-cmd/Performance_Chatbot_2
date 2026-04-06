@@ -100,7 +100,7 @@
 </head>
 <body>
   <div class="demo-banner">
-    This is a demo page simulating a BigCommerce product page. The <strong>Frequently Bought Together</strong> widget loads below the product description.
+    This is a demo page simulating a BigCommerce product page. The <strong>Frequently Bought Together</strong> widget loads after the product section, before Related Products.
   </div>
 
   <div class="store-header">
@@ -114,7 +114,7 @@
     </div>
   </div>
 
-  <div class="productView">
+  <article class="productView">
     <div class="productView-image">[Product Image Placeholder]</div>
     <div>
       <h1 class="productView-title" id="productTitle">Bell Qualifier DLX MIPS Helmet</h1>
@@ -125,7 +125,13 @@
       </div>
       <button class="productView-addToCart">Add to Cart</button>
     </div>
-  </div>
+  </article>
+
+  <!-- Simulated Related Products section (like BigCommerce auto-generates) -->
+  <section style="max-width:1100px;margin:0 auto;padding:0 24px 20px">
+    <h2 style="font-size:20px;font-weight:700;margin-bottom:12px;color:#6b7280;opacity:0.5">Related Products (simulated BC section)</h2>
+    <p style="color:#9ca3af;font-size:13px">This represents BigCommerce's auto-generated Related Products row. The FBT widget should appear <strong>above</strong> this section.</p>
+  </section>
 
   <!-- SKU switcher for testing different products -->
   <div class="sku-switcher">
