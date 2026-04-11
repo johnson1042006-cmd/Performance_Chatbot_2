@@ -239,18 +239,30 @@ export default function ChatWidget() {
         );
       }
 
-      // #region agent log
-      console.log('[PC-DBG H-A-B] timer-condition', {aiEnabled:botSettings.aiEnabled, fallbackTimerSeconds:botSettings.fallbackTimerSeconds, sessionStatus:data.sessionStatus, agentClaimed});
-      // #endregion
-      if (
-        botSettings.aiEnabled &&
-        data.sessionStatus !== "active_human" &&
-        !agentClaimed
-      ) {
+      // Sync agentClaimed from server session state — catches sessions claimed
+      // in a prior browser session where the Pusher event was missed
+      if (data.sessionStatus === "active_human") {
+        setAgentClaimed(true);
+        setWaitingForReply(false);
+      } else if (botSettings.aiEnabled && !agentClaimed) {
+        // For AI-handled sessions (waiting / active_ai), respond quickly.
+        // Only use the full fallbackTimerSeconds if the session status is
+        // something unexpected — gives agents a window in those cases only.
+        const delay =
+          data.sessionStatus === "waiting" || data.sessionStatus === "active_ai"
+            ? 2000
+            : botSettings.fallbackTimerSeconds * 1000;
+
         if (fallbackTimerRef.current) clearTimeout(fallbackTimerRef.current);
+        // #region agent log
+        console.log('[PC-DBG H-A-B] timer set', {delay, sessionStatus:data.sessionStatus, aiEnabled:botSettings.aiEnabled});
+        // #endregion
         fallbackTimerRef.current = setTimeout(() => {
           triggerAIFallback(content, sid!);
-        }, botSettings.fallbackTimerSeconds * 1000);
+        }, delay);
+      } else {
+        // AI disabled and no human agent — clear the spinner
+        setWaitingForReply(false);
       }
     } catch {
       setWaitingForReply(false);
