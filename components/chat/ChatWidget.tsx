@@ -150,6 +150,9 @@ export default function ChatWidget() {
   }, [messages]);
 
   const triggerAIFallback = async (latestMessage: string, sid: string) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7254/ingest/a837f45c-9b06-4e1b-8cb1-b2bd12e89b5f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'0ac826'},body:JSON.stringify({sessionId:'0ac826',location:'ChatWidget.tsx:triggerAIFallback',message:'AI fallback triggered',data:{sid,latestMessage},hypothesisId:'H-D',timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     try {
       const res = await fetch("/api/chat/ai-fallback", {
         method: "POST",
@@ -161,14 +164,23 @@ export default function ChatWidget() {
         }),
       });
       const data = await res.json();
+      // #region agent log
+      fetch('http://127.0.0.1:7254/ingest/a837f45c-9b06-4e1b-8cb1-b2bd12e89b5f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'0ac826'},body:JSON.stringify({sessionId:'0ac826',location:'ChatWidget.tsx:triggerAIFallback',message:'AI fallback response',data:{status:res.status,hasMessage:!!data.message,dataKeys:Object.keys(data),skipped:data.skipped,error:data.error},hypothesisId:'H-B-C-E',timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (data.message) {
         setMessages((prev) => {
           if (prev.some((m) => m.id === data.message.id)) return prev;
           return [...prev, data.message];
         });
         setWaitingForReply(false);
+      } else {
+        // Always clear the spinner — message absent means skipped, error, or timeout
+        setWaitingForReply(false);
       }
-    } catch {
+    } catch (err) {
+      // #region agent log
+      fetch('http://127.0.0.1:7254/ingest/a837f45c-9b06-4e1b-8cb1-b2bd12e89b5f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'0ac826'},body:JSON.stringify({sessionId:'0ac826',location:'ChatWidget.tsx:triggerAIFallback',message:'AI fallback fetch exception',data:{err:String(err)},hypothesisId:'H-C-E',timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       setWaitingForReply(false);
     }
   };
@@ -227,6 +239,9 @@ export default function ChatWidget() {
         );
       }
 
+      // #region agent log
+      fetch('http://127.0.0.1:7254/ingest/a837f45c-9b06-4e1b-8cb1-b2bd12e89b5f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'0ac826'},body:JSON.stringify({sessionId:'0ac826',location:'ChatWidget.tsx:sendMessage',message:'Timer condition check',data:{aiEnabled:botSettings.aiEnabled,fallbackTimerSeconds:botSettings.fallbackTimerSeconds,sessionStatus:data.sessionStatus,agentClaimed},hypothesisId:'H-A-B-D',timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (
         botSettings.aiEnabled &&
         data.sessionStatus !== "active_human" &&
