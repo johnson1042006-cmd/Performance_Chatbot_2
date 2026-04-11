@@ -34,8 +34,7 @@ export async function POST(req: NextRequest) {
     }
 
     // #region agent log
-    const fs = await import("fs");
-    fs.appendFileSync('/Users/antonioj/Performance_Chatbot_2/.cursor/debug-0ac826.log', JSON.stringify({sessionId:'0ac826',location:'ai-fallback/route.ts:session-check',message:'Session status check',data:{sessionStatus:session.status,sessionId},hypothesisId:'H-B',timestamp:Date.now()})+'\n');
+    console.error('[PC-DBG H-B] ai-fallback session-status', {status:session.status, sessionId});
     // #endregion
     if (session.status === "active_human") {
       return NextResponse.json({
@@ -62,6 +61,9 @@ export async function POST(req: NextRequest) {
     const claudeStart = Date.now();
     const aiResponse = await callClaude(system, conversationMessages);
     const claudeMs = Date.now() - claudeStart;
+    // #region agent log
+    console.error('[PC-DBG timing] promptMs', promptMs, 'claudeMs', claudeMs, 'totalMs', promptMs + claudeMs);
+    // #endregion
 
     const [savedMessage] = await db
       .insert(messages)
@@ -92,10 +94,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ message: savedMessage });
   } catch (error) {
-    console.error("AI fallback error:", error);
     // #region agent log
-    const fs = await import("fs");
-    fs.appendFileSync('/Users/antonioj/Performance_Chatbot_2/.cursor/debug-0ac826.log', JSON.stringify({sessionId:'0ac826',location:'ai-fallback/route.ts:catch',message:'AI fallback threw error',data:{error:String(error)},hypothesisId:'H-C-E',timestamp:Date.now()})+'\n');
+    console.error('[PC-DBG H-C-E] ai-fallback error', String(error));
     // #endregion
     return NextResponse.json(
       { error: "AI fallback failed", details: String(error) },

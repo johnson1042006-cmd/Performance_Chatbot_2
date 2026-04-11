@@ -151,7 +151,7 @@ export default function ChatWidget() {
 
   const triggerAIFallback = async (latestMessage: string, sid: string) => {
     // #region agent log
-    fetch('http://127.0.0.1:7254/ingest/a837f45c-9b06-4e1b-8cb1-b2bd12e89b5f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'0ac826'},body:JSON.stringify({sessionId:'0ac826',location:'ChatWidget.tsx:triggerAIFallback',message:'AI fallback triggered',data:{sid,latestMessage},hypothesisId:'H-D',timestamp:Date.now()})}).catch(()=>{});
+    console.log('[PC-DBG H-D] triggerAIFallback called', {sid});
     // #endregion
     try {
       const res = await fetch("/api/chat/ai-fallback", {
@@ -165,7 +165,7 @@ export default function ChatWidget() {
       });
       const data = await res.json();
       // #region agent log
-      fetch('http://127.0.0.1:7254/ingest/a837f45c-9b06-4e1b-8cb1-b2bd12e89b5f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'0ac826'},body:JSON.stringify({sessionId:'0ac826',location:'ChatWidget.tsx:triggerAIFallback',message:'AI fallback response',data:{status:res.status,hasMessage:!!data.message,dataKeys:Object.keys(data),skipped:data.skipped,error:data.error},hypothesisId:'H-B-C-E',timestamp:Date.now()})}).catch(()=>{});
+      console.log('[PC-DBG H-B-C-E] ai-fallback response', {status:res.status, hasMessage:!!data.message, keys:Object.keys(data), skipped:data.skipped, error:data.error});
       // #endregion
       if (data.message) {
         setMessages((prev) => {
@@ -179,7 +179,7 @@ export default function ChatWidget() {
       }
     } catch (err) {
       // #region agent log
-      fetch('http://127.0.0.1:7254/ingest/a837f45c-9b06-4e1b-8cb1-b2bd12e89b5f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'0ac826'},body:JSON.stringify({sessionId:'0ac826',location:'ChatWidget.tsx:triggerAIFallback',message:'AI fallback fetch exception',data:{err:String(err)},hypothesisId:'H-C-E',timestamp:Date.now()})}).catch(()=>{});
+      console.log('[PC-DBG H-C-E] ai-fallback exception', String(err));
       // #endregion
       setWaitingForReply(false);
     }
@@ -240,7 +240,7 @@ export default function ChatWidget() {
       }
 
       // #region agent log
-      fetch('http://127.0.0.1:7254/ingest/a837f45c-9b06-4e1b-8cb1-b2bd12e89b5f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'0ac826'},body:JSON.stringify({sessionId:'0ac826',location:'ChatWidget.tsx:sendMessage',message:'Timer condition check',data:{aiEnabled:botSettings.aiEnabled,fallbackTimerSeconds:botSettings.fallbackTimerSeconds,sessionStatus:data.sessionStatus,agentClaimed},hypothesisId:'H-A-B-D',timestamp:Date.now()})}).catch(()=>{});
+      console.log('[PC-DBG H-A-B] timer-condition', {aiEnabled:botSettings.aiEnabled, fallbackTimerSeconds:botSettings.fallbackTimerSeconds, sessionStatus:data.sessionStatus, agentClaimed});
       // #endregion
       if (
         botSettings.aiEnabled &&
