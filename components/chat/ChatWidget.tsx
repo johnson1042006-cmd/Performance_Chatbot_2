@@ -150,9 +150,6 @@ export default function ChatWidget() {
   }, [messages]);
 
   const triggerAIFallback = async (latestMessage: string, sid: string) => {
-    // #region agent log
-    console.log('[PC-DBG H-D] triggerAIFallback called', {sid});
-    // #endregion
     try {
       const res = await fetch("/api/chat/ai-fallback", {
         method: "POST",
@@ -164,9 +161,6 @@ export default function ChatWidget() {
         }),
       });
       const data = await res.json();
-      // #region agent log
-      console.log('[PC-DBG H-B-C-E] ai-fallback response', {status:res.status, hasMessage:!!data.message, keys:Object.keys(data), skipped:data.skipped, error:data.error});
-      // #endregion
       if (data.message) {
         setMessages((prev) => {
           if (prev.some((m) => m.id === data.message.id)) return prev;
@@ -177,10 +171,7 @@ export default function ChatWidget() {
         // Always clear the spinner — message absent means skipped, error, or timeout
         setWaitingForReply(false);
       }
-    } catch (err) {
-      // #region agent log
-      console.log('[PC-DBG H-C-E] ai-fallback exception', String(err));
-      // #endregion
+    } catch {
       setWaitingForReply(false);
     }
   };
@@ -254,9 +245,6 @@ export default function ChatWidget() {
             : botSettings.fallbackTimerSeconds * 1000;
 
         if (fallbackTimerRef.current) clearTimeout(fallbackTimerRef.current);
-        // #region agent log
-        console.log('[PC-DBG H-A-B] timer set', {delay, sessionStatus:data.sessionStatus, aiEnabled:botSettings.aiEnabled});
-        // #endregion
         fallbackTimerRef.current = setTimeout(() => {
           triggerAIFallback(content, sid!);
         }, delay);

@@ -33,9 +33,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // #region agent log
-    console.error('[PC-DBG H-B] ai-fallback session-status', {status:session.status, sessionId});
-    // #endregion
     if (session.status === "active_human") {
       return NextResponse.json({
         skipped: true,
@@ -50,20 +47,13 @@ export async function POST(req: NextRequest) {
         .where(eq(sessions.id, sessionId));
     }
 
-    const promptStart = Date.now();
     const { system, conversationMessages } = await buildPrompt(
       sessionId,
       latestMessage || "",
       pageContext
     );
-    const promptMs = Date.now() - promptStart;
 
-    const claudeStart = Date.now();
     const aiResponse = await callClaude(system, conversationMessages);
-    const claudeMs = Date.now() - claudeStart;
-    // #region agent log
-    console.error('[PC-DBG timing] promptMs', promptMs, 'claudeMs', claudeMs, 'totalMs', promptMs + claudeMs);
-    // #endregion
 
     const [savedMessage] = await db
       .insert(messages)
@@ -94,9 +84,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ message: savedMessage });
   } catch (error) {
-    // #region agent log
-    console.error('[PC-DBG H-C-E] ai-fallback error', String(error));
-    // #endregion
+    console.error("AI fallback error:", error);
     return NextResponse.json(
       { error: "AI fallback failed", details: String(error) },
       { status: 500 }
