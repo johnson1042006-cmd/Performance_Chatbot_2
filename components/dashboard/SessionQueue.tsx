@@ -32,6 +32,7 @@ export default function SessionQueue({
   const fetchSessions = useCallback(async () => {
     try {
       const res = await fetch("/api/sessions");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.sessions) setSessions(data.sessions);
     } catch (error) {

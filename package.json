@@ -16,6 +16,7 @@
     "db:seed:products": "npx tsx scripts/seed-products.ts",
     "db:seed:catalog": "npx tsx scripts/seed-catalog.ts",
     "db:seed:colorways": "npx tsx scripts/seed-colorways.ts",
+    "db:seed:pairings": "npx tsx scripts/seed-pairings.ts",
     "sync:lightspeed": "npx tsx scripts/sync-lightspeed-pairings.ts"
   },
   "dependencies": {

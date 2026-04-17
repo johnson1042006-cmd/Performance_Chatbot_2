@@ -28,6 +28,7 @@ export default function PairingsTable() {
   const fetchPairings = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/pairings");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.pairings) setPairings(data.pairings);
     } catch (error) {
@@ -43,11 +44,12 @@ export default function PairingsTable() {
 
   const addPairing = async () => {
     try {
-      await fetch("/api/admin/pairings", {
+      const res = await fetch("/api/admin/pairings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setForm({ primarySku: "", pairedSku: "", pairingType: "matching_pants" });
       setShowAdd(false);
       fetchPairings();
@@ -59,7 +61,8 @@ export default function PairingsTable() {
   const deletePairing = async (id: string) => {
     if (!confirm("Delete this pairing?")) return;
     try {
-      await fetch(`/api/admin/pairings?id=${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/admin/pairings?id=${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       fetchPairings();
     } catch (error) {
       console.error("Failed to delete pairing:", error);

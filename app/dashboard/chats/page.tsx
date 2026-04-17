@@ -20,6 +20,7 @@ export default function LiveChatsPage() {
   const handleSelectSession = useCallback(async (sessionId: string) => {
     try {
       const res = await fetch(`/api/sessions/${sessionId}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.session) setActiveSession(data.session);
     } catch (error) {
@@ -34,6 +35,7 @@ export default function LiveChatsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.session) setActiveSession(data.session);
     } catch (error) {
@@ -43,11 +45,12 @@ export default function LiveChatsPage() {
 
   const handleReleaseSession = useCallback(async (sessionId: string) => {
     try {
-      await fetch("/api/sessions/release", {
+      const res = await fetch("/api/sessions/release", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setActiveSession((prev) =>
         prev?.id === sessionId ? { ...prev, status: "active_ai" } : prev
       );

@@ -1,7 +1,8 @@
 import { db } from "@/lib/db";
 import { messages, knowledgeBase } from "@/lib/db/schema";
-import { eq, asc } from "drizzle-orm";
-import { searchProducts, extractSKUFromText, extractKeywords } from "@/lib/search/productSearch";
+import { eq, desc } from "drizzle-orm";
+import { searchProducts, extractSKUFromText, extractKeywords, productHasColor } from "@/lib/search/productSearch";
+import { expandColorQuery } from "@/lib/search/colorSynonyms";
 import { findPairings } from "@/lib/search/pairingSearch";
 import { AI_BEHAVIOR_RULES } from "./rules";
 import type { Message } from "@/lib/db/schema";
@@ -58,20 +59,27 @@ export async function buildPrompt(
   latestMessage: string,
   pageContext?: PageContext | null
 ): Promise<PromptResult> {
-  const [history, knowledge, contextProduct] =
+  const [recentRows, knowledge, contextProduct] =
     await Promise.all([
       db
         .select()
         .from(messages)
         .where(eq(messages.sessionId, sessionId))
-        .orderBy(asc(messages.sentAt)),
+        .orderBy(desc(messages.sentAt))
+        .limit(50),
       db.select().from(knowledgeBase),
       fetchContextProduct(pageContext),
     ]);
 
+  const history = recentRows.reverse();
+
   const customerMessages = history
     .filter((m: Message) => m.role === "customer")
     .map((m: Message) => m.content);
+
+  const effectiveLatest = latestMessage?.trim()
+    || customerMessages[customerMessages.length - 1]
+    || "";
 
   // Extract product-relevant keywords from recent history so that multi-turn
   // conversations preserve model names, colorways, and niche terms (e.g. "yagyo")
@@ -79,7 +87,7 @@ export async function buildPrompt(
   const recentHistory = customerMessages.slice(0, -1).slice(-3);
   const historyKeywords = recentHistory.flatMap((msg) => extractKeywords(msg));
   const uniqueHistoryTerms = Array.from(new Set(historyKeywords)).slice(0, 8);
-  const searchQuery = [latestMessage, ...uniqueHistoryTerms].join(" ").trim();
+  const searchQuery = [effectiveLatest, ...uniqueHistoryTerms].join(" ").trim();
 
   const emptySearch = { products: [] as BCProduct[], detectedColor: null as string | null };
 
@@ -87,8 +95,8 @@ export async function buildPrompt(
   // to maximize chances of hitting BigCommerce results.
   const [primarySearch, latestSearch, pairingResults] = await Promise.all([
     safeFetch(() => searchProducts(searchQuery), emptySearch),
-    searchQuery !== latestMessage
-      ? safeFetch(() => searchProducts(latestMessage), emptySearch)
+    searchQuery !== effectiveLatest
+      ? safeFetch(() => searchProducts(effectiveLatest), emptySearch)
       : Promise.resolve(emptySearch),
     pageContext?.productSku
       ? safeFetch(() => findPairings(pageContext.productSku!), [])
@@ -118,6 +126,7 @@ export async function buildPrompt(
 - When mentioning a product, format it as a clickable markdown link: [**Product Name**](url) — $price
 - ONLY ask a qualifying question if the request is truly vague (e.g. "I need gear" with zero specifics). Once the customer has stated a product type, use case, OR budget, you have enough — show products immediately.
 - NEVER ask more than 1 question before showing results. If you have products that match, show them AND ask a refinement question in the same message if needed.
+- STORE CATALOG AWARENESS: You have a full STORE CATALOG in the knowledge base listing every category, subcategory, brand, and browse URL. Use it to guide customers — especially for broad questions like "what do you carry?" or "do you have tires?" Link them to the relevant category page (e.g. [Street Helmets](https://performancecycle.com/helmets/street/)) alongside specific products when helpful.
 - MULTI-TURN REFINEMENTS: When a customer narrows their choice (e.g. "offroad only", "the cheaper one", "in black"), consider ALL products you've already discussed — not just products with that exact word in the name. For example, MX products are offroad products, sport products work for track, touring products work for long rides. Use your product knowledge, not just literal name matching.
 - MATCH PRODUCTS TO USE CASE: When the customer has stated a riding style, bike type, or use case, ONLY recommend products that genuinely fit. Do NOT show touring tires to a track rider, or dual-sport tires for a supersport bike. If the available products don't match the stated need, say so honestly and suggest they contact the shop for specific fitment.
 - NEVER GUESS SIZES OR FITMENT: Do NOT guess, assume, or recommend specific tire sizes, wheel dimensions, part fitment numbers, or compatibility with specific bike models unless that info is explicitly in the product data you have. Instead, ask the customer what size or fitment they need, then recommend the right product type/model. Our catalog lists tire models but not individual sizes — recommend by model and let the customer confirm sizing on the product page.
@@ -144,7 +153,13 @@ ${AI_BEHAVIOR_RULES.map((r, i) => `${i + 1}. ${r.rule}`).join("\n\n")}
 
   if (detectedColor) {
     system += `\n## COLOR PREFERENCE DETECTED\n`;
-    system += `The customer is looking for products in **${detectedColor.toUpperCase()}**. Products matching this color have been boosted to the top of the results. When presenting products, highlight which ones are available in ${detectedColor} by checking their variant/option data. If few or none match the exact color, be upfront and mention what colors ARE available.\n`;
+    system += `The customer wants products in **${detectedColor.toUpperCase()}**. Products tagged [COLOR MATCH] are confirmed to be available in this color. Products tagged [OTHER COLORS ONLY] do NOT come in this color.
+
+RULES:
+- ONLY recommend products tagged [COLOR MATCH]
+- NEVER recommend [OTHER COLORS ONLY] products unless zero color matches exist
+- When presenting a product, state which color variant matches
+- If no products match the color, say so honestly and suggest what colors ARE available\n`;
   }
 
   if (contextProduct) {
@@ -163,12 +178,26 @@ ${AI_BEHAVIOR_RULES.map((r, i) => `${i + 1}. ${r.rule}`).join("\n\n")}
   if (productResults.length > 0) {
     system += `\n## RELEVANT PRODUCTS FROM CATALOG\n\n`;
     for (const p of productResults.slice(0, 10)) {
+      const tags: string[] = [];
+      if (detectedColor) {
+        const expanded = new Set(
+          expandColorQuery(detectedColor).map((c) => c.toLowerCase())
+        );
+        const isMatch = productHasColor(p, expanded);
+        tags.push(isMatch
+          ? `[COLOR MATCH: ${detectedColor.toUpperCase()}]`
+          : `[OTHER COLORS ONLY]`);
+      }
+      const noTracking = p.inventory_tracking === "none";
+      const inStock = noTracking || p.inventory_level > 0;
+      tags.push(inStock ? `[IN STOCK]` : `[OUT OF STOCK]`);
+      system += tags.join(" ") + " ";
       system += formatProductForPrompt(p);
       system += `\n\n`;
     }
   } else {
     system += `\n## NO PRODUCTS FOUND FOR THIS QUERY\n`;
-    system += `The product search returned no results for this message. This does NOT mean the store doesn't carry the item — it may just mean the search terms didn't match. DO NOT tell the customer to call the store or visit in person. Instead, ask them to be more specific (brand, product type, size, etc.) so you can search again. Performance Cycle carries over 5,000 products across helmets, jackets, boots, gloves, tires, parts, accessories, and more.\n`;
+    system += `The product search returned no results for this message. This does NOT mean the store doesn't carry the item — it may just mean the search terms didn't match. DO NOT tell the customer to call the store or visit in person. Instead, ask them to be more specific (brand, product type, size, etc.) so you can search again. Performance Cycle carries over 5,000 products across helmets, jackets, boots, gloves, tires, parts, accessories, and more. CHECK THE STORE CATALOG in the knowledge base above — it lists every category and brand we carry. Use it to suggest relevant category browse links and confirm whether we likely stock what the customer is looking for.\n`;
   }
 
   if (pairingResults.length > 0) {

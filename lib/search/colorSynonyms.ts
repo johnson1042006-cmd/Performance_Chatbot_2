@@ -1,6 +1,6 @@
 export const colorSynonymMap: Record<string, string[]> = {
   black: [
-    "matte black", "gloss black", "stealth", "blackout", "carbon",
+    "matte black", "gloss black", "stealth", "blackout",
     "onyx", "jet", "midnight", "charcoal", "ebony", "obsidian", "noir", "dark",
   ],
   white: [

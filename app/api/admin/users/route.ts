@@ -93,6 +93,10 @@ export async function PATCH(req: NextRequest) {
     if (role !== undefined) updates.role = role;
     if (isActive !== undefined) updates.isActive = isActive;
 
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: "No fields to update" }, { status: 400 });
+    }
+
     const [updated] = await db
       .update(users)
       .set(updates)
@@ -104,6 +108,10 @@ export async function PATCH(req: NextRequest) {
         role: users.role,
         isActive: users.isActive,
       });
+
+    if (!updated) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
 
     return NextResponse.json({ user: updated });
   } catch (error) {

@@ -55,6 +55,18 @@ const PHRASE_SYNONYMS: [RegExp, string][] = [
   [/\bhivis\b/gi, "high visibility fluorescent"],
   [/\bexhaust system/gi, "exhaust pipe muffler"],
   [/\bexhaust systems/gi, "exhaust pipe muffler"],
+  [/\btech[\s-]?air\b/gi, "tech-air airbag"],
+  [/\bair\s*bag\b/gi, "airbag"],
+  [/\bavy\s+airbag/gi, "avalanche airbag"],
+  [/\bavy\s+bag/gi, "avalanche airbag"],
+  [/\bphone\s+mount/gi, "quadlock ram mount phone mount"],
+  [/\bleathers\b/gi, "leather suit race suit one piece"],
+  [/\bcans\b/gi, "exhaust muffler slip-on"],
+  [/\baction\s+cam(?:era)?/gi, "insta360 action camera"],
+  [/\bsnow\s+plow/gi, "snow plow"],
+  [/\belectric\s+bike/gi, "ebike e-bike electric"],
+  [/\belectric\s+motorcycle/gi, "ebike e-bike electric"],
+  [/\bbalance\s+bike/gi, "stacyc balance bike"],
 ];
 
 const QUERY_SYNONYMS: Record<string, string> = {
@@ -68,10 +80,35 @@ const QUERY_SYNONYMS: Record<string, string> = {
   plastics: "fender",
   panniers: "pannier",
   cans: "exhaust",
+  leathers: "race suit leather suit",
   mirror: "mirrors", mirrors: "mirror",
   sprockets: "sprocket",
   visor: "shield",
   shield: "visor",
+  "tech-air": "airbag",
+  "techair": "airbag",
+  airbag: "tech-air",
+  airbags: "tech-air",
+  intercom: "cardo sena communication",
+  intercoms: "cardo sena communication",
+  bluetooth: "cardo sena communication",
+  headset: "cardo sena communication",
+  communicator: "cardo sena communication",
+  gps: "garmin navigation",
+  navigation: "garmin gps",
+  "action camera": "insta360 camera",
+  "phone mount": "quadlock ram mount",
+  ebike: "e-bike electric",
+  "e-bike": "ebike electric",
+  "electric bike": "ebike e-bike",
+  "electric motorcycle": "ebike e-bike",
+  scooter: "ebike e-bike electric",
+  snowmobile: "snow",
+  snowplow: "snow plow",
+  "snow plow": "plow snow",
+  winch: "snow plow winch",
+  avalanche: "backcountry avy",
+  backcountry: "avalanche snow",
 };
 
 const ALL_COLOR_WORDS: Set<string> = (() => {
@@ -85,17 +122,28 @@ const ALL_COLOR_WORDS: Set<string> = (() => {
   return s;
 })();
 
-function productHasColor(product: BCProduct, expandedColors: Set<string>): boolean {
-  if (!product.variants || product.variants.length === 0) return true;
+const COLOR_OPTION_NAMES = ["color", "colour", "colorway", "finish", "style", "graphics", "color/graphics"];
+
+function isColorOption(displayName: string): boolean {
+  const lower = displayName.toLowerCase();
+  return COLOR_OPTION_NAMES.some((name) => lower.includes(name));
+}
+
+function colorWordMatch(label: string, colorTerm: string): boolean {
+  const re = new RegExp(`(^|[\\s/\\-_,.(])${colorTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[\\s/\\-_,.)])`, "i");
+  return re.test(label) || label === colorTerm;
+}
+
+export function productHasColor(product: BCProduct, expandedColors: Set<string>): boolean {
+  if (!product.variants || product.variants.length === 0) return false;
 
   return product.variants.some((v) =>
-    v.option_values.some((ov) => {
-      const displayName = ov.option_display_name.toLowerCase();
-      if (!displayName.includes("color") && !displayName.includes("colour"))
-        return false;
+    (v.option_values || []).some((ov) => {
+      if (!ov.label || !ov.option_display_name) return false;
+      if (!isColorOption(ov.option_display_name)) return false;
       const label = ov.label.toLowerCase();
       for (const c of Array.from(expandedColors)) {
-        if (label === c || label.includes(c) || c.includes(label)) return true;
+        if (colorWordMatch(label, c)) return true;
       }
       return false;
     })
@@ -116,7 +164,178 @@ function boostColorMatches(products: BCProduct[], color: string): BCProduct[] {
     }
   }
 
-  return [...matching, ...rest];
+  return matching.length > 0 ? matching : rest;
+}
+
+const PRODUCT_TYPE_MAP: Record<string, string[]> = {
+  airbag: ["airbag", "airbags", "air bag", "air bags", "tech-air", "tech air", "ai-1", "plasma system"],
+  helmet: ["helmet", "helmets", "lid", "lids", "brain bucket", "full face", "half helmet", "modular", "open face"],
+  jacket: ["jacket", "jackets", "coat"],
+  pants: ["pants", "pant", "jeans", "overpants"],
+  gloves: ["gloves", "glove", "gauntlet", "gauntlets"],
+  boots: ["boots", "boot", "shoes", "shoe"],
+  vest: ["vest", "vests"],
+  suit: ["suit", "suits", "one piece", "one-piece", "leathers"],
+  tire: ["tire", "tires", "tyre", "tyres", "inner tube", "inner tubes"],
+  exhaust: ["exhaust", "pipe", "pipes", "muffler", "header", "cans", "can", "slip-on", "slip on"],
+  chain: ["chain", "chains", "sprocket", "sprockets"],
+  oil: ["oil", "oils", "lubricant", "lube"],
+  battery: ["battery", "batteries"],
+  brake: ["brake", "brakes", "rotor", "rotors", "pad", "pads"],
+  visor: ["visor", "shield", "face shield"],
+  bag: ["bag", "bags", "luggage", "saddlebag", "saddlebags", "pannier", "panniers", "tank bag"],
+  jersey: ["jersey", "jerseys"],
+  goggle: ["goggle", "goggles"],
+  armor: ["armor", "armour", "protector", "protection", "guard", "guards", "back protector", "chest protector"],
+  communication: ["intercom", "intercoms", "communicator", "communicators", "headset", "headsets", "bluetooth"],
+  camera: ["camera", "cameras", "action camera", "dashcam"],
+  mount: ["phone mount", "phone mounts", "device mount", "gps mount"],
+  ebike: ["e-bike", "e-bikes", "ebike", "ebikes", "electric bike", "electric motorcycle", "electric scooter"],
+  snowplow: ["snow plow", "snow plows", "plow blade", "plow mount", "winch"],
+  snowgear: ["snowmobile gear", "snowmobile helmet", "snowmobile jacket", "snowmobile pants"],
+};
+
+const TYPE_EXCLUSION_TERMS: Record<string, string[]> = {
+  jacket: ["chest protector", "body armor", "roost guard", "roost deflector", "chest guard",
+    "under jersey", "pressure suit", "subframe", "bio-foam", "plastic shell"],
+  helmet: ["helmet bag", "helmet lock", "helmet shield", "helmet visor"],
+  boots: ["boot bag", "boot liner"],
+  gloves: ["glove box", "glove compartment"],
+  airbag: ["replacement canister", "canister only"],
+};
+
+const USE_CASE_SEARCH_TERMS: Record<string, Record<string, string[]>> = {
+  helmet: {
+    touring: ["modular helmet", "touring helmet", "full face helmet"],
+    sport: ["full face helmet", "race helmet", "street helmet"],
+    adventure: ["adventure helmet", "dual sport helmet", "adv helmet"],
+    street: ["full face helmet", "street helmet", "modular helmet"],
+    cruiser: ["half helmet", "open face helmet", "3/4 helmet"],
+    offroad: ["motocross helmet", "mx helmet", "dirt helmet"],
+    commute: ["modular helmet", "full face helmet", "street helmet"],
+  },
+  jacket: {
+    touring: ["touring jacket", "adventure jacket", "waterproof jacket"],
+    sport: ["leather jacket", "race jacket", "sport jacket"],
+    adventure: ["adventure jacket", "adv jacket", "dual sport jacket"],
+    cruiser: ["leather jacket", "cruiser jacket"],
+  },
+  boots: {
+    touring: ["touring boots", "adventure boots", "waterproof boots"],
+    sport: ["race boots", "sport boots", "track boots"],
+    adventure: ["adventure boots", "dual sport boots"],
+  },
+  airbag: {
+    street: ["tech-air airbag", "airbag vest", "klim ai-1", "tech-air plasma"],
+    offroad: ["tech-air offroad", "tech-air mx", "offroad airbag"],
+    avalanche: ["avalanche airbag", "klim atlas avalanche", "klim aspect avalanche"],
+    mx: ["tech-air mx", "tech-air offroad", "offroad airbag"],
+  },
+  suit: {
+    track: ["race suit", "one piece suit", "leather suit", "track suit"],
+    sport: ["race suit", "one piece suit", "leather suit", "track suit"],
+    street: ["riding suit", "leather suit"],
+  },
+};
+
+export function extractProductType(query: string): string | null {
+  const lower = query.toLowerCase();
+  for (const [type, terms] of Object.entries(PRODUCT_TYPE_MAP)) {
+    for (const term of terms) {
+      const re = new RegExp(`(^|\\s)${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(s|es)?($|\\s|\\?)`, "i");
+      if (re.test(lower)) return type;
+    }
+  }
+  return null;
+}
+
+const USE_CASE_KEYWORDS = [
+  "touring", "sport", "adventure", "street", "cruiser", "offroad",
+  "commute", "commuting", "track", "race", "racing", "dirt", "mx",
+  "dual sport", "adv", "avalanche",
+];
+
+function extractUseCase(query: string): string | null {
+  const lower = query.toLowerCase();
+  for (const uc of USE_CASE_KEYWORDS) {
+    if (lower.includes(uc)) {
+      if (uc === "commuting") return "commute";
+      if (uc === "track" || uc === "race" || uc === "racing") return "sport";
+      if (uc === "dirt" || uc === "mx") return "offroad";
+      if (uc === "dual sport" || uc === "adv") return "adventure";
+      return uc;
+    }
+  }
+  return null;
+}
+
+function productMatchesType(product: BCProduct, type: string): boolean {
+  const terms = PRODUCT_TYPE_MAP[type];
+  if (!terms) return false;
+  const nameLower = product.name.toLowerCase();
+  const descLower = (product.description || "").replace(/<[^>]*>/g, "").toLowerCase();
+  const matched = terms.some((term) => nameLower.includes(term) || descLower.substring(0, 500).includes(term));
+  if (!matched) return false;
+
+  const exclusions = TYPE_EXCLUSION_TERMS[type];
+  if (exclusions) {
+    const combined = nameLower + " " + descLower.substring(0, 800);
+    if (exclusions.some((ex) => combined.includes(ex))) return false;
+  }
+  return true;
+}
+
+function isInStock(product: BCProduct): boolean {
+  if (product.inventory_tracking === "none") return true;
+  return product.inventory_level > 0;
+}
+
+function preferInStock(products: BCProduct[]): BCProduct[] {
+  const inStock: BCProduct[] = [];
+  const oos: BCProduct[] = [];
+  for (const p of products) {
+    if (isInStock(p)) inStock.push(p);
+    else oos.push(p);
+  }
+  return inStock.length > 0 ? [...inStock, ...oos] : oos;
+}
+
+function filterByProductType(products: BCProduct[], type: string | null): BCProduct[] {
+  if (!type || products.length === 0) return products;
+  const matching = products.filter((p) => productMatchesType(p, type));
+  return matching.length > 0 ? matching : products;
+}
+
+const PREMIUM_BRANDS = new Set([
+  "alpinestars", "shoei", "arai", "schuberth", "sidi", "klim",
+  "rev'it", "revit", "fox racing", "fox", "bell", "scorpion",
+  "gaerne", "dainese", "agv", "nolan", "icon", "ls2",
+  "michelin", "dunlop", "pirelli", "metzeler", "avon",
+  "akrapovic", "yoshimura",
+]);
+
+const PREMIUM_BRANDS_LIST = Array.from(PREMIUM_BRANDS);
+
+function isPremiumBrand(productName: string): boolean {
+  const lower = productName.toLowerCase();
+  return PREMIUM_BRANDS_LIST.some((brand) => lower.startsWith(brand) || lower.includes(brand + " "));
+}
+
+function scoreRelevance(product: BCProduct, keywords: string[]): number {
+  const nameLower = product.name.toLowerCase();
+  const descLower = (product.description || "").replace(/<[^>]*>/g, "").toLowerCase().substring(0, 600);
+  let score = 0;
+  for (const kw of keywords) {
+    if (nameLower.includes(kw)) score += 3;
+    else if (descLower.includes(kw)) score += 1;
+  }
+  if (isInStock(product)) score += 2;
+  if (isPremiumBrand(product.name)) score += 1;
+  return score;
+}
+
+function rankByRelevance(products: BCProduct[], keywords: string[]): BCProduct[] {
+  return [...products].sort((a, b) => scoreRelevance(b, keywords) - scoreRelevance(a, keywords));
 }
 
 export function extractKeywords(query: string): string[] {
@@ -195,9 +414,38 @@ const CATEGORY_SYNONYMS: Record<string, string[]> = {
   "open face": ["open face"],
   modular: ["modular"],
   flip: ["modular"],
-  snow: ["snow"],
+  snow: ["snow", "snowmobile"],
+  snowmobile: ["snow"],
+  backcountry: ["snow"],
+  "snow plow": ["snow"],
+  snowplow: ["snow"],
   kids: ["kids"],
   youth: ["kids"],
+  touring: ["street", "touring"],
+  sport: ["street", "sport", "race"],
+  adventure: ["adventure", "dual sport"],
+  street: ["street"],
+  race: ["race", "street"],
+  cruiser: ["cruiser", "street"],
+  electronics: ["electronics"],
+  communication: ["electronics"],
+  intercom: ["electronics"],
+  bluetooth: ["electronics"],
+  gps: ["electronics"],
+  camera: ["electronics"],
+  "phone mount": ["electronics"],
+  ebike: ["ebikes"],
+  "e-bike": ["ebikes"],
+  "ebikes": ["ebikes"],
+  "electric bike": ["ebikes"],
+  "electric motorcycle": ["ebikes"],
+  electric: ["ebikes"],
+  parts: ["parts"],
+  accessories: ["parts"],
+  maintenance: ["parts"],
+  controls: ["parts"],
+  tools: ["parts"],
+  stands: ["parts"],
 };
 
 function expandCategoryTerms(keywords: string[]): string[] {
@@ -368,8 +616,8 @@ export async function searchProducts(
 
     // If enrichment failed for all, add raw local catalog entries
     if (localProducts.length === 0 && deduped.size === 0) {
-      const fallback: BCProduct[] = localMatches.slice(0, 10).map((m) => ({
-        id: 0,
+      const fallback: BCProduct[] = localMatches.slice(0, 10).map((m, idx) => ({
+        id: -(idx + 1),
         name: m.name,
         sku: "",
         price: m.price ? parseFloat(m.price) : 0,
@@ -401,7 +649,37 @@ export async function searchProducts(
     results = Array.from(deduped.values());
   }
 
-  return { products: applyColor(results), detectedColor };
+  const productType = extractProductType(normalizedQuery);
+
+  // Apply type filtering FIRST so we know how many relevant products we have
+  results = filterByProductType(results, productType);
+
+  // Fallback: if we detected a product type but have few results after filtering,
+  // do a use-case-aware search (e.g., "touring helmets" → search "modular helmet", "touring helmet")
+  if (results.length < 3 && productType) {
+    const useCase = extractUseCase(normalizedQuery);
+    const useCaseTerms = useCase
+      ? USE_CASE_SEARCH_TERMS[productType]?.[useCase]
+      : null;
+
+    const fallbackQueries: string[] = useCaseTerms
+      ? [...useCaseTerms]
+      : [PRODUCT_TYPE_MAP[productType][0] + "s"];
+
+    const fallbackSearches = fallbackQueries.flatMap((q) => [
+      searchProductsBC(q).catch(() => [] as BCProduct[]),
+      searchByCategory(q.split(" ")).catch(() => [] as BCProduct[]),
+    ]);
+
+    const fallbackResults = await Promise.all(fallbackSearches);
+    for (const batch of fallbackResults) addProducts(batch);
+    results = filterByProductType(Array.from(deduped.values()), productType);
+  }
+  results = rankByRelevance(results, keywords);
+  results = preferInStock(results);
+  results = applyColor(results);
+
+  return { products: results, detectedColor };
 }
 
 export function extractSKUFromText(text: string): string | null {

@@ -41,6 +41,7 @@ export default function ChatPanel({
   const fetchMessages = useCallback(async () => {
     try {
       const res = await fetch(`/api/sessions/${sessionId}/messages`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.messages) setMessages(data.messages);
     } catch (error) {

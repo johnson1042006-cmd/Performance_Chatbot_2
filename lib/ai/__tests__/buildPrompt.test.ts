@@ -288,7 +288,9 @@ describe("buildPrompt", () => {
       if (callCount === 1) {
         return {
           where: vi.fn().mockReturnValue({
-            orderBy: vi.fn().mockResolvedValue([]),
+            orderBy: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([]),
+            }),
           }),
         };
       }

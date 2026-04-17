@@ -33,6 +33,7 @@ export default function HistoryTable({ onSelectSession }: HistoryTableProps) {
       const res = await fetch(
         `/api/sessions/history?page=${page}&limit=15`
       );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.sessions) {
         setSessions(data.sessions);

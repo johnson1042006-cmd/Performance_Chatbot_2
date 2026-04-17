@@ -82,6 +82,98 @@ Service department closes 1 hour before the store.
 
 IMPORTANT: For the exact street address and phone number, direct customers to performancecycle.com/contact. Do NOT guess or make up an address.`,
   },
+  {
+    topic: "store_catalog",
+    content: `Performance Cycle Product Catalog — Full Store Menu
+
+Performance Cycle is Colorado's largest independent motorcycle gear, parts, and accessories retailer. Below is the complete category structure with browse links. Use this to guide customers to the right products and categories.
+
+HELMETS — https://performancecycle.com/helmets/
+  Street Helmets — https://performancecycle.com/helmets/street/
+  Adventure Helmets — https://performancecycle.com/helmets/adventure/
+  Race Helmets — https://performancecycle.com/helmets/race/
+  Modular Helmets — https://performancecycle.com/helmets/modular/
+  Moto (MX/Offroad) Helmets — https://performancecycle.com/helmets/moto/
+  Open Face Helmets — https://performancecycle.com/helmets/open-face/
+  Brands: AGV, Airoh, Alpinestars, Arai, Bell, Biltwell, Daytona, Fly Racing, Highway 21, HJC, Icon, KYT, Leatt, LS2, Shoei
+
+BOOTS — https://performancecycle.com/boots/
+  Adventure Boots — https://performancecycle.com/boots/adventure/
+  Race Boots — https://performancecycle.com/boots/race/
+  Moto (MX/Offroad) Boots — https://performancecycle.com/boots/moto/
+  Sport Boots — https://performancecycle.com/boots/sport/
+  Shoes — https://performancecycle.com/boots/shoes/
+  Touring Boots — https://performancecycle.com/boots/touring/
+  Brands: Alpinestars, Fly Racing, Forma, Fox Racing, Gaerne, Icon, Klim, Leatt, Noru, REV'IT!, Sidi
+
+TIRES — https://performancecycle.com/tires/
+  Adventure Tires — https://performancecycle.com/tires/adventure/
+  ATV Tires — https://performancecycle.com/tires/atv/
+  Cruiser Tires — https://performancecycle.com/tires/cruiser/
+  Dual Sport Tires — https://performancecycle.com/dual-sport/
+  Offroad Tires — https://performancecycle.com/tires/offroad/
+  Sport Touring Tires — https://performancecycle.com/tires/sport-touring/
+  Sportbike Tires — https://performancecycle.com/tires/sportbike/
+  Inner Tubes — https://performancecycle.com/tires/inner-tubes/
+  Brands: Continental, Dunlop, Metzeler, Michelin, MotoZ, Shinko
+  Tire mounting and balancing service available — see Service Department info.
+
+ELECTRONICS — https://performancecycle.com/electronics/
+  Communication systems, GPS, action cameras, phone mounts.
+  Cardo — Bluetooth communication/intercoms
+  Sena — Bluetooth communication/intercoms
+  Garmin — GPS navigation
+  Insta360 — Action cameras
+  Quadlock — Phone mounts
+  Ram Mount — Device mounts
+
+RIDING GEAR — https://performancecycle.com/riding-gear/
+  By riding style:
+    Adventure Gear — https://performancecycle.com/riding-gear/adventure/
+    Dual Sport Gear — https://performancecycle.com/riding-gear/dual-sport/
+    Street Gear — https://performancecycle.com/riding-gear/street/
+    Moto (MX/Offroad) Gear — https://performancecycle.com/riding-gear/moto/
+    Race Gear — https://performancecycle.com/riding-gear/race/
+    Sport Gear — https://performancecycle.com/riding-gear/sport/
+    Women's Gear — https://performancecycle.com/riding-gear/womens/
+  Product types: Jackets, Pants, Gloves, Jerseys, Suits, Vests, Base Layers, Armor/Protection
+  Goggles — https://performancecycle.com/riding-gear/goggles/
+  Brands: Alpinestars, Fasthouse, Fly Racing, Fox Racing, Icon, Klim, Leatt, Noru, REV'IT!, RST, Troy Lee Designs
+
+E-BIKES — https://performancecycle.com/ebikes/
+  Electric motorcycles, scooters, and e-bikes.
+  79Bike — Electric dirt bikes
+  E-Ride — Electric motorcycles/scooters
+  Stacyc — Kids' electric balance bikes
+  Stage2 — Electric bikes
+  Super73 — Electric cruiser bikes
+  We do NOT carry e-bike conversion kits.
+
+PARTS — https://performancecycle.com/parts/
+  Street Parts — Handlebars, Mirrors, Tie Downs, Motorcycle Covers, Fender Eliminator Kits, Air Filters, Sprockets
+  Offroad Parts — Offroad-specific components
+  Stands — Motorcycle stands and lifts
+  Maintenance — Oil, filters, chain lube, cleaning products
+  Tools — Specialty motorcycle tools
+  Controls — Levers, grips, cables
+
+SNOW — https://performancecycle.com/snow/
+  Backcountry Gear — Avalanche safety and backcountry equipment
+  Snow Plows — Plow Blades, Plow Mounts, Winches, Winch Mounts, Push Tubes, Manual Lift Kits
+  Snowmobile Gear — Helmets, jackets, pants, gloves, boots for snowmobiling
+
+SALE / CLEARANCE — https://performancecycle.com/sale/
+  Discounted items: Street Helmets, Moto Helmets, Boots, Street Gear, Offroad Gear, Casual Apparel
+  Note: Clearance/final sale items are not eligible for return.
+
+WHAT WE DO NOT CARRY:
+  - Full motorcycles or powersport vehicles (gear, parts, and accessories only)
+  - E-bike conversion kits
+  - Bicycle (non-motorized) parts or accessories
+  - Car or truck parts
+
+POPULAR BRANDS: AGV, Airoh, Alpinestars, Arai, Bell, Cardo, Continental, Dunlop, Fasthouse, Fly Racing, Forma, Fox Racing, Gaerne, Garmin, HJC, Icon, Insta360, Klim, KYT, Leatt, LS2, Metzeler, Michelin, Noru, Quadlock, Ram Mount, REV'IT!, RST, Sena, Shinko, Shoei, Sidi, Super73, Troy Lee Designs`,
+  },
 ];
 
 export async function seedKnowledge() {

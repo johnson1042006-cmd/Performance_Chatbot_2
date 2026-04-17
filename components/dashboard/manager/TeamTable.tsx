@@ -26,6 +26,7 @@ export default function TeamTable({ onInvite }: TeamTableProps) {
   const fetchUsers = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/users");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.users) setUsers(data.users);
     } catch (error) {
@@ -41,11 +42,12 @@ export default function TeamTable({ onInvite }: TeamTableProps) {
 
   const toggleActive = async (userId: string, currentActive: boolean) => {
     try {
-      await fetch("/api/admin/users", {
+      const res = await fetch("/api/admin/users", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: userId, isActive: !currentActive }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       fetchUsers();
     } catch (error) {
       console.error("Failed to toggle user:", error);

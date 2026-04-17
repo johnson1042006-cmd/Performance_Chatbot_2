@@ -32,13 +32,17 @@ export default function BotSettings() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      await fetch("/api/admin/settings", {
+      const res = await fetch("/api/admin/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settings),
       });
+      if (!res.ok) throw new Error("Save failed");
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
+    } catch (err) {
+      console.error("Settings save error:", err);
+      alert("Failed to save settings. Please try again.");
     } finally {
       setSaving(false);
     }

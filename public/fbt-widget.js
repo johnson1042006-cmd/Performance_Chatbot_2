@@ -80,7 +80,7 @@
     card.innerHTML =
       imgHtml +
       '<div class="pc-fbt-card-body">' +
-        '<span class="' + badgeClass + '">' + (TYPE_LABELS[item.pairingType] || item.pairingType.replace(/_/g, " ")) + "</span>" +
+        '<span class="' + badgeClass + '">' + (TYPE_LABELS[item.pairingType] || (item.pairingType ? item.pairingType.replace(/_/g, " ") : "related")) + "</span>" +
         '<div class="pc-fbt-card-name">' + escapeHtml(item.name) + "</div>" +
         '<div class="pc-fbt-card-sku">SKU: ' + escapeHtml(item.sku) + "</div>" +
         '<div class="pc-fbt-card-price">' + priceHtml + "</div>" +
@@ -223,7 +223,7 @@
     }
 
     var filtered = pairings.filter(function (p) {
-      return !cartSkuSet[p.sku.toUpperCase()];
+      return p.sku && !cartSkuSet[p.sku.toUpperCase()];
     });
 
     if (filtered.length === 0) return;

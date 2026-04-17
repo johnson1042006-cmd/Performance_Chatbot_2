@@ -17,8 +17,13 @@
     "@media(max-width:480px){#pc-chat-frame{width:calc(100vw - 20px);right:10px;bottom:80px;height:min(500px,70vh)}}";
   document.head.appendChild(style);
 
-  var sessionId = localStorage.getItem("pc_chat_session") || generateId();
-  localStorage.setItem("pc_chat_session", sessionId);
+  var sessionId;
+  try {
+    sessionId = localStorage.getItem("pc_chat_session") || generateId();
+    localStorage.setItem("pc_chat_session", sessionId);
+  } catch (e) {
+    sessionId = generateId();
+  }
 
   function generateId() {
     return "s_" + Math.random().toString(36).substr(2, 12) + Date.now().toString(36);

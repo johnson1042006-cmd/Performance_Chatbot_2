@@ -366,9 +366,10 @@ export function formatProductForPrompt(product: BCProduct): string {
         .join("\n")
     : "  No variant data available";
 
-  const desc = product.description
-    ? product.description.replace(/<[^>]*>/g, "").substring(0, 300)
-    : "No description";
+  const rawDesc = product.description
+    ? product.description.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim()
+    : "";
+  const desc = rawDesc ? rawDesc.substring(0, 800) : "No description";
 
   return `**${product.name}**
   SKU: ${product.sku}

@@ -30,7 +30,10 @@ export default function ManagerDashboard() {
 
   useEffect(() => {
     fetch("/api/analytics")
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
       .then((data) => setAnalytics(data))
       .catch(console.error);
   }, []);

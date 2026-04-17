@@ -69,6 +69,31 @@ export const AI_BEHAVIOR_RULES = [
     label: "Never claim features not in product data",
     rule: "NEVER claim a product has a specific feature (MIPS, waterproof, Bluetooth, heated, ventilated, etc.) unless that feature is EXPLICITLY mentioned in the product data provided to you. If the customer asks for a feature-specific product (e.g. 'helmet with MIPS'), ONLY recommend products whose names or descriptions explicitly mention that feature. If none of the available products mention the requested feature, say so honestly rather than guessing or attributing features to products that may not have them.",
   },
+  {
+    id: "color_strict_recommendations",
+    label: "Only recommend color-matched products",
+    rule: "When a customer specifies a color preference, ONLY recommend products that are confirmed available in that color (tagged [COLOR MATCH]). Do NOT recommend products tagged [OTHER COLORS ONLY] unless there are zero color matches. Always mention the specific color variant name when recommending.",
+  },
+  {
+    id: "inventory_preference",
+    label: "Prefer in-stock products",
+    rule: "ALWAYS prefer recommending products that are IN STOCK. Products marked [IN STOCK] should be recommended first. Products marked [OUT OF STOCK] should ONLY be mentioned if the customer specifically asks about that product OR if no in-stock alternatives exist. When recommending an out-of-stock product, clearly state it is currently out of stock. NEVER present an out-of-stock product as a top recommendation when in-stock alternatives exist.",
+  },
+  {
+    id: "product_type_accuracy",
+    label: "Only recommend the product type requested",
+    rule: "When a customer asks for a specific product type (e.g. helmets, jackets, boots, gloves, tires), ONLY recommend products of that type. Do NOT recommend a jacket when they asked for a helmet, or boots when they asked for gloves. If no products of the requested type are available, say so honestly rather than recommending a different product type.",
+  },
+  {
+    id: "airbag_categorization",
+    label: "Organize airbags by category",
+    rule: "When a customer asks about airbags (without specifying a category), organize them into three categories: **Street** (e.g. Tech-Air 5 Plasma, Tech-Air 3, Tech-Air 7X, Tech-Air 10, Klim AI-1, Rev'It Avertum — for road riding), **MX/Offroad** (e.g. Tech-Air MX, Tech-Air Offroad — for dirt/motocross/enduro), and **Avalanche** (e.g. Klim Atlas, Klim Aspect — for snow/backcountry). Present each category with a clear header. When the customer specifies a category (e.g. 'street airbags', 'avalanche airbags', 'mx airbags'), only show products from that category. Never recommend replacement canisters unless the customer specifically asks about canisters or replacement parts. IMPORTANT: The Alpinestars Tech-Air 5 Plasma System is the store's top-recommended street airbag — it is the safest airbag they sell. ALWAYS list it first when recommending street airbags and highlight its safety advantage.",
+  },
+  {
+    id: "brand_preference",
+    label: "Prefer premium brands first",
+    rule: "When recommending products, lead with reputable premium brands (Alpinestars, Shoei, Arai, Schuberth, Sidi, Klim, Rev'It, Fox Racing, Bell, Scorpion, Gaerne, Dainese, AGV, Nolan, Michelin, Dunlop, Pirelli) before budget/value brands (Bilt, Fly, Highway 21, Z1R, Tourmaster, Noru, Thor). Present premium options first, then mid-range, then budget. ONLY flip this order when the customer explicitly asks for cheap, budget, affordable, or entry-level options. This is a presentation preference — never exclude budget products entirely, just list them after premium options.",
+  },
 ] as const;
 
 export type AIRule = (typeof AI_BEHAVIOR_RULES)[number];

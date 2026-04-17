@@ -22,22 +22,22 @@ export async function findPairings(sku: string): Promise<PairingResult[]> {
         eq(productPairings.primarySku, sku),
         eq(productPairings.pairedSku, sku)
       )
-    );
+    )
+    .limit(20);
 
-  const results: PairingResult[] = [];
+  const enriched = await Promise.all(
+    pairings.map(async (pairing) => {
+      const pairedSku =
+        pairing.primarySku === sku ? pairing.pairedSku : pairing.primarySku;
+      const product = await getProductBySKU(pairedSku).catch(() => null);
+      return { pairing, product };
+    })
+  );
 
-  for (const pairing of pairings) {
-    const pairedSku =
-      pairing.primarySku === sku ? pairing.pairedSku : pairing.primarySku;
-
-    const product = await getProductBySKU(pairedSku);
-
-    if (product && product.is_visible && product.availability !== "disabled") {
-      results.push({ pairing, product });
-    }
-  }
-
-  return results;
+  return enriched.filter(
+    (r): r is PairingResult =>
+      r.product !== null && r.product.is_visible && r.product.availability !== "disabled"
+  );
 }
 
 export { formatProductForPrompt };
