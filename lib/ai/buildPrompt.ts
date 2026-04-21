@@ -1,7 +1,15 @@
 import { db } from "@/lib/db";
 import { messages, knowledgeBase } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
-import { searchProducts, extractSKUFromText, extractKeywords, productHasColor, getMatchingColorLabels } from "@/lib/search/productSearch";
+import {
+  searchProducts,
+  extractSKUFromText,
+  extractKeywords,
+  productHasColor,
+  getMatchingColorLabels,
+  extractBudget,
+  type BudgetInfo,
+} from "@/lib/search/productSearch";
 import { expandColorQuery } from "@/lib/search/colorSynonyms";
 import { findPairings } from "@/lib/search/pairingSearch";
 import { AI_BEHAVIOR_RULES } from "./rules";
@@ -12,6 +20,153 @@ import {
   formatProductForPrompt,
   type BCProduct,
 } from "@/lib/bigcommerce/client";
+
+// Known brands in the catalog. Order doesn't matter — this is just for
+// extracting a brand name from a product title so we can diversify results.
+// Multi-word brands MUST come before single-word ones they share a token with
+// (e.g. "Fox Racing" before "Fox", "Rev'It" before "Rev").
+const KNOWN_BRANDS: string[] = [
+  "Alpinestars", "Shoei", "Arai", "Schuberth", "Sidi", "Klim",
+  "Rev'It", "RevIt", "Rev It",
+  "Fox Racing", "Fox",
+  "Bell", "Scorpion", "Gaerne", "Dainese", "AGV", "Nolan", "HJC",
+  "Icon", "LS2", "Simpson", "Shark", "O'Neal", "Oneal", "Leatt",
+  "6D", "Troy Lee Designs", "TLD", "Answer", "Thor", "Fly Racing", "Fly",
+  "Michelin", "Dunlop", "Pirelli", "Metzeler", "Bridgestone", "Shinko",
+  "Continental", "Kenda", "Maxxis", "IRC",
+  "Bilt", "Highway 21", "Z1R", "Tourmaster", "Tour Master", "Noru",
+  "Sedici", "Gmax", "GMAX", "Cortech", "Joe Rocket", "Speed and Strength",
+  "Oxford", "SW-Motech", "Givi", "Shad", "Kriega",
+  "EVS", "Leatt Brace", "Atlas", "Fly", "FXR", "509", "100%",
+];
+
+function brandOf(name: string): string {
+  const lower = name.toLowerCase();
+  for (const b of KNOWN_BRANDS) {
+    const bl = b.toLowerCase();
+    // Match as a word boundary at the start of the name, or as a standalone
+    // token elsewhere. We want "Bell MX-9" -> "Bell", not "Campbell..." -> "Bell".
+    const re = new RegExp(`(^|[^a-z0-9])${bl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^a-z0-9])`, "i");
+    if (re.test(lower)) return b;
+  }
+  return name.split(/\s+/)[0] || "Unknown";
+}
+
+/**
+ * Cap products by brand so the top-N isn't dominated by one brand. Walks the
+ * already-ranked list in order (preserving in-stock / color-match / premium
+ * signals) and skips products that would exceed the per-brand cap.
+ *
+ * Two-tier fallback: if cap=2 leaves fewer than minFloor products, retry at
+ * cap=3. If that's still too few, pass the original list through untouched.
+ */
+function capByBrand(
+  products: BCProduct[],
+  limit: number,
+  minFloor = 5
+): BCProduct[] {
+  if (products.length <= limit) return products.slice(0, limit);
+
+  const attempt = (perBrandCap: number): BCProduct[] => {
+    const counts = new Map<string, number>();
+    const out: BCProduct[] = [];
+    for (const p of products) {
+      if (out.length >= limit) break;
+      const b = brandOf(p.name);
+      const c = counts.get(b) || 0;
+      if (c >= perBrandCap) continue;
+      counts.set(b, c + 1);
+      out.push(p);
+    }
+    return out;
+  };
+
+  const strict = attempt(2);
+  if (strict.length >= Math.min(minFloor, products.length)) return strict;
+
+  const relaxed = attempt(3);
+  if (relaxed.length >= Math.min(minFloor, products.length)) return relaxed;
+
+  return products.slice(0, limit);
+}
+
+// Feature keywords customers commonly ask about. When one is detected in the
+// query, we scan each product's name AND description to tag the ones that
+// genuinely have the feature, then float them to the top. Starts narrow on
+// purpose; easy to extend when new feature queries surface.
+const FEATURE_KEYWORDS: Array<{ canonical: string; patterns: RegExp[] }> = [
+  { canonical: "MIPS", patterns: [/\bmips\b/i] },
+  {
+    canonical: "waterproof",
+    patterns: [
+      /\bwater[-\s]?proof\b/i,
+      /\bh2o\b/i,
+      /\bgore[-\s]?tex\b/i,
+      /\bdrystar\b/i,
+    ],
+  },
+  { canonical: "heated", patterns: [/\bheated\b/i] },
+  {
+    canonical: "Bluetooth",
+    patterns: [/\bbluetooth\b/i, /\bcomm(?:unication)?\s+system\b/i],
+  },
+  {
+    canonical: "airbag",
+    patterns: [/\bairbag\b/i, /\btech[-\s]?air\b/i],
+  },
+  {
+    canonical: "ventilated",
+    patterns: [/\bvented\b/i, /\bventilated\b/i, /\bmesh\b/i],
+  },
+  { canonical: "D3O", patterns: [/\bd3o\b/i] },
+  { canonical: "carbon fiber", patterns: [/\bcarbon\s?fiber\b/i] },
+];
+
+function detectFeatures(query: string): string[] {
+  if (!query) return [];
+  const out: string[] = [];
+  for (const f of FEATURE_KEYWORDS) {
+    if (f.patterns.some((p) => p.test(query))) out.push(f.canonical);
+  }
+  return out;
+}
+
+function productMentionsFeature(p: BCProduct, featureCanonical: string): boolean {
+  const entry = FEATURE_KEYWORDS.find((f) => f.canonical === featureCanonical);
+  if (!entry) return false;
+  const haystack = `${p.name} ${(p.description || "").replace(/<[^>]+>/g, " ")}`;
+  return entry.patterns.some((re) => re.test(haystack));
+}
+
+function countFeatureMatches(p: BCProduct, features: string[]): number {
+  let n = 0;
+  for (const f of features) if (productMentionsFeature(p, f)) n++;
+  return n;
+}
+
+function productPriceNum(p: BCProduct): number {
+  const candidates = [p.calculated_price, p.sale_price, p.price];
+  for (const c of candidates) {
+    if (typeof c === "number" && c > 0) return c;
+  }
+  return Number.POSITIVE_INFINITY;
+}
+
+/**
+ * Partition products into in-budget and over-budget based on a parsed budget.
+ * Returns [...inBudget, ...overBudget] so budget items are prioritized while
+ * over-budget items remain as fallback (Option B: sort, don't filter).
+ */
+function sortByBudget(products: BCProduct[], budget: BudgetInfo): BCProduct[] {
+  if (!budget.max) return products;
+  const inBudget: BCProduct[] = [];
+  const overBudget: BCProduct[] = [];
+  for (const p of products) {
+    if (productPriceNum(p) <= budget.max) inBudget.push(p);
+    else overBudget.push(p);
+  }
+  return [...inBudget, ...overBudget];
+}
 
 interface PageContext {
   url?: string;
@@ -114,6 +269,27 @@ export async function buildPrompt(
     }
   }
 
+  // Detect a stated budget in the latest message (e.g. "under $300",
+  // "around $400", "$200-$500"). Null when no budget signal is present.
+  const budget = extractBudget(effectiveLatest);
+
+  // Detect feature keywords (MIPS, waterproof, Bluetooth, etc.) and re-rank so
+  // products whose name OR description mention the feature come first. This
+  // surfaces feature-matched products whose titles don't contain the feature
+  // word (e.g. Fox V3 for MIPS — MIPS is only in the description).
+  const detectedFeatures = detectFeatures(effectiveLatest);
+  const featureSorted = detectedFeatures.length > 0
+    ? [...productResults].sort(
+        (a, b) =>
+          countFeatureMatches(b, detectedFeatures) -
+          countFeatureMatches(a, detectedFeatures)
+      )
+    : productResults;
+
+  // Precedence: feature match > budget > brand-diversity cap > raw search rank.
+  const budgetSorted = budget ? sortByBudget(featureSorted, budget) : featureSorted;
+  const displayProducts = capByBrand(budgetSorted, 10);
+
   let system = `You are a live chat support agent at Performance Cycle — Colorado's largest independent motorcycle gear, parts, and accessories retailer in Centennial, CO.
 
 ## HOW TO RESPOND
@@ -151,6 +327,12 @@ ${AI_BEHAVIOR_RULES.map((r, i) => `${i + 1}. ${r.rule}`).join("\n\n")}
     system += `\nWhen the customer says "this" or "it", they are referring to the product/page above.\n`;
   }
 
+  if (budget && budget.max) {
+    system += `\n## CUSTOMER BUDGET\n`;
+    system += `The customer stated a budget: "${budget.phrase}". Parsed ceiling: $${budget.max}${budget.soft ? " (soft target — this is an 'around' figure, so small stretches are acceptable)" : ""}${budget.min ? ` (range $${budget.min}-$${budget.max})` : ""}.\n`;
+    system += `Only LEAD with products at or below this ceiling. Within the RELEVANT PRODUCTS section below, in-budget items are listed FIRST. If nothing in the list fits, say so honestly and list what's closest — do NOT silently present over-budget items as if they fit the budget.\n`;
+  }
+
   if (detectedColor) {
     system += `\n## COLOR PREFERENCE DETECTED\n`;
     system += `The customer wants products in **${detectedColor.toUpperCase()}**.
@@ -163,6 +345,17 @@ ABSOLUTE RULES (violating these breaks the customer's trust):
 - If a product is tagged [COLOR MATCH: ${detectedColor.toUpperCase()}], NEVER say it doesn't come in ${detectedColor}. Cite the "${detectedColor.toUpperCase()} VARIANTS:" line when presenting it.
 - LEAD with [COLOR MATCH] products. Only mention [OTHER COLORS ONLY] products if zero color matches exist.
 - If NO products are tagged [COLOR MATCH], say so honestly and list what colors ARE available from the products shown.\n`;
+  }
+
+  if (detectedFeatures.length > 0) {
+    const featList = detectedFeatures.join(", ");
+    const tagList = detectedFeatures.map((f) => `[${f.toUpperCase()} MATCH]`).join(" / ");
+    system += `\n## FEATURE REQUIREMENTS DETECTED\n`;
+    system += `The customer asked for: **${featList}**. In the RELEVANT PRODUCTS section below:
+- ${tagList} tags indicate the feature is confirmed in the product's name OR description — these are SAFE to recommend and you can state the feature as fact.
+- Products WITHOUT a matching feature tag are in the list as context only — do NOT claim they have ${featList} if they aren't tagged.
+- LEAD with tagged products. Include multiple brands when tagged products span brands (e.g. if Bell, Fox, and Icon all have [MIPS MATCH], recommend across all three — do not stack multiple models from one brand).
+- If NO products in the list carry the ${featList} tag, say so honestly ("I don't see anything with ${featList} in that category right now — want me to pull up [closest alternative]?").\n`;
   }
 
   if (contextProduct) {
@@ -194,6 +387,13 @@ ABSOLUTE RULES (violating these breaks the customer's trust):
         tags.push(`[OTHER COLORS ONLY]`);
       }
     }
+    if (detectedFeatures.length > 0) {
+      for (const f of detectedFeatures) {
+        if (productMentionsFeature(p, f)) {
+          tags.push(`[${f.toUpperCase()} MATCH]`);
+        }
+      }
+    }
     if (p.availability === "disabled") {
       tags.push(`[IN STORE ONLY]`);
     } else {
@@ -208,9 +408,9 @@ ABSOLUTE RULES (violating these breaks the customer's trust):
     return out;
   }
 
-  if (productResults.length > 0) {
+  if (displayProducts.length > 0) {
     system += `\n## RELEVANT PRODUCTS FROM CATALOG\n\n`;
-    for (const p of productResults.slice(0, 10)) {
+    for (const p of displayProducts) {
       system += renderProductEntry(p) + `\n\n`;
     }
   } else {

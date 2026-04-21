@@ -92,8 +92,11 @@ function normalizePath(raw: string): string | null {
   } catch {
     return null;
   }
-  // Strip query/hash already handled by URL; normalize trailing slash
-  if (!path.endsWith("/")) path = path + "/";
+  // Normalize trailing slash — but skip file URLs (PDFs, images, etc.) where
+  // adding "/" turns a real file into a 404.
+  const last = path.split("/").filter(Boolean).pop() || "";
+  const looksLikeFile = /\.[a-z0-9]{2,4}$/i.test(last);
+  if (!looksLikeFile && !path.endsWith("/")) path = path + "/";
   return path.toLowerCase();
 }
 

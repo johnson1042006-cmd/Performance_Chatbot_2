@@ -372,6 +372,103 @@ function rankByRelevance(products: BCProduct[], keywords: string[]): BCProduct[]
   return [...products].sort((a, b) => scoreRelevance(b, keywords) - scoreRelevance(a, keywords));
 }
 
+export interface BudgetInfo {
+  max: number | null;
+  min: number | null;
+  phrase: string;
+  soft: boolean;
+}
+
+// Parse amounts like "$1,200", "1200", "1,200 dollars" into a number.
+function parseAmount(raw: string): number | null {
+  if (!raw) return null;
+  const cleaned = raw.replace(/[$,\s]/g, "");
+  if (!cleaned) return null;
+  const n = parseFloat(cleaned);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
+
+/**
+ * Detects a customer-stated budget in free text. Returns null when no budget
+ * signal is found. Ordered so more specific patterns (ranges, ceilings) win
+ * over looser ones (around/about, bare "budget $N").
+ */
+export function extractBudget(text: string): BudgetInfo | null {
+  if (!text) return null;
+  const t = text.toLowerCase();
+
+  const amt = `\\$?\\s*([0-9][0-9,]*(?:\\.\\d+)?)\\s*(?:dollars?|bucks?|usd)?`;
+
+  // Range: "$200-$500", "$200 to $500", "between $200 and $500"
+  const rangeRe = new RegExp(
+    `(?:between\\s+)?${amt}\\s*(?:-|to|and|\\u2013)\\s*${amt}`,
+    "i"
+  );
+  const rangeMatch = t.match(rangeRe);
+  if (rangeMatch) {
+    const a = parseAmount(rangeMatch[1]);
+    const b = parseAmount(rangeMatch[2]);
+    if (a && b && a < b && a >= 10 && b >= 20) {
+      return {
+        min: a,
+        max: b,
+        phrase: rangeMatch[0].trim(),
+        soft: false,
+      };
+    }
+  }
+
+  // Hard ceiling: "under $300", "less than $300", "below $300", "max $300",
+  // "no more than $300", "not more than $300", "up to $300", "within $300".
+  const ceilingRe = new RegExp(
+    `(?:under|less than|below|no more than|not more than|max(?:imum)?(?:\\s+of)?|up to|within|at most|cap(?:ped)?\\s+at)\\s+${amt}`,
+    "i"
+  );
+  const ceilingMatch = t.match(ceilingRe);
+  if (ceilingMatch) {
+    const n = parseAmount(ceilingMatch[1]);
+    if (n && n >= 10) {
+      return { min: null, max: n, phrase: ceilingMatch[0].trim(), soft: false };
+    }
+  }
+
+  // Explicit budget keyword: "budget of $300", "budget is $300",
+  // "my budget is 300", "spend $300", "spend up to $300", "keep it under $300".
+  const explicitRe = new RegExp(
+    `(?:(?:my\\s+)?budget(?:\\s+is|\\s+of|:)?|(?:i\\s+(?:want\\s+to\\s+|can\\s+)?)?spend(?:ing)?(?:\\s+up\\s+to)?|keep\\s+it\\s+under|price\\s+range\\s+(?:of|is|around))\\s+${amt}`,
+    "i"
+  );
+  const explicitMatch = t.match(explicitRe);
+  if (explicitMatch) {
+    const n = parseAmount(explicitMatch[1]);
+    if (n && n >= 10) {
+      return { min: null, max: n, phrase: explicitMatch[0].trim(), soft: false };
+    }
+  }
+
+  // Soft target: "around $300", "about $300", "roughly $300", "near $300",
+  // "in the $300 range", "ballpark $300". Bot treats max = n * 1.15.
+  const softRe = new RegExp(
+    `(?:around|about|roughly|near(?:ly)?|ballpark(?:\\s+of)?|in\\s+the)\\s+${amt}(?:\\s+range)?`,
+    "i"
+  );
+  const softMatch = t.match(softRe);
+  if (softMatch) {
+    const n = parseAmount(softMatch[1]);
+    if (n && n >= 20) {
+      return {
+        min: null,
+        max: Math.round(n * 1.15),
+        phrase: softMatch[0].trim(),
+        soft: true,
+      };
+    }
+  }
+
+  return null;
+}
+
 export function extractKeywords(query: string): string[] {
   let processed = query.toLowerCase();
   for (const [pattern, replacement] of PHRASE_SYNONYMS) {

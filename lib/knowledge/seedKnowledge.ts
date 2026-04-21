@@ -80,7 +80,7 @@ Sunday: 10:00 AM - 5:00 PM
 Holiday hours may vary. Check our website or social media for holiday schedule updates.
 Service department closes 1 hour before the store.
 
-IMPORTANT: For the exact street address and phone number, direct customers to performancecycle.com/contact. Do NOT guess or make up an address.`,
+IMPORTANT: For the exact street address and phone number, direct customers to the [Contact Us page](https://performancecycle.com/contact-us/). Do NOT guess or make up an address or phone number.`,
   },
   {
     topic: "store_catalog",
