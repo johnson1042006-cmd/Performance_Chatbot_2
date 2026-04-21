@@ -236,11 +236,12 @@ export default function ChatWidget() {
         setAgentClaimed(true);
         setWaitingForReply(false);
       } else if (botSettings.aiEnabled && !agentClaimed) {
-        // For AI-handled sessions (waiting / active_ai), respond quickly.
-        // Only use the full fallbackTimerSeconds if the session status is
-        // something unexpected — gives agents a window in those cases only.
+        // waiting: give human agents the full fallbackTimerSeconds window to
+        // claim before AI takes over. active_ai: AI is already in charge, so
+        // reply quickly on follow-up messages. Agents can still claim at any
+        // time via the session-claimed Pusher event, which cancels this timer.
         const delay =
-          data.sessionStatus === "waiting" || data.sessionStatus === "active_ai"
+          data.sessionStatus === "active_ai"
             ? 2000
             : botSettings.fallbackTimerSeconds * 1000;
 

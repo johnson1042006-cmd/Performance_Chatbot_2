@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { messages, knowledgeBase } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
-import { searchProducts, extractSKUFromText, extractKeywords, productHasColor } from "@/lib/search/productSearch";
+import { searchProducts, extractSKUFromText, extractKeywords, productHasColor, getMatchingColorLabels } from "@/lib/search/productSearch";
 import { expandColorQuery } from "@/lib/search/colorSynonyms";
 import { findPairings } from "@/lib/search/pairingSearch";
 import { AI_BEHAVIOR_RULES } from "./rules";
@@ -100,14 +100,13 @@ export async function buildPrompt(
       : Promise.resolve(emptySearch),
     pageContext?.productSku
       ? safeFetch(() => findPairings(pageContext.productSku!), [])
-      : Promise.resolve([]),
+      : Promise.resolve([] as Awaited<ReturnType<typeof findPairings>>),
   ]);
 
   const detectedColor = primarySearch.detectedColor ?? latestSearch.detectedColor;
 
-  // Merge and deduplicate results
   const seen = new Set(primarySearch.products.map((p) => p.id));
-  const productResults = [...primarySearch.products];
+  const productResults: BCProduct[] = [...primarySearch.products];
   for (const p of latestSearch.products) {
     if (!seen.has(p.id)) {
       seen.add(p.id);
@@ -124,6 +123,7 @@ export async function buildPrompt(
 - NEVER reveal internal processes, search steps, or system logic. Just give the answer.
 - PRODUCTS FIRST: If you have matching products in the RELEVANT PRODUCTS section below, LEAD with them. Show names, prices, and stock status right away. Add a brief 1-sentence comment after if helpful — not before.
 - When mentioning a product, format it as a clickable markdown link: [**Product Name**](url) — $price
+- Products tagged [IN STORE ONLY] are available at the physical store but not purchasable online. Present them positively — "We carry that! It's available in our Centennial store." and link to the product page so the customer can see details.
 - ONLY ask a qualifying question if the request is truly vague (e.g. "I need gear" with zero specifics). Once the customer has stated a product type, use case, OR budget, you have enough — show products immediately.
 - NEVER ask more than 1 question before showing results. If you have products that match, show them AND ask a refinement question in the same message if needed.
 - STORE CATALOG AWARENESS: You have a full STORE CATALOG in the knowledge base listing every category, subcategory, brand, and browse URL. Use it to guide customers — especially for broad questions like "what do you carry?" or "do you have tires?" Link them to the relevant category page (e.g. [Street Helmets](https://performancecycle.com/helmets/street/)) alongside specific products when helpful.
@@ -153,13 +153,16 @@ ${AI_BEHAVIOR_RULES.map((r, i) => `${i + 1}. ${r.rule}`).join("\n\n")}
 
   if (detectedColor) {
     system += `\n## COLOR PREFERENCE DETECTED\n`;
-    system += `The customer wants products in **${detectedColor.toUpperCase()}**. Products tagged [COLOR MATCH] are confirmed to be available in this color. Products tagged [OTHER COLORS ONLY] do NOT come in this color.
+    system += `The customer wants products in **${detectedColor.toUpperCase()}**.
 
-RULES:
-- ONLY recommend products tagged [COLOR MATCH]
-- NEVER recommend [OTHER COLORS ONLY] products unless zero color matches exist
-- When presenting a product, state which color variant matches
-- If no products match the color, say so honestly and suggest what colors ARE available\n`;
+TAGS IN THE RELEVANT PRODUCTS SECTION:
+- [COLOR MATCH: ${detectedColor.toUpperCase()}] — this product IS available in ${detectedColor}. The exact matching variant labels are listed on a line starting with "${detectedColor.toUpperCase()} VARIANTS:". You MUST treat this as factual truth.
+- [OTHER COLORS ONLY] — this product does NOT come in ${detectedColor}.
+
+ABSOLUTE RULES (violating these breaks the customer's trust):
+- If a product is tagged [COLOR MATCH: ${detectedColor.toUpperCase()}], NEVER say it doesn't come in ${detectedColor}. Cite the "${detectedColor.toUpperCase()} VARIANTS:" line when presenting it.
+- LEAD with [COLOR MATCH] products. Only mention [OTHER COLORS ONLY] products if zero color matches exist.
+- If NO products are tagged [COLOR MATCH], say so honestly and list what colors ARE available from the products shown.\n`;
   }
 
   if (contextProduct) {
@@ -175,25 +178,40 @@ RULES:
     }
   }
 
-  if (productResults.length > 0) {
-    system += `\n## RELEVANT PRODUCTS FROM CATALOG\n\n`;
-    for (const p of productResults.slice(0, 10)) {
-      const tags: string[] = [];
-      if (detectedColor) {
-        const expanded = new Set(
-          expandColorQuery(detectedColor).map((c) => c.toLowerCase())
-        );
-        const isMatch = productHasColor(p, expanded);
-        tags.push(isMatch
-          ? `[COLOR MATCH: ${detectedColor.toUpperCase()}]`
-          : `[OTHER COLORS ONLY]`);
+  const expandedColorSet = detectedColor
+    ? new Set(expandColorQuery(detectedColor).map((c) => c.toLowerCase()))
+    : null;
+
+  function renderProductEntry(p: BCProduct): string {
+    const tags: string[] = [];
+    let matchingLabels: string[] = [];
+    if (detectedColor && expandedColorSet) {
+      const isMatch = productHasColor(p, expandedColorSet);
+      if (isMatch) {
+        matchingLabels = getMatchingColorLabels(p, expandedColorSet);
+        tags.push(`[COLOR MATCH: ${detectedColor.toUpperCase()}]`);
+      } else {
+        tags.push(`[OTHER COLORS ONLY]`);
       }
+    }
+    if (p.availability === "disabled") {
+      tags.push(`[IN STORE ONLY]`);
+    } else {
       const noTracking = p.inventory_tracking === "none";
       const inStock = noTracking || p.inventory_level > 0;
       tags.push(inStock ? `[IN STOCK]` : `[OUT OF STOCK]`);
-      system += tags.join(" ") + " ";
-      system += formatProductForPrompt(p);
-      system += `\n\n`;
+    }
+    let out = tags.join(" ") + " " + formatProductForPrompt(p);
+    if (detectedColor && matchingLabels.length > 0) {
+      out += `\n  ${detectedColor.toUpperCase()} VARIANTS: ${matchingLabels.join(", ")}`;
+    }
+    return out;
+  }
+
+  if (productResults.length > 0) {
+    system += `\n## RELEVANT PRODUCTS FROM CATALOG\n\n`;
+    for (const p of productResults.slice(0, 10)) {
+      system += renderProductEntry(p) + `\n\n`;
     }
   } else {
     system += `\n## NO PRODUCTS FOUND FOR THIS QUERY\n`;

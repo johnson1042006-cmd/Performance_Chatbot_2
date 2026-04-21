@@ -8,7 +8,6 @@ import { eq } from "drizzle-orm";
 const DEFAULT_SETTINGS = {
   aiEnabled: true,
   fallbackTimerSeconds: 60,
-  aiModel: "claude-haiku-4-5",
 };
 
 export async function GET() {

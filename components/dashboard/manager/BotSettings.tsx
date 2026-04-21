@@ -8,14 +8,12 @@ import { Save, Bot } from "lucide-react";
 interface Settings {
   aiEnabled: boolean;
   fallbackTimerSeconds: number;
-  aiModel: string;
 }
 
 export default function BotSettings() {
   const [settings, setSettings] = useState<Settings>({
     aiEnabled: true,
     fallbackTimerSeconds: 60,
-    aiModel: "claude-haiku-4-5",
   });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -105,22 +103,6 @@ export default function BotSettings() {
             </p>
           </div>
 
-          <div className="py-3">
-            <label className="block text-sm font-medium text-text-primary mb-2">
-              AI Model
-            </label>
-            <select
-              value={settings.aiModel}
-              onChange={(e) =>
-                setSettings((s) => ({ ...s, aiModel: e.target.value }))
-              }
-              className="w-64 px-3 py-2 text-sm border border-border rounded-button focus:outline-none focus:ring-2 focus:ring-accent/20"
-            >
-              <option value="claude-haiku-4-5">Claude Haiku (claude-haiku-4-5)</option>
-              <option value="claude-sonnet-4-20250514">Claude Sonnet (claude-sonnet-4-20250514)</option>
-              <option value="claude-opus-4-6">Claude Opus (claude-opus-4-6)</option>
-            </select>
-          </div>
         </div>
 
         <div className="flex items-center justify-end gap-2 mt-4 pt-4 border-t border-border">

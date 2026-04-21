@@ -338,7 +338,7 @@ describe("searchProducts", () => {
     expect(result.products).toHaveLength(0);
   });
 
-  it("skips disabled products from SKU lookup", async () => {
+  it("returns disabled products from SKU lookup (surfaced as in-store-only)", async () => {
     const { getProductBySKU } = await import("@/lib/bigcommerce/client");
     const { searchProducts } = await import("../productSearch");
 
@@ -348,7 +348,8 @@ describe("searchProducts", () => {
     });
 
     const result = await searchProducts("ABC-123");
-    expect(result.products).toHaveLength(0);
+    expect(result.products).toHaveLength(1);
+    expect(result.products[0].availability).toBe("disabled");
   });
 
   it("detects color in query and sets detectedColor", async () => {
@@ -385,7 +386,7 @@ describe("searchProducts", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("filters out invisible and disabled products from results", async () => {
+  it("filters out invisible products but keeps disabled (in-store-only) products", async () => {
     const bc = await import("@/lib/bigcommerce/client");
     const { searchProducts } = await import("../productSearch");
 
@@ -402,7 +403,8 @@ describe("searchProducts", () => {
     (bc.searchProductsBC as ReturnType<typeof vi.fn>).mockResolvedValueOnce([visible, hidden, disabled]);
 
     const result = await searchProducts("helmet");
-    expect(result.products).toHaveLength(1);
-    expect(result.products[0].name).toBe("Good");
+    const names = result.products.map((p) => p.name).sort();
+    expect(names).toEqual(["Disabled", "Good"]);
+    expect(result.products.find((p) => p.name === "Hidden")).toBeUndefined();
   });
 });

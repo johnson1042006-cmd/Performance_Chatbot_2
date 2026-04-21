@@ -150,6 +150,40 @@ export function productHasColor(product: BCProduct, expandedColors: Set<string>)
   );
 }
 
+/**
+ * Returns the unique color-option variant labels whose value contains any of the
+ * expanded color terms. Used to surface matching colorways explicitly in the
+ * prompt so the LLM can't claim a product "doesn't come in" the requested color.
+ */
+export function getMatchingColorLabels(
+  product: BCProduct,
+  expandedColors: Set<string>
+): string[] {
+  if (!product.variants || product.variants.length === 0) return [];
+  const seen = new Set<string>();
+  const matches: string[] = [];
+  for (const v of product.variants) {
+    for (const ov of v.option_values || []) {
+      if (!ov.label || !ov.option_display_name) continue;
+      if (!isColorOption(ov.option_display_name)) continue;
+      const label = ov.label;
+      const lower = label.toLowerCase();
+      let hit = false;
+      for (const c of Array.from(expandedColors)) {
+        if (colorWordMatch(lower, c)) {
+          hit = true;
+          break;
+        }
+      }
+      if (hit && !seen.has(lower)) {
+        seen.add(lower);
+        matches.push(label);
+      }
+    }
+  }
+  return matches;
+}
+
 function boostColorMatches(products: BCProduct[], color: string): BCProduct[] {
   const expanded = new Set(expandColorQuery(color).map((c) => c.toLowerCase()));
 
@@ -567,7 +601,7 @@ export async function searchProducts(
   const skuMatch = normalizedQuery.match(SKU_PATTERN);
   if (skuMatch) {
     const skuProduct = await getProductBySKU(skuMatch[0]);
-    if (skuProduct && skuProduct.is_visible && skuProduct.availability !== "disabled") {
+    if (skuProduct && skuProduct.is_visible) {
       return { products: [skuProduct], detectedColor };
     }
   }
@@ -588,7 +622,7 @@ export async function searchProducts(
   const deduped = new Map<number, BCProduct>();
   function addProducts(products: BCProduct[]) {
     for (const p of products) {
-      if (p.is_visible && p.availability !== "disabled" && !deduped.has(p.id)) {
+      if (p.is_visible && !deduped.has(p.id)) {
         deduped.set(p.id, p);
       }
     }
@@ -677,6 +711,7 @@ export async function searchProducts(
   }
   results = rankByRelevance(results, keywords);
   results = preferInStock(results);
+
   results = applyColor(results);
 
   return { products: results, detectedColor };

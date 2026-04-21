@@ -90,6 +90,29 @@ export async function searchLocalCatalog(
   // If FTS found good results, return early (saves DB round-trips)
   if (seen.size >= 3) return results();
 
+  // Strategy 1b: Per-word FTS when combined AND returned nothing (e.g. "metal ramps"
+  // fails because no product has both "metal" and "ramp", but "ramp" alone matches 6).
+  if (seen.size === 0 && words.length >= 2) {
+    try {
+      for (const word of words) {
+        if (word.length < 3) continue;
+        const wRaw = await db.execute(
+          sql`SELECT name, price, url, ts_rank(to_tsvector('english', name_lower), plainto_tsquery('english', ${word})) as rank
+              FROM local_catalog
+              WHERE to_tsvector('english', name_lower) @@ plainto_tsquery('english', ${word})
+              ORDER BY rank DESC
+              LIMIT 15`
+        );
+        for (const r of getRows<RowRank>(wRaw)) {
+          add(r.name, r.price, r.url, 0.7 + Math.min(Number(r.rank), 0.1));
+        }
+      }
+    } catch (e) {
+      console.error("Per-word FTS search failed:", e);
+    }
+    if (seen.size >= 3) return results();
+  }
+
   // Strategy 2: Multi-word AND with basic de-stemming
   if (words.length >= 2) {
     try {
