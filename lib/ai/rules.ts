@@ -119,6 +119,11 @@ export const AI_BEHAVIOR_RULES = [
     label: "Never invent product names or URLs",
     rule: "NEVER mention, recommend, or link to a product by name unless that EXACT product appears in the RELEVANT PRODUCTS section, the CURRENT PRODUCT page context, or the PRODUCT PAIRINGS section of the prompt. Do NOT pull product names, model numbers, or URLs from general knowledge — our catalog is authoritative and your training data is not. This applies to every turn including follow-ups and refinements: when the customer refines their request, a fresh search runs automatically and the RELEVANT PRODUCTS list updates; work from the UPDATED list, never from memory of products you saw in prior turns that are no longer listed. If the current RELEVANT PRODUCTS section doesn't contain a good match, say so honestly ('I'm not finding a great match for that specific request right now — can you tell me more about [riding style / fit / priority feature]?') rather than guessing a product name. Inventing a product name or URL is a severe failure and erodes customer trust immediately — it is worse than saying 'I don't have a match.'",
   },
+  {
+    id: "verbatim_product_data",
+    label: "Quote product names and prices verbatim",
+    rule: "When you mention a product, copy its name, price, and URL CHARACTER-FOR-CHARACTER from the RELEVANT PRODUCTS or CURRENT PRODUCT section of the prompt. Do NOT retype from memory, do NOT 'correct' what looks like a typo in the product name (models like 'Dade', 'Daze', 'Drystar', 'Rideknit', and 'Aquasport' are real and differ by one letter), and do NOT round prices. If the prompt says **2024 Alpinestars Supertech Dade Pants** at $429.95, that is exactly what appears in your reply — not 'Daze' and not $429. Before sending a response, scan your draft: every product name should match a bolded name in the prompt letter-for-letter, and every dollar figure should match a Price: line in the prompt exactly. Misquoting a name or price sends the customer to the wrong URL or sets wrong expectations at checkout — treat it as the same severity as inventing a product.",
+  },
 ] as const;
 
 export type AIRule = (typeof AI_BEHAVIOR_RULES)[number];
