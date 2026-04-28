@@ -26,34 +26,62 @@ describe("callClaude edge cases", () => {
     expect(result).toContain("unable to generate");
   });
 
-  it("throws when API key is invalid (simulated)", async () => {
+  it("returns graceful fallback when API key is invalid (simulated)", async () => {
+    const createMock = vi
+      .fn()
+      .mockRejectedValue(new Error("401 Unauthorized"));
     vi.doMock("@anthropic-ai/sdk", () => ({
       default: class MockAnthropic {
-        messages = {
-          create: vi.fn().mockRejectedValue(new Error("401 Unauthorized")),
-        };
+        messages = { create: createMock };
       },
     }));
 
     const { callClaude } = await import("@/lib/ai/callClaude");
-    await expect(
-      callClaude("system", [{ role: "user", content: "test" }])
-    ).rejects.toThrow("401");
+    const result = await callClaude("system", [
+      { role: "user", content: "test" },
+    ]);
+    expect(result).toContain("trouble connecting");
+    // verify retry happened
+    expect(createMock).toHaveBeenCalledTimes(2);
   });
 
-  it("throws on timeout (simulated)", async () => {
+  it("returns graceful fallback on timeout (simulated)", async () => {
+    const createMock = vi
+      .fn()
+      .mockRejectedValue(new Error("Request timed out"));
     vi.doMock("@anthropic-ai/sdk", () => ({
       default: class MockAnthropic {
-        messages = {
-          create: vi.fn().mockRejectedValue(new Error("Request timed out")),
-        };
+        messages = { create: createMock };
       },
     }));
 
     const { callClaude } = await import("@/lib/ai/callClaude");
-    await expect(
-      callClaude("system", [{ role: "user", content: "test" }])
-    ).rejects.toThrow("timed out");
+    const result = await callClaude("system", [
+      { role: "user", content: "test" },
+    ]);
+    expect(result).toContain("trouble connecting");
+    expect(createMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("recovers on retry when first attempt fails", async () => {
+    const createMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("transient network error"))
+      .mockResolvedValueOnce({
+        content: [{ type: "text", text: "Hello from Claude" }],
+      });
+    vi.doMock("@anthropic-ai/sdk", () => ({
+      default: class MockAnthropic {
+        messages = { create: createMock };
+      },
+    }));
+
+    const { callClaude } = await import("@/lib/ai/callClaude");
+    const result = await callClaude("system", [
+      { role: "user", content: "test" },
+    ]);
+    expect(result).toBe("Hello from Claude");
+    expect(createMock).toHaveBeenCalledTimes(2);
   });
 });
 

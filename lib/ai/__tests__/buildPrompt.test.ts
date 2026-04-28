@@ -260,6 +260,9 @@ describe("buildPrompt", () => {
     searchProducts: vi.fn().mockResolvedValue({ products: [], detectedColor: null }),
     extractSKUFromText: vi.fn().mockReturnValue(null),
     extractKeywords: vi.fn().mockReturnValue([]),
+    productHasColor: vi.fn().mockReturnValue(false),
+    getMatchingColorLabels: vi.fn().mockReturnValue([]),
+    extractBudget: vi.fn().mockReturnValue(null),
   }));
 
   vi.mock("@/lib/search/pairingSearch", () => ({

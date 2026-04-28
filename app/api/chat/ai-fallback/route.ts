@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error("AI fallback error:", error);
     return NextResponse.json(
-      { error: "AI fallback failed", details: String(error) },
+      { error: "AI fallback failed" },
       { status: 500 }
     );
   }

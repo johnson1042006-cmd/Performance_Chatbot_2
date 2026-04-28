@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { sessions } from "@/lib/db/schema";
-import { and, desc, eq, lt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, lt, ne } from "drizzle-orm";
 
 const STALE_SESSION_HOURS = 24;
 
@@ -35,17 +35,17 @@ export async function GET() {
   }
 }
 
-async function getNextCustomerNumber(): Promise<number> {
-  const result = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(sessions);
-  return (result[0]?.count || 0) + 1;
-}
-
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { customerIdentifier, pageContext } = body;
+
+    if (!customerIdentifier || typeof customerIdentifier !== "string") {
+      return NextResponse.json(
+        { error: "customerIdentifier is required" },
+        { status: 400 }
+      );
+    }
 
     const existing = await db
       .select()
@@ -58,13 +58,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ session: existing[0] });
     }
 
-    const customerNum = await getNextCustomerNumber();
-    const displayName = `Customer #${customerNum}`;
-
     const [session] = await db
       .insert(sessions)
       .values({
-        customerIdentifier: displayName,
+        customerIdentifier,
         pageContext,
         status: "waiting",
       })
