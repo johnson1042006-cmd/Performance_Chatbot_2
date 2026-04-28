@@ -1,5 +1,5 @@
 (function () {
-  var PC_FBT_URL = "https://performance-chatbot-2.vercel.app";
+  var PC_FBT_URL = "https://performance-chatbot2-2.vercel.app";
 
   var TYPE_LABELS = {
     matching_pants: "Matching Pants",

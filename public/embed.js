@@ -1,5 +1,5 @@
 (function () {
-  var PC_CHAT_URL = "https://performance-chatbot-2.vercel.app";
+  var PC_CHAT_URL = "https://performance-chatbot2-2.vercel.app";
 
   var path = window.location.pathname.toLowerCase();
   var excludedPaths = ["/checkout", "/finishorder", "/order-confirmation", "/manage-account/payment"];
