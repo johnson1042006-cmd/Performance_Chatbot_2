@@ -8,6 +8,7 @@ import { eq } from "drizzle-orm";
 const DEFAULT_SETTINGS = {
   aiEnabled: true,
   fallbackTimerSeconds: 60,
+  historyRetentionMonths: 0,
 };
 
 export async function GET() {

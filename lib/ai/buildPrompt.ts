@@ -8,7 +8,14 @@ import {
   productHasColor,
   getMatchingColorLabels,
   extractBudget,
+  extractProductType,
+  extractAccessorySubject,
+  extractDiscussedProductSubject,
+  extractSubcategoryRequest,
+  isSupportedProductType,
   type BudgetInfo,
+  type SubcategoryValue,
+  type SupportedProductType,
 } from "@/lib/search/productSearch";
 import { expandColorQuery } from "@/lib/search/colorSynonyms";
 import { findPairings } from "@/lib/search/pairingSearch";
@@ -17,6 +24,7 @@ import type { Message } from "@/lib/db/schema";
 import {
   getProductBySKU,
   getProductByName,
+  getProductByNameLike,
   formatProductForPrompt,
   type BCProduct,
 } from "@/lib/bigcommerce/client";
@@ -246,17 +254,66 @@ export async function buildPrompt(
 
   const emptySearch = { products: [] as BCProduct[], detectedColor: null as string | null };
 
-  // Run two searches in parallel: the focused query + just the latest message
-  // to maximize chances of hitting BigCommerce results.
-  const [primarySearch, latestSearch, pairingResults] = await Promise.all([
-    safeFetch(() => searchProducts(searchQuery), emptySearch),
-    searchQuery !== effectiveLatest
-      ? safeFetch(() => searchProducts(effectiveLatest), emptySearch)
-      : Promise.resolve(emptySearch),
-    pageContext?.productSku
-      ? safeFetch(() => findPairings(pageContext.productSku!), [])
-      : Promise.resolve([] as Awaited<ReturnType<typeof findPairings>>),
-  ]);
+  // Resolve an accessory subject from the latest message + history. When the
+  // customer asks "what accessories do you have for the Shoei RF-1400" or
+  // "any accessories for that helmet", we want to pull pairings for the
+  // referenced product even when no page context is set. The subject can be
+  // an explicit SKU or a product name from a prior assistant message.
+  const historyContents = history.map((m: Message) => m.content);
+  const assistantContents = history
+    .filter((m: Message) => m.role === "ai" || m.role === "agent")
+    .map((m: Message) => m.content);
+
+  const accessorySubject = extractAccessorySubject(effectiveLatest, historyContents);
+
+  async function resolveDiscussedProduct(): Promise<BCProduct | null> {
+    const subj = extractDiscussedProductSubject(effectiveLatest, assistantContents);
+    if (!subj) return null;
+    if (subj.sku) {
+      return await safeFetch(() => getProductBySKU(subj.sku!), null);
+    }
+    if (subj.productName) {
+      const candidates = await safeFetch(
+        () => getProductByNameLike(subj.productName!, 5),
+        [] as BCProduct[]
+      );
+      return candidates[0] ?? null;
+    }
+    return null;
+  }
+
+  async function resolvePairingSku(): Promise<string | null> {
+    if (pageContext?.productSku) return pageContext.productSku;
+    if (accessorySubject.sku) return accessorySubject.sku;
+    if (accessorySubject.productName) {
+      const candidates = await safeFetch(
+        () => getProductByNameLike(accessorySubject.productName!, 3),
+        [] as BCProduct[]
+      );
+      if (candidates.length > 0 && candidates[0].sku) return candidates[0].sku;
+    }
+    return null;
+  }
+
+  // Run searches in parallel: the focused query + just the latest message
+  // to maximize chances of hitting BigCommerce results, plus pairings for the
+  // resolved subject SKU.
+  const [primarySearch, latestSearch, pairingResults, discussedProduct] =
+    await Promise.all([
+      safeFetch(() => searchProducts(searchQuery), emptySearch),
+      searchQuery !== effectiveLatest
+        ? safeFetch(() => searchProducts(effectiveLatest), emptySearch)
+        : Promise.resolve(emptySearch),
+      (async () => {
+        const sku = await resolvePairingSku();
+        if (!sku) return [] as Awaited<ReturnType<typeof findPairings>>;
+        return safeFetch(
+          () => findPairings(sku),
+          [] as Awaited<ReturnType<typeof findPairings>>
+        );
+      })(),
+      resolveDiscussedProduct(),
+    ]);
 
   const detectedColor = primarySearch.detectedColor ?? latestSearch.detectedColor;
 
@@ -267,6 +324,15 @@ export async function buildPrompt(
       seen.add(p.id);
       productResults.push(p);
     }
+  }
+
+  if (discussedProduct) {
+    const idx = productResults.findIndex((p) => p.id === discussedProduct.id);
+    if (idx >= 0) {
+      productResults.splice(idx, 1);
+    }
+    productResults.unshift(discussedProduct);
+    seen.add(discussedProduct.id);
   }
 
   // Detect a stated budget in the latest message (e.g. "under $300",
@@ -289,6 +355,16 @@ export async function buildPrompt(
   // Precedence: feature match > budget > brand-diversity cap > raw search rank.
   const budgetSorted = budget ? sortByBudget(featureSorted, budget) : featureSorted;
   const displayProducts = capByBrand(budgetSorted, 10);
+
+  // Detect subcategory intent for the latest message so we can render an
+  // explicit "STYLE PREFERENCE" block in the prompt. Helmets/jackets/boots/
+  // gloves/pants/tires get this treatment; other types pass through.
+  const latestType = extractProductType(effectiveLatest);
+  const subcategoryProductType: SupportedProductType | null =
+    isSupportedProductType(latestType) ? latestType : null;
+  const subcategoryRequest = subcategoryProductType
+    ? extractSubcategoryRequest(effectiveLatest, subcategoryProductType)
+    : null;
 
   let system = `You are a live chat support agent at Performance Cycle — Colorado's largest independent motorcycle gear, parts, and accessories retailer in Centennial, CO.
 
@@ -358,10 +434,48 @@ ABSOLUTE RULES (violating these breaks the customer's trust):
 - If NO products in the list carry the ${featList} tag, say so honestly ("I don't see anything with ${featList} in that category right now — want me to pull up [closest alternative]?").\n`;
   }
 
+  if (subcategoryProductType) {
+    const TYPE_LABEL: Record<SupportedProductType, string> = {
+      helmet: "helmet",
+      jacket: "jacket",
+      boots: "pair of boots",
+      gloves: "pair of gloves",
+      pants: "pair of pants",
+      tire: "tire",
+    };
+    const STREET_LABEL: Record<SupportedProductType, string> = {
+      helmet: "full-face / street",
+      jacket: "street / road",
+      boots: "street / road",
+      gloves: "street / road",
+      pants: "street / road",
+      tire: "sport-touring / street",
+    };
+    const typeLabel = TYPE_LABEL[subcategoryProductType];
+    const streetLabel = STREET_LABEL[subcategoryProductType];
+    system += `\n## STYLE PREFERENCE\n`;
+    if (subcategoryRequest && subcategoryRequest.explicit) {
+      system += `The customer asked specifically for **${subcategoryRequest.value.replace(/_/g, " ")}** ${typeLabel}s. ONLY lead with products tagged \`[STYLE: ${subcategoryRequest.value}]\` in the RELEVANT PRODUCTS section. If no products carry that tag, say so honestly and offer the closest alternative.\n`;
+    } else if (subcategoryRequest && !subcategoryRequest.explicit) {
+      system += `The customer asked to see all ${typeLabel}s. Show a mix across styles using the \`[STYLE: ...]\` tags in the RELEVANT PRODUCTS section.\n`;
+    } else {
+      system += `The customer asked about ${typeLabel}s without specifying a style. DEFAULT to **${streetLabel}** products. The \`[STYLE: ...]\` tags in the RELEVANT PRODUCTS section come from the BigCommerce category tree and are authoritative — never lead with off-road / MX / dirt / adventure / open-face / half / modular / cruiser-only products unless the customer explicitly asks. If the only products available are off-style, say so honestly rather than presenting them as a default.\n`;
+    }
+  }
+
   if (contextProduct) {
     system += `\n## CURRENT PRODUCT (from page context — FULL DETAILS)\n\n`;
     system += formatProductForPrompt(contextProduct);
     system += `\n\nYou have complete data for this product. Use it to answer questions about stock, sizing, colors, price, and compatibility.\n`;
+  }
+
+  if (
+    discussedProduct &&
+    (!contextProduct || discussedProduct.id !== contextProduct.id)
+  ) {
+    system += `\n## PRODUCT CUSTOMER IS FOLLOWING UP ON (FULL DETAILS)\n\n`;
+    system += formatProductForPrompt(discussedProduct);
+    system += `\n\nThe customer's latest message is a follow-up about THIS product (resolved from their question and/or the most recent product you showed in **bold**). Use the Variants list and per-variant stock lines above as the only source of truth for sizes and inventory — never invent sizes or stock states. If RELEVANT PRODUCTS below also includes this SKU, treat this section as authoritative for follow-up questions.\n`;
   }
 
   if (knowledge.length > 0) {
@@ -400,6 +514,10 @@ ABSOLUTE RULES (violating these breaks the customer's trust):
       const noTracking = p.inventory_tracking === "none";
       const inStock = noTracking || p.inventory_level > 0;
       tags.push(inStock ? `[IN STOCK]` : `[OUT OF STOCK]`);
+    }
+    const sub = (p as BCProduct & { _subcategory?: SubcategoryValue | null })._subcategory;
+    if (sub) {
+      tags.push(`[STYLE: ${sub}]`);
     }
     let out = tags.join(" ") + " " + formatProductForPrompt(p);
     if (detectedColor && matchingLabels.length > 0) {

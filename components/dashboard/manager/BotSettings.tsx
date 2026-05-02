@@ -3,17 +3,27 @@
 import { useState, useEffect } from "react";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
-import { Save, Bot } from "lucide-react";
+import { Save, Bot, Trash2 } from "lucide-react";
 
 interface Settings {
   aiEnabled: boolean;
   fallbackTimerSeconds: number;
+  historyRetentionMonths: number;
 }
+
+const RETENTION_OPTIONS: { value: number; label: string }[] = [
+  { value: 0, label: "Disabled (keep forever)" },
+  { value: 1, label: "1 month" },
+  { value: 3, label: "3 months" },
+  { value: 6, label: "6 months" },
+  { value: 12, label: "12 months" },
+];
 
 export default function BotSettings() {
   const [settings, setSettings] = useState<Settings>({
     aiEnabled: true,
     fallbackTimerSeconds: 60,
+    historyRetentionMonths: 0,
   });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -103,6 +113,35 @@ export default function BotSettings() {
             </p>
           </div>
 
+        </div>
+
+        <div className="py-3">
+          <div className="flex items-center gap-2 mb-2">
+            <Trash2 size={16} className="text-text-secondary" />
+            <label className="block text-sm font-medium text-text-primary">
+              Chat History Retention
+            </label>
+          </div>
+          <select
+            value={settings.historyRetentionMonths}
+            onChange={(e) =>
+              setSettings((s) => ({
+                ...s,
+                historyRetentionMonths: parseInt(e.target.value, 10) || 0,
+              }))
+            }
+            className="w-64 px-3 py-2 text-sm border border-border rounded-button focus:outline-none focus:ring-2 focus:ring-accent/20 bg-white"
+          >
+            {RETENTION_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-text-secondary mt-1">
+            Automatically delete closed chat sessions older than this on the
+            1st of each month. Disabled keeps history forever.
+          </p>
         </div>
 
         <div className="flex items-center justify-end gap-2 mt-4 pt-4 border-t border-border">

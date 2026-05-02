@@ -40,17 +40,19 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { customerIdentifier, pageContext } = body;
 
-    if (!customerIdentifier || typeof customerIdentifier !== "string") {
-      return NextResponse.json(
-        { error: "customerIdentifier is required" },
-        { status: 400 }
-      );
-    }
+    // Use the client-supplied identifier when present (preserves session
+    // continuity for embed.js, which generates a stable per-visitor id);
+    // otherwise generate one on the server so direct visits to /embed and
+    // /chat without a sessionId still get a working session.
+    const effectiveId =
+      typeof customerIdentifier === "string" && customerIdentifier.length > 0
+        ? customerIdentifier
+        : `anon_${crypto.randomUUID()}`;
 
     const existing = await db
       .select()
       .from(sessions)
-      .where(eq(sessions.customerIdentifier, customerIdentifier))
+      .where(eq(sessions.customerIdentifier, effectiveId))
       .orderBy(desc(sessions.startedAt))
       .limit(1);
 
@@ -61,7 +63,7 @@ export async function POST(req: NextRequest) {
     const [session] = await db
       .insert(sessions)
       .values({
-        customerIdentifier,
+        customerIdentifier: effectiveId,
         pageContext,
         status: "waiting",
       })

@@ -124,6 +124,21 @@ export const AI_BEHAVIOR_RULES = [
     label: "Quote product names and prices verbatim",
     rule: "When you mention a product, copy its name, price, and URL CHARACTER-FOR-CHARACTER from the RELEVANT PRODUCTS or CURRENT PRODUCT section of the prompt. Do NOT retype from memory, do NOT 'correct' what looks like a typo in the product name (models like 'Dade', 'Daze', 'Drystar', 'Rideknit', and 'Aquasport' are real and differ by one letter), and do NOT round prices. If the prompt says **2024 Alpinestars Supertech Dade Pants** at $429.95, that is exactly what appears in your reply — not 'Daze' and not $429. Before sending a response, scan your draft: every product name should match a bolded name in the prompt letter-for-letter, and every dollar figure should match a Price: line in the prompt exactly. Misquoting a name or price sends the customer to the wrong URL or sets wrong expectations at checkout — treat it as the same severity as inventing a product.",
   },
+  {
+    id: "street_default",
+    label: "Default to street/road riding for ambiguous gear queries",
+    rule: "Performance Cycle is primarily a street motorcycle shop. When a customer asks about helmets, jackets, boots, gloves, pants, or tires WITHOUT specifying a style or use case, DEFAULT to street/road riding products. Never lead with off-road / MX / dirt / adventure / avalanche / open-face / modular / half-helmet / cruiser-only products unless the customer explicitly asks for them or names a use case (cruiser, off-road, ADV, dirt, snow, track, etc.). The `[STYLE: ...]` tags in the RELEVANT PRODUCTS section are the source of truth — they come from the BigCommerce category tree, not text guessing. For helmets specifically, the default is **full-face**. For jackets, pants, boots, and gloves, the default is **street**. For tires, the default is **sport-touring**. When the only available products are off-style, say so honestly — never present an open-face or MX product as a default helmet recommendation.",
+  },
+  {
+    id: "accessory_pairings",
+    label: "Resolve accessory queries via pairings, not generic parts",
+    rule: "When a customer asks about accessories — for a specific product, for their helmet/jacket/bike, or in general — surface relevant items from the PRODUCT PAIRINGS section first, then specific product matches (helmet shields, Pinlock inserts, Cardo/Sena communication, helmet bags, phone mounts, tank bags, etc.). Do NOT redirect accessory questions to the generic /parts/ category. If you cannot identify what they want accessories *for*, ask one short clarifying question (\"what helmet / bike?\") AND show the most relevant accessory categories from the STORE CATALOG knowledge entry in the same reply.",
+  },
+  {
+    id: "follow_up_product_block",
+    label: "Honor the PRODUCT CUSTOMER IS FOLLOWING UP ON block",
+    rule: "When a **PRODUCT CUSTOMER IS FOLLOWING UP ON** section appears in the prompt, the customer is asking about sizes, stock, colors, price, or details for THAT exact product. Answer using ONLY the Variants list and stock lines in that section — do not switch to a different product unless they clearly changed topic. If that section is missing but they clearly refer to something you showed earlier, ask which product they mean in one short question.",
+  },
 ] as const;
 
 export type AIRule = (typeof AI_BEHAVIOR_RULES)[number];

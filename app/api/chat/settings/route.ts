@@ -23,11 +23,12 @@ export async function GET() {
     }
 
     const parsed = JSON.parse(entry.content);
-    return NextResponse.json({
+    const out = {
       aiEnabled: parsed.aiEnabled ?? DEFAULTS.aiEnabled,
       fallbackTimerSeconds:
         parsed.fallbackTimerSeconds ?? DEFAULTS.fallbackTimerSeconds,
-    });
+    };
+    return NextResponse.json(out);
   } catch {
     return NextResponse.json(DEFAULTS);
   }

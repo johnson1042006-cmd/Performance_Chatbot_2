@@ -17,7 +17,10 @@ export default function MessageBubble({
   const isAI = role === "ai";
 
   return (
-    <div className={`flex ${isCustomer ? "justify-end" : "justify-start"} mb-3`}>
+    <div
+      className={`flex ${isCustomer ? "justify-end" : "justify-start"} mb-3`}
+      data-testid={`message-${role}`}
+    >
       <div className="max-w-[80%]">
         {!isCustomer && (
           <div className="flex items-center gap-1.5 mb-1">

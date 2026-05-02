@@ -14,6 +14,14 @@ import {
   expandColorQuery,
   colorSynonymMap,
 } from "./colorSynonyms";
+import {
+  classifyProductSubcategory,
+  extractSubcategoryRequest,
+  biasBySubcategory,
+  isSupportedProductType,
+  STREET_FALLBACK_PHRASE,
+  type SubcategoryValue,
+} from "./subcategory";
 import { db } from "@/lib/db";
 import { sql } from "drizzle-orm";
 
@@ -227,12 +235,25 @@ const PRODUCT_TYPE_MAP: Record<string, string[]> = {
   ebike: ["e-bike", "e-bikes", "ebike", "ebikes", "electric bike", "electric motorcycle", "electric scooter"],
   snowplow: ["snow plow", "snow plows", "plow blade", "plow mount", "winch"],
   snowgear: ["snowmobile gear", "snowmobile helmet", "snowmobile jacket", "snowmobile pants"],
+  accessory: ["accessory", "accessories", "add-on", "add-ons", "extras", "accessory pack"],
 };
 
 const TYPE_EXCLUSION_TERMS: Record<string, string[]> = {
   jacket: ["chest protector", "body armor", "roost guard", "roost deflector", "chest guard",
     "under jersey", "pressure suit", "subframe", "bio-foam", "plastic shell"],
-  helmet: ["helmet bag", "helmet lock", "helmet shield", "helmet visor"],
+  // Filter out helmet ACCESSORIES that mention "helmet" in their name
+  // (shields, visors, Pinlock inserts, sun shades, breath boxes, comm units,
+  // bags, locks). These should surface for accessory queries, not helmet
+  // queries. Match terms are checked as substrings on name + first 800
+  // chars of description.
+  helmet: [
+    "helmet bag", "helmet lock", "helmet shield", "helmet visor",
+    "sun shield", "sun shade", "inner shield", "iridium shield",
+    "smoke shield", "tinted shield", "clear shield", "replacement shield",
+    "face shield", "pinlock", "anti-fog", "breath box", "breathbox",
+    "breath deflector", "chin curtain", "helmet liner", "cheek pad",
+    "communication system", "intercom", "cardo", "sena",
+  ],
   boots: ["boot bag", "boot liner"],
   gloves: ["glove box", "glove compartment"],
   airbag: ["replacement canister", "canister only"],
@@ -572,7 +593,6 @@ const CATEGORY_SYNONYMS: Record<string, string[]> = {
   "electric motorcycle": ["ebikes"],
   electric: ["ebikes"],
   parts: ["parts"],
-  accessories: ["parts"],
   maintenance: ["parts"],
   controls: ["parts"],
   tools: ["parts"],
@@ -785,17 +805,22 @@ export async function searchProducts(
   // Apply type filtering FIRST so we know how many relevant products we have
   results = filterByProductType(results, productType);
 
-  // Fallback: if we detected a product type but have few results after filtering,
-  // do a use-case-aware search (e.g., "touring helmets" → search "modular helmet", "touring helmet")
+  // Use-case fallback: detect cruiser/touring/sport/etc. and pull style-
+  // specific results so e.g. "touring helmet" surfaces modular/touring lids.
   if (results.length < 3 && productType) {
     const useCase = extractUseCase(normalizedQuery);
     const useCaseTerms = useCase
       ? USE_CASE_SEARCH_TERMS[productType]?.[useCase]
       : null;
 
-    const fallbackQueries: string[] = useCaseTerms
-      ? [...useCaseTerms]
-      : [PRODUCT_TYPE_MAP[productType][0] + "s"];
+    let fallbackQueries: string[];
+    if (useCaseTerms) {
+      fallbackQueries = [...useCaseTerms];
+    } else if (isSupportedProductType(productType)) {
+      fallbackQueries = [STREET_FALLBACK_PHRASE[productType]];
+    } else {
+      fallbackQueries = [PRODUCT_TYPE_MAP[productType][0] + "s"];
+    }
 
     const fallbackSearches = fallbackQueries.flatMap((q) => [
       searchProductsBC(q).catch(() => [] as BCProduct[]),
@@ -806,8 +831,51 @@ export async function searchProducts(
     for (const batch of fallbackResults) addProducts(batch);
     results = filterByProductType(Array.from(deduped.values()), productType);
   }
+
+  // Street-bias top-up: when the customer asked generically about a
+  // street-default product type ("what helmets do you have", "I need a
+  // jacket") AND did not request a specific style, proactively pull in
+  // street products so the bias step has a real lead pool. Without this the
+  // BC parent-category lookup can dominate with whichever subcategory BC
+  // sorted first (often Moto/MX), and the bias has no street items to
+  // promote.
+  if (
+    productType &&
+    isSupportedProductType(productType) &&
+    extractSubcategoryRequest(normalizedQuery, productType) === null &&
+    !extractUseCase(normalizedQuery)
+  ) {
+    const streetTopUp = await searchProductsBC(
+      STREET_FALLBACK_PHRASE[productType]
+    ).catch(() => [] as BCProduct[]);
+    addProducts(streetTopUp);
+    results = filterByProductType(Array.from(deduped.values()), productType);
+  }
   results = rankByRelevance(results, keywords);
   results = preferInStock(results);
+
+  // Subcategory classification + bias for street-default product types.
+  // For helmet/jacket/boots/gloves/pants/tire we attach a `_subcategory`
+  // field to each product (read by buildPrompt for prompt tagging) and
+  // either hard-filter (explicit ask) or promote-street/demote-offroad
+  // (ambiguous ask). Other product types pass through unchanged.
+  if (isSupportedProductType(productType)) {
+    const subRequest = extractSubcategoryRequest(normalizedQuery, productType);
+    const annotated = await Promise.all(
+      results.map(async (p) => {
+        const sub = await classifyProductSubcategory(p, productType).catch(
+          () => null as SubcategoryValue | null
+        );
+        (p as BCProduct & { _subcategory?: SubcategoryValue | null })._subcategory = sub;
+        return p;
+      })
+    );
+    results = biasBySubcategory(
+      annotated as Array<BCProduct & { _subcategory?: SubcategoryValue | null }>,
+      productType,
+      subRequest
+    );
+  }
 
   results = applyColor(results);
 
@@ -818,3 +886,200 @@ export function extractSKUFromText(text: string): string | null {
   const match = text.match(SKU_PATTERN);
   return match ? match[0] : null;
 }
+
+// ---------------------------------------------------------------------------
+// Accessory intent: did the customer ask for accessories *for* something?
+// ---------------------------------------------------------------------------
+//
+// "accessories for my Shoei RF-1400" → returns a subject hint we can hand to
+// findPairings. Two strategies, in order of preference:
+//   1. SKU pattern present in the latest message → use it directly.
+//   2. A product name from prior conversation history → return the most
+//      recently mentioned BC product name from the assistant's history.
+//
+// The caller is responsible for resolving the hint into a concrete pairing
+// lookup; this function only surfaces the hint so buildPrompt can call
+// findPairings without page context.
+
+export interface AccessorySubjectHint {
+  sku: string | null;
+  productName: string | null;
+  isAccessoryQuery: boolean;
+}
+
+const ACCESSORY_QUERY_PATTERNS: RegExp[] = [
+  /\baccessor(?:y|ies)\b/i,
+  /\badd[\s-]?ons?\b/i,
+  /\bextras?\b/i,
+  /\bgo\s+with\b/i,
+  /\bpair(?:ed|s)?\s+with\b/i,
+  /\bcompanion\b/i,
+];
+
+const HISTORY_SCAN_LIMIT = 10;
+
+/**
+ * The shared SKU_PATTERN is intentionally permissive (matches alpha-only
+ * tokens like "RF1400") but that means it also matches normal words like
+ * "what" or "looking". For accessory subject resolution we want stricter
+ * confidence — only accept SKU-like tokens that contain a digit or
+ * dash/underscore separator. Iterates over ALL pattern matches and returns
+ * the first one that passes the stricter filter.
+ */
+function extractStrictSku(text: string): string | null {
+  if (!text) return null;
+  const re = new RegExp(SKU_PATTERN.source, "gi");
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    const token = match[0];
+    const hasDigit = /\d/.test(token);
+    const hasSeparator = /[-_]/.test(token);
+    if (hasDigit || hasSeparator) return token;
+  }
+  return null;
+}
+
+/**
+ * Detect accessory intent in the latest message and (optionally) resolve a
+ * subject SKU or product name from the conversation history.
+ *
+ * @param latestMessage - the customer's most recent message
+ * @param historyContents - last N message contents (newest LAST), used to find
+ *   a fallback subject when the customer says "for it" / "for that helmet"
+ */
+export function extractAccessorySubject(
+  latestMessage: string,
+  historyContents: string[] = []
+): AccessorySubjectHint {
+  const isAccessoryQuery = ACCESSORY_QUERY_PATTERNS.some((re) => re.test(latestMessage));
+
+  const skuFromLatest = extractStrictSku(latestMessage);
+  if (skuFromLatest && isAccessoryQuery) {
+    return { sku: skuFromLatest, productName: null, isAccessoryQuery: true };
+  }
+
+  if (!isAccessoryQuery) {
+    return { sku: null, productName: null, isAccessoryQuery: false };
+  }
+
+  const recent = historyContents.slice(-HISTORY_SCAN_LIMIT);
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const content = recent[i];
+    const sku = extractStrictSku(content);
+    if (sku) return { sku, productName: null, isAccessoryQuery: true };
+  }
+
+  const NAME_PATTERN = /\*\*([^*]{4,80})\*\*/g;
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const content = recent[i];
+    let match: RegExpExecArray | null;
+    let lastName: string | null = null;
+    NAME_PATTERN.lastIndex = 0;
+    while ((match = NAME_PATTERN.exec(content)) !== null) {
+      lastName = match[1].trim();
+    }
+    if (lastName) {
+      return { sku: null, productName: lastName, isAccessoryQuery: true };
+    }
+  }
+
+  return { sku: null, productName: null, isAccessoryQuery: true };
+}
+
+// ---------------------------------------------------------------------------
+// Follow-up product resolution (sizes, stock, "tell me more", "that one")
+// ---------------------------------------------------------------------------
+//
+// When the customer asks a short detail question after the assistant listed
+// products in markdown (**Name**), the fresh keyword search often drops the
+// referenced product from RELEVANT PRODUCTS. We recover the subject from the
+// latest message (strict SKU) or from the most recent assistant reply that
+// contains a bold product title, then fetch full BC data for buildPrompt.
+
+export interface DiscussedProductSubject {
+  sku: string | null;
+  productName: string | null;
+}
+
+const BOLD_PRODUCT_PATTERN = /\*\*([^*]{4,120})\*\*/g;
+
+function extractLastBoldProductNameFromRecent(contents: string[]): string | null {
+  const recent = contents.slice(-HISTORY_SCAN_LIMIT);
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const content = recent[i];
+    let lastName: string | null = null;
+    BOLD_PRODUCT_PATTERN.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = BOLD_PRODUCT_PATTERN.exec(content)) !== null) {
+      lastName = match[1].trim();
+    }
+    if (lastName) return lastName;
+  }
+  return null;
+}
+
+/**
+ * True when the latest message looks like a follow-up about an item already
+ * in the thread (sizes, stock, price, ordinals, "that one") rather than a fresh
+ * broad catalog question. Long messages are treated as new searches.
+ */
+export function isLikelyProductFollowUp(latestMessage: string): boolean {
+  const t = latestMessage.trim();
+  if (!t) return false;
+  if (extractStrictSku(t)) return true;
+  if (t.length > 140) return false;
+
+  const patterns: RegExp[] = [
+    /\bwhat(\s|'s|s)?\s+.{0,40}\b(price|cost)\b/i,
+    /\bhow\s+much\b/i,
+    /\bsizes?\b/i,
+    /\bwhat\s+sizes?\b/i,
+    /\bin\s+stock\b/i,
+    /\bout\s+of\s+stock\b/i,
+    /\b(low\s+)?stock\b/i,
+    /\bavailable\b.{0,30}\b(in|for|size|color)\b/i,
+    /\b(tell|show)\s+me\s+more\b/i,
+    /\bmore\s+(details|info)\b/i,
+    /\bthe\s+(first|second|third|cheapest|cheaper)\b/i,
+    /\bthat\s+one\b/i,
+    /\bthis\s+one\b/i,
+    /\b(is|are)\s+.{0,20}\b(in\s+stock|available)\b/i,
+    /\bdo\s+you\s+have\b.{0,20}\b(in|size|xl|xxl|large|medium|small)\b/i,
+    /\b(variant|variants|colorway|colour|color)\b/i,
+    /\bfit(s|ting)?\b/i,
+  ];
+  return patterns.some((p) => p.test(t));
+}
+
+/**
+ * Resolve which product the customer is following up on. Returns null when the
+ * message does not look like a product-detail follow-up or when no prior
+ * assistant product title exists to anchor on.
+ */
+export function extractDiscussedProductSubject(
+  latestMessage: string,
+  assistantHistoryContents: string[]
+): DiscussedProductSubject | null {
+  const sku = extractStrictSku(latestMessage);
+  if (sku) return { sku, productName: null };
+
+  if (!isLikelyProductFollowUp(latestMessage)) return null;
+
+  const name = extractLastBoldProductNameFromRecent(assistantHistoryContents);
+  if (name) return { sku: null, productName: name };
+
+  return null;
+}
+
+/**
+ * Re-export subcategory helpers from this module so consumers don't need to
+ * import from two files. The actual implementation lives in `./subcategory`.
+ */
+export {
+  classifyProductSubcategory,
+  extractSubcategoryRequest,
+  isSupportedProductType,
+  type SubcategoryValue,
+  type SupportedProductType,
+  type SubcategoryRequest,
+} from "./subcategory";

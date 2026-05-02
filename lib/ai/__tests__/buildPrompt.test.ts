@@ -22,6 +22,9 @@ describe("AI_BEHAVIOR_RULES", () => {
       "qualifying_questions",
       "no_hallucinate_contact",
       "no_hallucinate_features",
+      "street_default",
+      "accessory_pairings",
+      "follow_up_product_block",
     ];
     const ruleIds = AI_BEHAVIOR_RULES.map((r) => r.id);
     for (const id of expectedIds) {
@@ -263,6 +266,15 @@ describe("buildPrompt", () => {
     productHasColor: vi.fn().mockReturnValue(false),
     getMatchingColorLabels: vi.fn().mockReturnValue([]),
     extractBudget: vi.fn().mockReturnValue(null),
+    extractProductType: vi.fn().mockReturnValue(null),
+    extractAccessorySubject: vi.fn().mockReturnValue({
+      sku: null,
+      productName: null,
+      isAccessoryQuery: false,
+    }),
+    extractDiscussedProductSubject: vi.fn().mockReturnValue(null),
+    extractSubcategoryRequest: vi.fn().mockReturnValue(null),
+    isSupportedProductType: vi.fn().mockReturnValue(false),
   }));
 
   vi.mock("@/lib/search/pairingSearch", () => ({
@@ -272,6 +284,7 @@ describe("buildPrompt", () => {
   vi.mock("@/lib/bigcommerce/client", () => ({
     getProductBySKU: vi.fn().mockResolvedValue(null),
     getProductByName: vi.fn().mockResolvedValue([]),
+    getProductByNameLike: vi.fn().mockResolvedValue([]),
     formatProductForPrompt: vi.fn().mockReturnValue("**Mock Product**\n  SKU: M-1\n  Price: $99.99"),
   }));
 

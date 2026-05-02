@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { extractKeywords, extractSKUFromText } from "../productSearch";
+import {
+  extractKeywords,
+  extractSKUFromText,
+  extractAccessorySubject,
+  extractDiscussedProductSubject,
+  isLikelyProductFollowUp,
+} from "../productSearch";
 import {
   extractColorFromQuery,
   expandColorQuery,
@@ -259,6 +265,137 @@ describe("extractSKUFromText", () => {
     // Typical motorcycle parts SKUs
     expect(extractSKUFromText("SKU: 0101-1234")).toBeTruthy();
     expect(extractSKUFromText("part number ABC123")).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractAccessorySubject
+// ---------------------------------------------------------------------------
+describe("extractAccessorySubject", () => {
+  it("flags clear accessory queries", () => {
+    expect(
+      extractAccessorySubject("any accessories for my helmet").isAccessoryQuery
+    ).toBe(true);
+    expect(
+      extractAccessorySubject("what add-ons go with the RF-1400").isAccessoryQuery
+    ).toBe(true);
+    expect(
+      extractAccessorySubject("extras for my Bell helmet").isAccessoryQuery
+    ).toBe(true);
+  });
+
+  it("does not flag non-accessory queries", () => {
+    expect(extractAccessorySubject("show me helmets").isAccessoryQuery).toBe(false);
+    expect(extractAccessorySubject("Pinlock for Bell helmet").isAccessoryQuery).toBe(false);
+  });
+
+  it("extracts SKU from latest message when present", () => {
+    const subject = extractAccessorySubject("accessories for SKU-12345 please");
+    expect(subject.isAccessoryQuery).toBe(true);
+    expect(subject.sku).toBeTruthy();
+  });
+
+  it("prefers SKU over product name when SKU is present in history", () => {
+    const history = [
+      "what helmets do you have",
+      "Here are some options: **Shoei RF-1400** at $599.99 — IN STOCK",
+      "tell me more about the second one",
+    ];
+    const subject = extractAccessorySubject(
+      "what accessories do you have for it",
+      history
+    );
+    expect(subject.isAccessoryQuery).toBe(true);
+    expect(subject.sku).toBe("RF-1400");
+  });
+
+  it("falls back to product name from history when no SKU pattern exists", () => {
+    const history = [
+      "Here is **Alpinestars Tech Air Plasma Vest**",
+    ];
+    const subject = extractAccessorySubject(
+      "any accessories for that one",
+      history
+    );
+    expect(subject.isAccessoryQuery).toBe(true);
+    expect(subject.productName).toBe("Alpinestars Tech Air Plasma Vest");
+  });
+
+  it("uses the most recent product name when multiple are mentioned without SKUs", () => {
+    const history = [
+      "Here is **Alpinestars Plasma Vest**",
+      "And also **Alpinestars Stella Bionic Vest**",
+    ];
+    const subject = extractAccessorySubject(
+      "any accessories for that one",
+      history
+    );
+    expect(subject.productName).toBe("Alpinestars Stella Bionic Vest");
+  });
+
+  it("returns isAccessoryQuery=true even with no resolvable subject", () => {
+    const subject = extractAccessorySubject("what accessories do you have");
+    expect(subject.isAccessoryQuery).toBe(true);
+    expect(subject.sku).toBeNull();
+    expect(subject.productName).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isLikelyProductFollowUp / extractDiscussedProductSubject
+// ---------------------------------------------------------------------------
+describe("isLikelyProductFollowUp", () => {
+  it("detects size and stock follow-ups", () => {
+    expect(isLikelyProductFollowUp("what sizes do you have")).toBe(true);
+    expect(isLikelyProductFollowUp("is XL in stock")).toBe(true);
+    expect(isLikelyProductFollowUp("tell me more")).toBe(true);
+  });
+
+  it("detects strict SKU in message", () => {
+    expect(isLikelyProductFollowUp("check ABC-12345 for me")).toBe(true);
+  });
+
+  it("returns false for long fresh catalog questions", () => {
+    expect(
+      isLikelyProductFollowUp(
+        "I am looking for the best waterproof touring jacket under 400 dollars for long distance"
+      )
+    ).toBe(false);
+  });
+});
+
+describe("extractDiscussedProductSubject", () => {
+  it("returns SKU from latest when present", () => {
+    const assistant: string[] = [];
+    expect(extractDiscussedProductSubject("part 05-0100-AB", assistant)).toEqual({
+      sku: "05-0100-AB",
+      productName: null,
+    });
+  });
+
+  it("returns null when follow-up pattern but no assistant product yet", () => {
+    expect(extractDiscussedProductSubject("what sizes?", [])).toBeNull();
+  });
+
+  it("resolves product name from latest assistant bold title", () => {
+    const assistant = [
+      "Here are some picks:\n\n[**Shoei RF-1400 Full Face**](https://example.com) — $599",
+    ];
+    expect(extractDiscussedProductSubject("what sizes?", assistant)).toEqual({
+      sku: null,
+      productName: "Shoei RF-1400 Full Face",
+    });
+  });
+
+  it("uses the most recent assistant message with a bold title", () => {
+    const assistant = [
+      "**Bell Qualifier** — $199",
+      "**AGV K6 S** — $449",
+    ];
+    expect(extractDiscussedProductSubject("is the second one in stock?", assistant)).toEqual({
+      sku: null,
+      productName: "AGV K6 S",
+    });
   });
 });
 
