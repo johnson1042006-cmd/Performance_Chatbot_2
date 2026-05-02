@@ -1,3 +1,5 @@
+import { RETURNS_INFO_REPLY } from "./returnsReply";
+
 export const AI_BEHAVIOR_RULES = [
   {
     id: "multiple_recommendations",
@@ -31,8 +33,14 @@ export const AI_BEHAVIOR_RULES = [
   },
   {
     id: "return_policy",
-    label: "Hard-coded return policy",
-    rule: "Return policy is hard-coded in the knowledge base. Do NOT hallucinate return rules. Use only the exact policy from the knowledge base when answering return-related questions. ALWAYS include clickable markdown links to the Returns & Exchanges page (https://performancecycle.com/returns-exchanges/) and the Return Form PDF (https://performancecycle.com/content/Online%20Return%20Form.pdf) when discussing returns or exchanges.",
+    label: "Returns and exchanges redirect",
+    rule: `RETURNS AND EXCHANGES (high priority): Whenever the customer asks about returns, exchanges, refunds, store credit for returns, RMAs, sending an item back, swapping sizes for policy reasons, or similar — including when combined with other topics — follow this strictly. Do NOT summarize timelines, helmet rules, PDF forms, shipping fees, restocking rules, or any policy details from the KNOWLEDGE BASE entry or from memory; official policy exists only on the website linked in the mandated sentence below.
+
+If the message is ONLY about returns/exchanges/refunds/etc., your entire reply must be EXACTLY this single line and nothing else (same spelling and punctuation, hyphen immediately before https, no markdown link syntax, no greeting, no bullet points, no Return Form PDF link): ${RETURNS_INFO_REPLY}
+
+If the message also asks about products, stock, sizing, features, hours, service, or anything else unrelated to returns policy, answer those parts completely first in your normal helpful voice. Then address the return/exchange portion using ONLY that exact same single line — verbatim again — with no extra policy sentences before or after it.
+
+Never invent return URLs or link to the Return Form PDF for policy questions; the single mandated line is the complete answer for the returns/exchange portion.`,
   },
   {
     id: "ebikes",

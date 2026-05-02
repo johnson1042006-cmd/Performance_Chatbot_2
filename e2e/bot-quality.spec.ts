@@ -18,6 +18,13 @@
  */
 
 import { test, expect, Page } from "@playwright/test";
+import { RETURNS_INFO_REPLY } from "@/lib/ai/returnsReply";
+
+/** Matches canonical returns reply; trims trailing whitespace because DOM text may collapse it. */
+function replyHasReturnsCanonical(r: string): boolean {
+  const core = RETURNS_INFO_REPLY.trimEnd();
+  return r.trim().includes(core);
+}
 
 interface QA {
   area: string;
@@ -396,15 +403,12 @@ const QUESTIONS: QA[] = [
   {
     area: "policy",
     q: "what's your return policy",
-    must: [
-      isNonTrivial,
-      hasAny("return", "exchange", "performancecycle.com/returns"),
-    ],
+    must: [isNonTrivial, replyHasReturnsCanonical],
   },
   {
     area: "policy",
     q: "can I return a helmet",
-    must: [isNonTrivial, hasAny("return", "helmet", "worn", "visor", "non-returnable")],
+    must: [isNonTrivial, replyHasReturnsCanonical],
     mustNot: [NEVER_CALL_STORE],
   },
   {

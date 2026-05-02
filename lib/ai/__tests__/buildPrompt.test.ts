@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { AI_BEHAVIOR_RULES } from "../rules";
+import { RETURNS_INFO_REPLY } from "../returnsReply";
 
 // ---------------------------------------------------------------------------
 // AI_BEHAVIOR_RULES integrity
@@ -46,9 +47,10 @@ describe("AI_BEHAVIOR_RULES", () => {
     expect(rule!.rule).toContain("visit in person");
   });
 
-  it("return_policy rule references the returns URL", () => {
+  it("return_policy rule embeds the canonical RETURNS_INFO_REPLY text", () => {
     const rule = AI_BEHAVIOR_RULES.find((r) => r.id === "return_policy");
     expect(rule).toBeDefined();
+    expect(rule!.rule).toContain(RETURNS_INFO_REPLY.trimEnd());
     expect(rule!.rule).toContain("performancecycle.com/returns-exchanges");
   });
 
