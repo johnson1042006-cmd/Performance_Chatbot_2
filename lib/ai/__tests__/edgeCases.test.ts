@@ -235,7 +235,7 @@ describe("Large input edge cases", () => {
 // Session status edge cases
 // ---------------------------------------------------------------------------
 describe("Session status edge cases", () => {
-  it("ai-fallback route has maxDuration set to 30", async () => {
+  it("ai-fallback route has maxDuration set to 60", async () => {
     vi.doMock("@/lib/db", () => ({
       db: { select: vi.fn().mockReturnValue({ from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }) }) }) },
     }));
@@ -245,7 +245,7 @@ describe("Session status edge cases", () => {
     vi.doMock("@/lib/pusher/server", () => ({ getPusher: vi.fn() }));
 
     const { maxDuration } = await import("@/app/api/chat/ai-fallback/route");
-    expect(maxDuration).toBe(30);
+    expect(maxDuration).toBe(60);
   });
 });
 

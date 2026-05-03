@@ -28,9 +28,53 @@ interface BotSettings {
   fallbackTimerSeconds: number;
 }
 
+const EMBED_CUSTOMER_STORAGE_KEY = "pc-embed-customer-id";
+/** On `/embed`, never wait longer than this before invoking AI (human-first window). */
+const EMBED_MAX_HUMAN_FIRST_WAIT_SECONDS = 6;
+
+const SESSION_FETCH_MS = 25_000;
+const CHAT_POST_MS = 55_000;
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  ms: number
+): Promise<Response> {
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } finally {
+    clearTimeout(tid);
+  }
+}
+
 export default function ChatWidget() {
   const searchParams = useSearchParams();
-  const customerIdentifier = searchParams.get("sessionId") || "";
+  const urlSessionId = searchParams.get("sessionId")?.trim() ?? "";
+
+  // Stable ID when embed.js omits sessionId: without this each POST used anon_UUID()
+  // and init skipped entirely (`customerIdentifier` was falsy), breaking continuity.
+  const [visitorKey, setVisitorKey] = useState("");
+  useEffect(() => {
+    if (urlSessionId) {
+      setVisitorKey(urlSessionId);
+      return;
+    }
+    try {
+      let stored = sessionStorage.getItem(EMBED_CUSTOMER_STORAGE_KEY);
+      if (!stored) {
+        stored = `embed_${crypto.randomUUID()}`;
+        sessionStorage.setItem(EMBED_CUSTOMER_STORAGE_KEY, stored);
+      }
+      setVisitorKey(stored);
+    } catch {
+      setVisitorKey(`embed_${crypto.randomUUID()}`);
+    }
+  }, [urlSessionId]);
+
+  const customerIdentifier = visitorKey;
+
   const [dbSessionId, setDbSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -43,8 +87,21 @@ export default function ChatWidget() {
     fallbackTimerSeconds: 60,
   });
   const scrollRef = useRef<HTMLDivElement>(null);
-  const initialized = useRef(false);
+  const sessionInitStartedForKey = useRef<string | null>(null);
   const fallbackTimerRef = useRef<NodeJS.Timeout | null>(null);
+  /** Sync guard so rapid double-clicks cannot enqueue two sends before React re-renders. */
+  const sendInFlightRef = useRef(false);
+
+  const appendAiNotice = useCallback((text: string) => {
+    const notice: Message = {
+      id: `notice-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      role: "ai",
+      content: text,
+      sentAt: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, notice]);
+    setWaitingForReply(false);
+  }, []);
 
   useEffect(() => {
     const handler = (event: MessageEvent) => {
@@ -64,16 +121,21 @@ export default function ChatWidget() {
   }, []);
 
   useEffect(() => {
-    if (!customerIdentifier || initialized.current) return;
-    initialized.current = true;
+    if (!customerIdentifier) return;
+    if (sessionInitStartedForKey.current === customerIdentifier) return;
+    sessionInitStartedForKey.current = customerIdentifier;
 
     async function initSession() {
       try {
-        const res = await fetch("/api/sessions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ customerIdentifier }),
-        });
+        const res = await fetchWithTimeout(
+          "/api/sessions",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ customerIdentifier }),
+          },
+          SESSION_FETCH_MS
+        );
         const data = await res.json();
         if (data.session?.id) {
           setDbSessionId(data.session.id);
@@ -84,7 +146,7 @@ export default function ChatWidget() {
           }
         }
       } catch {
-        // Will retry on next message send
+        // sendMessage will POST /api/sessions again
       }
     }
     initSession();
@@ -160,25 +222,38 @@ export default function ChatWidget() {
           pageContext,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (data.message) {
         setMessages((prev) => {
           if (prev.some((m) => m.id === data.message.id)) return prev;
           return [...prev, data.message];
         });
         setWaitingForReply(false);
-      } else {
-        // Always clear the spinner — message absent means skipped, error, or timeout
-        setWaitingForReply(false);
+        return;
       }
+      if (data.skipped && data.reason === "Session is handled by a human agent") {
+        appendAiNotice(
+          "A team member is handling this chat — they'll reply shortly."
+        );
+        return;
+      }
+      appendAiNotice(
+        typeof data.error === "string"
+          ? `${data.error} Please try sending your message again.`
+          : "Something went wrong generating a reply. Please try again."
+      );
     } catch {
-      setWaitingForReply(false);
+      appendAiNotice(
+        "We couldn't reach the assistant. Check your connection and try again."
+      );
     }
   };
 
   const sendMessage = async () => {
-    if (!input.trim() || sending) return;
-    const content = input.trim();
+    const trimmed = input.trim();
+    if (!trimmed || sendInFlightRef.current) return;
+    sendInFlightRef.current = true;
+    const content = trimmed;
     setInput("");
     setSending(true);
     setWaitingForReply(true);
@@ -196,12 +271,24 @@ export default function ChatWidget() {
     try {
       let sid = dbSessionId;
       if (!sid) {
-        const sRes = await fetch("/api/sessions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ customerIdentifier, pageContext }),
-        });
-        const sData = await sRes.json();
+        let sRes: Response;
+        try {
+          sRes = await fetchWithTimeout(
+            "/api/sessions",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ customerIdentifier, pageContext }),
+            },
+            SESSION_FETCH_MS
+          );
+        } catch {
+          appendAiNotice(
+            "Could not reach the server to start chat (timed out). Check your connection and try again."
+          );
+          return;
+        }
+        const sData = await sRes.json().catch(() => ({}));
         if (sData.session?.id) {
           sid = sData.session.id;
           setDbSessionId(sid);
@@ -209,53 +296,90 @@ export default function ChatWidget() {
       }
 
       if (!sid) {
-        setSending(false);
-        setWaitingForReply(false);
+        appendAiNotice(
+          "We couldn't start your chat session (connection issue). Refresh and try again."
+        );
         return;
       }
 
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: content,
-          sessionId: sid,
-          pageContext,
-        }),
-      });
-      const data = await res.json();
+      let res: Response;
+      try {
+        res = await fetchWithTimeout(
+          "/api/chat",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              message: content,
+              sessionId: sid,
+              pageContext,
+            }),
+          },
+          CHAT_POST_MS
+        );
+      } catch {
+        appendAiNotice(
+          "Your message timed out before the server responded. Try again."
+        );
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        appendAiNotice(
+          typeof data.error === "string"
+            ? `${data.error} Try again in a moment.`
+            : "Your message didn't go through. Please try again."
+        );
+        return;
+      }
+
       if (data.message) {
         setMessages((prev) =>
           prev.map((m) => (m.id === tempMsg.id ? data.message : m))
         );
       }
 
+      const onEmbed =
+        typeof window !== "undefined" &&
+        window.location.pathname.includes("/embed");
+      const humanFirstSeconds = onEmbed
+        ? Math.min(
+            botSettings.fallbackTimerSeconds,
+            EMBED_MAX_HUMAN_FIRST_WAIT_SECONDS
+          )
+        : botSettings.fallbackTimerSeconds;
+
       // Sync agentClaimed from server session state — catches sessions claimed
       // in a prior browser session where the Pusher event was missed
       if (data.sessionStatus === "active_human") {
         setAgentClaimed(true);
-        setWaitingForReply(false);
+        appendAiNotice(
+          "You're connected with our team — someone will reply shortly."
+        );
       } else if (botSettings.aiEnabled && !agentClaimed) {
-        // waiting: give human agents the full fallbackTimerSeconds window to
-        // claim before AI takes over. active_ai: AI is already in charge, so
-        // reply quickly on follow-up messages. Agents can still claim at any
-        // time via the session-claimed Pusher event, which cancels this timer.
+        // waiting: give human agents the fallback window before AI takes over.
+        // On `/embed`, cap wait so visitors aren't staring at a blank chat for 60s.
         const delay =
           data.sessionStatus === "active_ai"
             ? 2000
-            : botSettings.fallbackTimerSeconds * 1000;
+            : humanFirstSeconds * 1000;
 
         if (fallbackTimerRef.current) clearTimeout(fallbackTimerRef.current);
         fallbackTimerRef.current = setTimeout(() => {
           triggerAIFallback(content, sid!);
         }, delay);
       } else {
-        // AI disabled and no human agent — clear the spinner
-        setWaitingForReply(false);
+        appendAiNotice(
+          "AI replies are turned off — our staff will respond when available."
+        );
       }
     } catch {
-      setWaitingForReply(false);
+      appendAiNotice(
+        "Something went wrong. Please refresh and try again."
+      );
     } finally {
+      sendInFlightRef.current = false;
       setSending(false);
     }
   };
@@ -296,24 +420,41 @@ export default function ChatWidget() {
           </div>
         )}
       </div>
-      <div className="border-t border-border bg-surface px-3 py-3 shrink-0">
+      <div className="relative z-20 border-t border-border bg-surface px-3 py-3 shrink-0">
         <div className="flex items-center gap-2">
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" || e.shiftKey) return;
+              e.preventDefault();
+              void sendMessage();
+            }}
             placeholder="Type your message..."
             data-testid="chat-input"
+            autoComplete="off"
             className="flex-1 px-3.5 py-2.5 text-sm border border-border rounded-full focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent bg-background"
           />
           <button
-            onClick={sendMessage}
-            disabled={!input.trim() || sending}
+            type="button"
+            onClick={() => void sendMessage()}
+            disabled={!input.trim()}
+            aria-busy={sending}
             data-testid="chat-send"
-            className="w-10 h-10 bg-accent hover:bg-accent/90 text-white rounded-full flex items-center justify-center transition-colors disabled:opacity-40"
+            className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors text-white shrink-0 ${
+              !input.trim()
+                ? "bg-accent/35 cursor-not-allowed opacity-60"
+                : sending
+                  ? "bg-accent/80 cursor-wait"
+                  : "bg-accent hover:bg-accent/90"
+            }`}
           >
-            <Send size={16} />
+            {sending ? (
+              <Loader2 size={16} className="animate-spin" aria-hidden />
+            ) : (
+              <Send size={16} aria-hidden />
+            )}
           </button>
         </div>
         <p className="text-[10px] text-text-secondary text-center mt-2">

@@ -6,7 +6,7 @@ import { buildPrompt } from "@/lib/ai/buildPrompt";
 import { callClaude } from "@/lib/ai/callClaude";
 import { getPusher } from "@/lib/pusher/server";
 
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
