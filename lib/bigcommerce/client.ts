@@ -371,12 +371,19 @@ export function formatProductForPrompt(product: BCProduct): string {
     : "";
   const desc = rawDesc ? rawDesc.substring(0, 800) : "No description";
 
-  return `**${product.name}**
-  SKU: ${product.sku}
-  Price: $${price.toFixed(2)}
-  Stock: ${stockStatus}
-  URL: ${product.custom_url?.url ? `https://performancecycle.com${product.custom_url.url}` : "N/A"}
-  Description: ${desc}
-  Variants:
+  const url = product.custom_url?.url
+    ? `https://performancecycle.com${product.custom_url.url}`
+    : null;
+  const titleLine = url
+    ? `[**${product.name}**](${url})`
+    : `**${product.name}**`;
+
+  return `${titleLine}
+    SKU: ${product.sku}
+    Price: $${price.toFixed(2)}
+    Stock: ${stockStatus}
+    URL: ${url || "N/A"}
+    Description: ${desc}
+    Variants:
 ${variantInfo}`;
 }

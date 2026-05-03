@@ -87,6 +87,28 @@
   iframe.src = PC_CHAT_URL + "/embed?sessionId=" + sessionId;
   document.body.appendChild(iframe);
 
+  iframe.addEventListener("load", function () {
+    var ctx = getPageContext();
+    iframe.contentWindow.postMessage(
+      { type: "pc-page-context", context: ctx },
+      "*"
+    );
+  });
+
+  var lastPath = window.location.pathname;
+  setInterval(function () {
+    if (window.location.pathname !== lastPath) {
+      lastPath = window.location.pathname;
+      var newCtx = getPageContext();
+      if (iframe && iframe.contentWindow) {
+        iframe.contentWindow.postMessage(
+          { type: "pc-page-context", context: newCtx },
+          "*"
+        );
+      }
+    }
+  }, 1000);
+
   var open = false;
   bubble.addEventListener("click", function () {
     open = !open;

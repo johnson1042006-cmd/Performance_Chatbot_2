@@ -374,7 +374,7 @@ export async function buildPrompt(
 - NEVER say "let me check", "give me a sec", "let me pull up", or any variation. You already have the data — just present it.
 - NEVER reveal internal processes, search steps, or system logic. Just give the answer.
 - PRODUCTS FIRST: If you have matching products in the RELEVANT PRODUCTS section below, LEAD with them. Show names, prices, and stock status right away. Add a brief 1-sentence comment after if helpful — not before.
-- When mentioning a product, format it as a clickable markdown link: [**Product Name**](url) — $price
+- When mentioning a product, copy the pre-formatted bold linked title VERBATIM from the RELEVANT PRODUCTS section (it's already in [**Name**](url) form) and append " — $price" using the price from that same entry. Do NOT reconstruct the URL from the URL: line — use the pre-built link only.
 - Products tagged [IN STORE ONLY] are available at the physical store but not purchasable online. Present them positively — "We carry that! It's available in our Centennial store." and link to the product page so the customer can see details.
 - ONLY ask a qualifying question if the request is truly vague (e.g. "I need gear" with zero specifics). Once the customer has stated a product type, use case, OR budget, you have enough — show products immediately.
 - NEVER ask more than 1 question before showing results. If you have products that match, show them AND ask a refinement question in the same message if needed.
@@ -545,15 +545,33 @@ ABSOLUTE RULES (violating these breaks the customer's trust):
     }
   }
 
-  const conversationMessages: { role: "user" | "assistant"; content: string }[] =
-    history
-      .filter((m: Message) => m.role !== "customer" || m.content !== latestMessage)
-      .map((m: Message) => ({
-        role: m.role === "customer" ? ("user" as const) : ("assistant" as const),
-        content: m.content,
-      }));
+  // Only drop the LAST message if it duplicates latestMessage. The previous
+  // implementation removed every matching customer message, which broke
+  // multi-turn context whenever a short reply ("yes", "ok", "in black") was
+  // repeated.
+  const last = history[history.length - 1];
+  const historyToUse =
+    last && last.role === "customer" && last.content === latestMessage
+      ? history.slice(0, -1)
+      : history;
 
-  conversationMessages.push({ role: "user", content: latestMessage });
+  const conversationMessages: { role: "user" | "assistant"; content: string }[] =
+    historyToUse.map((m: Message) => ({
+      role: m.role === "customer" ? ("user" as const) : ("assistant" as const),
+      content: m.content,
+    }));
+
+  // Guard against empty latestMessage so we never send empty user content
+  // to the Anthropic API (it 400s).
+  const trimmedLatest = (latestMessage || "").trim();
+  if (trimmedLatest.length > 0) {
+    conversationMessages.push({ role: "user", content: latestMessage });
+  } else if (
+    conversationMessages.length === 0 ||
+    conversationMessages[conversationMessages.length - 1].role !== "user"
+  ) {
+    conversationMessages.push({ role: "user", content: "(no message)" });
+  }
 
   const inlineSKU = extractSKUFromText(latestMessage);
   if (inlineSKU && (!contextProduct || contextProduct.sku !== inlineSKU)) {
