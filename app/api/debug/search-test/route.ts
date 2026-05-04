@@ -13,9 +13,9 @@ export async function GET() {
     const rows = await db.execute(
       sql`SELECT DISTINCT bc_product_id, product_name FROM product_colorways WHERE colorway_lower LIKE ${'%blue%'} AND product_name ILIKE ${'%helmet%'} LIMIT 5`
     );
-    colorwaySQL = Array.isArray(rows) ? rows.slice(0, 5) : (rows as any).rows?.slice(0, 5) ?? rows;
-  } catch (e: any) {
-    colorwaySQLError = e?.message || String(e);
+    colorwaySQL = Array.isArray(rows) ? rows.slice(0, 5) : (rows as Record<string, unknown[]>).rows?.slice(0, 5) ?? rows;
+  } catch (e: unknown) {
+    colorwaySQLError = e instanceof Error ? e.message : String(e);
   }
 
   let searchResult: unknown = null;
@@ -31,8 +31,8 @@ export async function GET() {
         variantCount: p.variants?.length ?? 0,
       })),
     };
-  } catch (e: any) {
-    searchError = e?.message || String(e);
+  } catch (e: unknown) {
+    searchError = e instanceof Error ? e.message : String(e);
   }
 
   return NextResponse.json({ colorwaySQL, colorwaySQLError, searchResult, searchError });
