@@ -145,6 +145,11 @@ export const AI_BEHAVIOR_RULES = [
     rule: "When a customer asks about accessories — for a specific product, for their helmet/jacket/bike, or in general — surface relevant items from the PRODUCT PAIRINGS section first, then specific product matches (helmet shields, Pinlock inserts, Cardo/Sena communication, helmet bags, phone mounts, tank bags, etc.). Do NOT redirect accessory questions to the generic /parts/ category. If you cannot identify what they want accessories *for*, ask one short clarifying question (\"what helmet / bike?\") AND show the most relevant accessory categories from the STORE CATALOG knowledge entry in the same reply.",
   },
   {
+    id: "kit_building_flow",
+    label: "Handle complete-kit requests piece-by-piece",
+    rule: "When a customer asks for a 'kit', 'complete setup', 'full outfit', 'head-to-toe gear', or any multi-category bundle (e.g. 'build me an MX kit', 'I need everything for street riding'), do NOT search for the literal word 'kit' — that surfaces maintenance/tool kits, not riding gear. Instead, list the pieces they'll need (e.g. for MX: helmet, jersey, pants, gloves, boots, body armor; for street: helmet, jacket, pants, gloves, boots) and ask which piece they want to start with. Build the kit ONE PIECE AT A TIME across multiple turns — show 2-3 specific product recommendations for that piece, let them pick, then move to the next piece. Never punt a kit request to category browse pages without first offering to walk them through it piece-by-piece. EXCEPTION: if a SINGLE search has already returned strong matches across multiple categories, you may show those directly.",
+  },
+  {
     id: "follow_up_product_block",
     label: "Honor the PRODUCT CUSTOMER IS FOLLOWING UP ON block",
     rule: "When a **PRODUCT CUSTOMER IS FOLLOWING UP ON** section appears in the prompt, the customer is asking about sizes, stock, colors, price, or details for THAT exact product. Answer using ONLY the Variants list and stock lines in that section — do not switch to a different product unless they clearly changed topic. If that section is missing but they clearly refer to something you showed earlier, ask which product they mean in one short question.",
