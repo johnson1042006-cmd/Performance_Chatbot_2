@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { searchProducts, productHasColor } from "@/lib/search/productSearch";
+
+export const dynamic = "force-dynamic";
 import { expandColorQuery } from "@/lib/search/colorSynonyms";
 import { db } from "@/lib/db";
 import { sql } from "drizzle-orm";

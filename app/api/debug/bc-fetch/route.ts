@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getProductById } from "@/lib/bigcommerce/client";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const testId = 6010; // Shoei RF-SR Fullface Helmet (known blue helmet)
 
