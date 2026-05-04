@@ -13,7 +13,7 @@ export async function GET() {
     const rows = await db.execute(
       sql`SELECT DISTINCT bc_product_id, product_name FROM product_colorways WHERE colorway_lower LIKE ${'%blue%'} AND product_name ILIKE ${'%helmet%'} LIMIT 5`
     );
-    colorwaySQL = Array.isArray(rows) ? rows.slice(0, 5) : (rows as Record<string, unknown[]>).rows?.slice(0, 5) ?? rows;
+    colorwaySQL = Array.isArray(rows) ? rows.slice(0, 5) : (rows as unknown as Record<string, unknown[]>).rows?.slice(0, 5) ?? rows;
   } catch (e: unknown) {
     colorwaySQLError = e instanceof Error ? e.message : String(e);
   }
