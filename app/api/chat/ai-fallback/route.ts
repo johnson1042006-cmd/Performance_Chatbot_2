@@ -47,11 +47,26 @@ export async function POST(req: NextRequest) {
         .where(eq(sessions.id, sessionId));
     }
 
-    const { system, conversationMessages } = await buildPrompt(
-      sessionId,
-      latestMessage || "",
-      pageContext
-    );
+    let system: string;
+    let conversationMessages: { role: "user" | "assistant"; content: string }[];
+    try {
+      const result = await buildPrompt(
+        sessionId,
+        latestMessage || "",
+        pageContext
+      );
+      system = result.system;
+      conversationMessages = result.conversationMessages;
+    } catch (buildErr) {
+      console.error("buildPrompt failed:", buildErr);
+      return NextResponse.json(
+        {
+          error:
+            "I'm having trouble looking that up right now. Could you try rephrasing or asking again in a moment?",
+        },
+        { status: 503 }
+      );
+    }
 
     let aiResponse: string;
     try {
