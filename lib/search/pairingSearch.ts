@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { productPairings } from "@/lib/db/schema";
-import { eq, or } from "drizzle-orm";
+import { and, eq, ne, or } from "drizzle-orm";
 import type { ProductPairing } from "@/lib/db/schema";
 import {
   getProductBySKU,
@@ -18,9 +18,12 @@ export async function findPairings(sku: string): Promise<PairingResult[]> {
     .select()
     .from(productPairings)
     .where(
-      or(
-        eq(productPairings.primarySku, sku),
-        eq(productPairings.pairedSku, sku)
+      and(
+        or(
+          eq(productPairings.primarySku, sku),
+          eq(productPairings.pairedSku, sku)
+        ),
+        ne(productPairings.pairingType, "frequently_bought")
       )
     )
     .limit(20);
