@@ -55,5 +55,11 @@ export async function callClaude(
   }
 
   console.error("callClaude exhausted all retries:", lastError);
-  return ERROR_FALLBACK;
+  const err = new Error("callClaude exhausted retries") as Error & {
+    isCallClaudeFailure: true;
+  };
+  err.isCallClaudeFailure = true;
+  throw err;
 }
+
+export const CALL_CLAUDE_ERROR_MESSAGE = ERROR_FALLBACK;

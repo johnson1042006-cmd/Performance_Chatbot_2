@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { messages, sessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { buildPrompt } from "@/lib/ai/buildPrompt";
-import { callClaude } from "@/lib/ai/callClaude";
+import { callClaude, CALL_CLAUDE_ERROR_MESSAGE } from "@/lib/ai/callClaude";
 import { getPusher } from "@/lib/pusher/server";
 
 export const maxDuration = 60;
@@ -53,7 +53,21 @@ export async function POST(req: NextRequest) {
       pageContext
     );
 
-    const aiResponse = await callClaude(system, conversationMessages);
+    let aiResponse: string;
+    try {
+      aiResponse = await callClaude(system, conversationMessages);
+    } catch (err) {
+      const isClaudeFailure =
+        err && typeof err === "object" && "isCallClaudeFailure" in err;
+      return NextResponse.json(
+        {
+          error: isClaudeFailure
+            ? CALL_CLAUDE_ERROR_MESSAGE
+            : "Failed to generate AI reply",
+        },
+        { status: 503 }
+      );
+    }
 
     const [savedMessage] = await db
       .insert(messages)

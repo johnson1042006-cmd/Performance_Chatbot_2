@@ -37,10 +37,16 @@ describe("callClaude edge cases", () => {
     }));
 
     const { callClaude } = await import("@/lib/ai/callClaude");
-    const result = await callClaude("system", [
-      { role: "user", content: "test" },
-    ]);
-    expect(result).toContain("trouble connecting");
+    let caught: unknown;
+    try {
+      await callClaude("system", [{ role: "user", content: "test" }]);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeDefined();
+    expect(
+      caught && typeof caught === "object" && "isCallClaudeFailure" in caught
+    ).toBe(true);
     // verify retry happened
     expect(createMock).toHaveBeenCalledTimes(2);
   });
@@ -56,10 +62,16 @@ describe("callClaude edge cases", () => {
     }));
 
     const { callClaude } = await import("@/lib/ai/callClaude");
-    const result = await callClaude("system", [
-      { role: "user", content: "test" },
-    ]);
-    expect(result).toContain("trouble connecting");
+    let caught: unknown;
+    try {
+      await callClaude("system", [{ role: "user", content: "test" }]);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeDefined();
+    expect(
+      caught && typeof caught === "object" && "isCallClaudeFailure" in caught
+    ).toBe(true);
     expect(createMock).toHaveBeenCalledTimes(2);
   });
 
