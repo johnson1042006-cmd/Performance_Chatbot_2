@@ -174,6 +174,35 @@ WHAT WE DO NOT CARRY:
 
 POPULAR BRANDS: AGV, Airoh, Alpinestars, Arai, Bell, Cardo, Continental, Dunlop, Fasthouse, Fly Racing, Forma, Fox Racing, Gaerne, Garmin, HJC, Icon, Insta360, Klim, KYT, Leatt, LS2, Metzeler, Michelin, Noru, Quadlock, Ram Mount, REV'IT!, RST, Sena, Shinko, Shoei, Sidi, Super73, Troy Lee Designs`,
   },
+  {
+    topic: "what_we_sell",
+    content: `WHAT PERFORMANCE CYCLE SELLS:
+
+Performance Cycle is a motorcycle GEAR, PARTS, and ACCESSORIES retailer in Centennial, CO. We are NOT a motorcycle dealership.
+
+WE SELL:
+- Helmets (street, full-face, modular, half, off-road, MX, adventure)
+- Jackets, pants, suits, vests
+- Boots, gloves
+- Body armor and protection (chest protectors, back protectors, knee guards)
+- Tech-Air airbag systems (we are a Factory Authorized Tech-Air Service Center)
+- Tires (street, sport, sport-touring, dual-sport, MX/dirt)
+- Parts (chains, sprockets, brake pads and rotors, batteries, levers, mirrors, controls, stands)
+- Exhaust systems, slip-ons, and components
+- Communication systems (intercoms, headsets, Bluetooth)
+- Accessories (phone mounts, GPS, action cameras, tank bags, luggage)
+- Snow gear and snow plows
+- E-bikes (browse https://performancecycle.com/ebikes/ — handle e-bike inquiries via the e-bike routing rules)
+
+WE DO NOT SELL:
+- Motorcycles. We are NOT a motorcycle dealership. We sell GEAR for motorcycles, not the motorcycles themselves.
+- Cars, ATVs, side-by-sides, dirt bikes (the vehicles), or scooters (other than e-scooters in our e-bike section).
+- Used gear or used parts (everything we sell is new).
+
+CRITICAL FOR THE AI: When a customer asks "what's a good bike?" or "what motorcycle should I get?" or "do you carry [motorcycle brand/model]?" the correct response is to clarify the boundary: "We don't sell motorcycles — we're a gear and parts shop. But if you've got a bike or are picking one out, I can help you with helmets, jackets, gloves, tires, parts, and accessories. What are you looking for?"
+
+Do NOT offer to help them pick out a motorcycle. Do NOT compare motorcycle models. Do NOT recommend motorcycle dealerships by name.`,
+  },
 ];
 
 export async function seedKnowledge() {
