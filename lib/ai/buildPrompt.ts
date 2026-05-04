@@ -12,6 +12,7 @@ import {
   extractAccessorySubject,
   extractDiscussedProductSubject,
   extractSubcategoryRequest,
+  isLikelyProductFollowUp,
   isSupportedProductType,
   type BudgetInfo,
   type SubcategoryValue,
@@ -245,9 +246,15 @@ export async function buildPrompt(
     || "";
 
   // Extract product-relevant keywords from recent history so that multi-turn
-  // conversations preserve model names, colorways, and niche terms (e.g. "yagyo")
-  // that a hardcoded allowlist would miss.
-  const recentHistory = customerMessages.slice(0, -1).slice(-3);
+  // FOLLOW-UPS preserve model names, colorways, and niche terms (e.g. "what
+  // colors?", "in black?", "is it in stock"). For fresh queries that introduce
+  // a new product context (e.g. "show me a blue street helmet" after an
+  // unrelated jacket conversation), skip the padding — otherwise old keywords
+  // pollute the search and surface unrelated parts/accessories.
+  const isFollowUp = isLikelyProductFollowUp(effectiveLatest);
+  const recentHistory = isFollowUp
+    ? customerMessages.slice(0, -1).slice(-3)
+    : [];
   const historyKeywords = recentHistory.flatMap((msg) => extractKeywords(msg));
   const uniqueHistoryTerms = Array.from(new Set(historyKeywords)).slice(0, 8);
   const searchQuery = [effectiveLatest, ...uniqueHistoryTerms].join(" ").trim();
