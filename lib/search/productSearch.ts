@@ -646,6 +646,7 @@ async function searchByColorway(
 ): Promise<BCProduct[]> {
   try {
     const colorTerms = expandColorQuery(color);
+    if (colorTerms.length === 0) return [];
 
     const colorConditions = colorTerms.map(
       (c) => sql`colorway_lower LIKE ${`%${c.toLowerCase()}%`}`
