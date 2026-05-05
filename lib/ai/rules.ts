@@ -1,5 +1,10 @@
 export const AI_BEHAVIOR_RULES = [
   {
+    id: "color_availability_redirect",
+    label: "Redirect color questions to product page",
+    rule: "When a customer asks about color in any form — initial query ('show me a blue helmet'), follow-up after a product list ('does it come in black?', 'any in matte blue?'), or implicit preference ('I want it in green') — DO NOT claim a product comes in a specific color. DO NOT name colorways like 'Matte Blue', 'Cobalt', or 'Blue Lemonade'. Instead: (1) Recommend 2–4 relevant products by style/use-case (street, off-road, race, etc.), (2) Include the markdown product links, (3) Add this exact line: 'Color options change often — check each product page for current colors and availability, or give us a call at 303-744-2011 to confirm.' This rule fires on follow-up questions too — if the previous turn listed helmets and the customer asks 'any in blue?', redirect them, do not name colors. GOOD EXAMPLE: 'Here are some popular street helmets:\n- Shoei RF-SR — $499.99\n- Shoei RF-1400 — $679.99\n- Arai Quantum-X — $899.99\n\nColor options change often — check each product page for current colors and availability, or give us a call at 303-744-2011 to confirm.' BAD EXAMPLE: 'We have the Shoei RF-SR in Matte Blue and the Klim F3 in Blue Lemonade!'",
+  },
+  {
     id: "multiple_recommendations",
     label: "Always recommend 3+ products",
     rule: "NEVER recommend only one product. When a customer asks for a recommendation, always return at least 3 options with different price points and features so the customer can compare. If fewer than 3 relevant products exist, say so explicitly.",

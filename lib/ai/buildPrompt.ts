@@ -5,8 +5,6 @@ import {
   searchProducts,
   extractSKUFromText,
   extractKeywords,
-  productHasColor,
-  getMatchingColorLabels,
   extractBudget,
   extractProductType,
   extractAccessorySubject,
@@ -18,7 +16,6 @@ import {
   type SubcategoryValue,
   type SupportedProductType,
 } from "@/lib/search/productSearch";
-import { expandColorQuery } from "@/lib/search/colorSynonyms";
 import { findPairings } from "@/lib/search/pairingSearch";
 import { AI_BEHAVIOR_RULES } from "./rules";
 import type { Message } from "@/lib/db/schema";
@@ -322,8 +319,6 @@ export async function buildPrompt(
       resolveDiscussedProduct(),
     ]);
 
-  const detectedColor = primarySearch.detectedColor ?? latestSearch.detectedColor;
-
   const seen = new Set(primarySearch.products.map((p) => p.id));
   const productResults: BCProduct[] = [...primarySearch.products];
   for (const p of latestSearch.products) {
@@ -416,20 +411,6 @@ ${AI_BEHAVIOR_RULES.map((r, i) => `${i + 1}. ${r.rule}`).join("\n\n")}
     system += `Only LEAD with products at or below this ceiling. Within the RELEVANT PRODUCTS section below, in-budget items are listed FIRST. If nothing in the list fits, say so honestly and list what's closest — do NOT silently present over-budget items as if they fit the budget.\n`;
   }
 
-  if (detectedColor) {
-    system += `\n## COLOR PREFERENCE DETECTED\n`;
-    system += `The customer wants products in **${detectedColor.toUpperCase()}**.
-
-TAGS IN THE RELEVANT PRODUCTS SECTION:
-- [COLOR MATCH: ${detectedColor.toUpperCase()}] — this product IS available in ${detectedColor}. The exact matching variant labels are listed on a line starting with "${detectedColor.toUpperCase()} VARIANTS:". You MUST treat this as factual truth.
-- [OTHER COLORS ONLY] — this product does NOT come in ${detectedColor}.
-
-ABSOLUTE RULES (violating these breaks the customer's trust):
-- If a product is tagged [COLOR MATCH: ${detectedColor.toUpperCase()}], NEVER say it doesn't come in ${detectedColor}. Cite the "${detectedColor.toUpperCase()} VARIANTS:" line when presenting it.
-- LEAD with [COLOR MATCH] products. Only mention [OTHER COLORS ONLY] products if zero color matches exist.
-- If NO products are tagged [COLOR MATCH], say so honestly and list what colors ARE available from the products shown.\n`;
-  }
-
   if (detectedFeatures.length > 0) {
     const featList = detectedFeatures.join(", ");
     const tagList = detectedFeatures.map((f) => `[${f.toUpperCase()} MATCH]`).join(" / ");
@@ -492,22 +473,8 @@ ABSOLUTE RULES (violating these breaks the customer's trust):
     }
   }
 
-  const expandedColorSet = detectedColor
-    ? new Set(expandColorQuery(detectedColor).map((c) => c.toLowerCase()))
-    : null;
-
   function renderProductEntry(p: BCProduct): string {
     const tags: string[] = [];
-    let matchingLabels: string[] = [];
-    if (detectedColor && expandedColorSet) {
-      const isMatch = productHasColor(p, expandedColorSet);
-      if (isMatch) {
-        matchingLabels = getMatchingColorLabels(p, expandedColorSet);
-        tags.push(`[COLOR MATCH: ${detectedColor.toUpperCase()}]`);
-      } else {
-        tags.push(`[OTHER COLORS ONLY]`);
-      }
-    }
     if (detectedFeatures.length > 0) {
       for (const f of detectedFeatures) {
         if (productMentionsFeature(p, f)) {
@@ -526,11 +493,7 @@ ABSOLUTE RULES (violating these breaks the customer's trust):
     if (sub) {
       tags.push(`[STYLE: ${sub}]`);
     }
-    let out = tags.join(" ") + " " + formatProductForPrompt(p);
-    if (detectedColor && matchingLabels.length > 0) {
-      out += `\n  ${detectedColor.toUpperCase()} VARIANTS: ${matchingLabels.join(", ")}`;
-    }
-    return out;
+    return tags.join(" ") + " " + formatProductForPrompt(p);
   }
 
   if (displayProducts.length > 0) {

@@ -263,8 +263,7 @@ describe("buildPrompt", () => {
     searchProducts: vi.fn().mockResolvedValue({ products: [], detectedColor: null }),
     extractSKUFromText: vi.fn().mockReturnValue(null),
     extractKeywords: vi.fn().mockReturnValue([]),
-    productHasColor: vi.fn().mockReturnValue(false),
-    getMatchingColorLabels: vi.fn().mockReturnValue([]),
+    isLikelyProductFollowUp: vi.fn().mockReturnValue(false),
     extractBudget: vi.fn().mockReturnValue(null),
     extractProductType: vi.fn().mockReturnValue(null),
     extractAccessorySubject: vi.fn().mockReturnValue({
