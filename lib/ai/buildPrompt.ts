@@ -18,6 +18,7 @@ import {
 } from "@/lib/search/productSearch";
 import { findPairings } from "@/lib/search/pairingSearch";
 import { AI_BEHAVIOR_RULES } from "./rules";
+import { PRODUCT_TAXONOMY } from "./taxonomy";
 import type { Message } from "@/lib/db/schema";
 import {
   getProductBySKU,
@@ -465,6 +466,8 @@ ${AI_BEHAVIOR_RULES.map((r, i) => `${i + 1}. ${r.rule}`).join("\n\n")}
     system += formatProductForPrompt(discussedProduct);
     system += `\n\nThe customer's latest message is a follow-up about THIS product (resolved from their question and/or the most recent product you showed in **bold**). Use the Variants list and per-variant stock lines above as the only source of truth for sizes and inventory — never invent sizes or stock states. If RELEVANT PRODUCTS below also includes this SKU, treat this section as authoritative for follow-up questions.\n`;
   }
+
+  system += `\n## PRODUCT TAXONOMY\n\n${PRODUCT_TAXONOMY}\n`;
 
   if (knowledge.length > 0) {
     system += `\n## KNOWLEDGE BASE\n\n`;
