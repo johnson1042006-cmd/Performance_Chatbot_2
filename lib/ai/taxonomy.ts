@@ -34,6 +34,7 @@ STREET full-face (for road use):
 
 RACE (track/sport):
 - Shoei: X-Fifteen
+  NOTE: On performancecycle.com this helmet is listed as 'Shoei X-15' — correct product URL is /shoei-x-15-helmet/ — do NOT link to /shoei-x-fifteen-helmet/ as that returns a 404.
 - Arai: Corsair-X
 - KYT: NZ-Race, TT-Course, TT-Revo
 
