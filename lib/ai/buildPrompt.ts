@@ -295,7 +295,7 @@ export async function buildPrompt(
         () => getProductByNameLike(accessorySubject.productName!, 3),
         [] as BCProduct[]
       );
-      if (candidates.length > 0 && candidates[0].sku) return candidates[0].sku;
+      if (candidates.length > 0 && candidates[0].id) return `ID:${candidates[0].id}`;
     }
     return null;
   }
