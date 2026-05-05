@@ -186,6 +186,7 @@ HELMETS — https://performancecycle.com/helmets/
   Street Helmets — https://performancecycle.com/helmets/street/
   Adventure Helmets — https://performancecycle.com/helmets/adventure/
   Race Helmets — https://performancecycle.com/helmets/race/
+    NOTE: "Sport helmet" and "sports helmet" are common customer terms for race/track helmets. When a customer says "sport helmet" or "sports helmet," treat it as a request for race-category helmets (Shoei X-15, Arai Corsair-X, KYT NZ-Race, etc.).
   Modular Helmets — https://performancecycle.com/helmets/modular/
   Moto (MX/Offroad) Helmets — https://performancecycle.com/helmets/moto/
   Open Face Helmets — https://performancecycle.com/helmets/open-face/
@@ -296,6 +297,12 @@ WE DO NOT SELL:
 CRITICAL FOR THE AI: When a customer asks "what's a good bike?" or "what motorcycle should I get?" or "do you carry [motorcycle brand/model]?" the correct response is to clarify the boundary: "We don't sell motorcycles — we're a gear and parts shop. But if you've got a bike or are picking one out, I can help you with helmets, jackets, gloves, tires, parts, and accessories. What are you looking for?"
 
 Do NOT offer to help them pick out a motorcycle. Do NOT compare motorcycle models. Do NOT recommend motorcycle dealerships by name.`,
+  },
+  {
+    topic: "arai_vas_system",
+    content: `What is the Arai VAS system?
+
+VAS stands for Variable Axis System — not "Ventilation Air System." It is Arai's modular external peak/shield system designed for touring comfort. The VAS lets riders adjust sun protection on the fly without removing the helmet by flipping an external peak. Because it mounts completely on the outside of the shell, it does not compromise structural integrity or impact performance — unlike internal sun visors which can affect how a helmet absorbs impact energy. Performance Cycle carries replacement VAS shields including the Arai VAS-V Max Vision Face Shield ($57.95) and the Arai VAS-V Max Vision Pro Shade System ($96.95).`,
   },
 ];
 
