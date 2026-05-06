@@ -52,6 +52,7 @@ export default function ChatPanel({
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [claimedByBanner, setClaimedByBanner] = useState<string | null>(null);
+  const [justClaimed, setJustClaimed] = useState(false);
   const [showReassign, setShowReassign] = useState(false);
   const [onlineAgents, setOnlineAgents] = useState<OnlineAgent[]>([]);
   const [reassigning, setReassigning] = useState(false);
@@ -62,7 +63,7 @@ export default function ChatPanel({
   const isAi = sessionClaimedByKind === "ai" || sessionStatus === "active_ai";
   const isUnclaimed = !sessionClaimedByKind && sessionStatus === "waiting";
   const myId = authSession?.user?.id;
-  const isMyChat = isHuman && sessionClaimedBy?.id === myId;
+  const isMyChat = justClaimed || (isHuman && !!myId && sessionClaimedBy?.id === myId);
   const canRelease = isMyChat || (isManager && isHuman) || (isManager && isAi);
 
   const fetchMessages = useCallback(async () => {
@@ -110,6 +111,7 @@ export default function ChatPanel({
       );
 
       channel.bind("session-released", () => {
+        setJustClaimed(false);
         setClaimedByBanner(null);
         onSessionUpdate?.();
       });
@@ -150,6 +152,13 @@ export default function ChatPanel({
     if (showReassign) fetchOnlineAgents();
   }, [showReassign, fetchOnlineAgents]);
 
+  // Clear optimistic flag if props confirm a different agent owns the session
+  useEffect(() => {
+    if (justClaimed && sessionClaimedBy?.id && sessionClaimedBy.id !== myId) {
+      setJustClaimed(false);
+    }
+  }, [justClaimed, sessionClaimedBy, myId]);
+
   const handleClaim = async () => {
     try {
       const res = await fetch("/api/sessions/claim", {
@@ -165,6 +174,7 @@ export default function ChatPanel({
         return;
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setJustClaimed(true);
       onClaim(sessionId);
     } catch (error) {
       console.error("Claim failed:", error);

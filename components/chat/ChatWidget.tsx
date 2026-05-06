@@ -198,6 +198,26 @@ export default function ChatWidget() {
     return () => clearInterval(tid);
   }, [dbSessionId]);
 
+  // ── Session-status poll (runs only while waiting for a claim) ───────────────
+  useEffect(() => {
+    if (!dbSessionId || sessionState !== "waiting") return;
+    const poll = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const res = await fetch(`/api/sessions/${dbSessionId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const kind = data.session?.claimedByKind as string | null | undefined;
+        if (kind === "human") setSessionState("active_human");
+        else if (kind === "ai") setSessionState("active_ai");
+      } catch {
+        // non-fatal
+      }
+    };
+    const tid = setInterval(poll, 4_000);
+    return () => clearInterval(tid);
+  }, [dbSessionId, sessionState]);
+
   // ── Pusher subscription ─────────────────────────────────────────────────────
   const subscribeToChannel = useCallback(() => {
     if (!dbSessionId) return () => {};
