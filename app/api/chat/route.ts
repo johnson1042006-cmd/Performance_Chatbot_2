@@ -70,6 +70,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // ── Reject customer messages on closed sessions ──────────────────
+    // The embed is supposed to react to the `session-closed` Pusher event
+    // and disable its input, but if that signal was missed (network drop,
+    // tab in background, etc.) this guard prevents the message from being
+    // silently dropped into a closed conversation.
+    if (role === "customer" && session.status === "closed") {
+      return NextResponse.json(
+        {
+          error:
+            "This conversation has ended. Please start a new chat.",
+          code: "session_closed",
+        },
+        { status: 410 }
+      );
+    }
+
     // ── Per-session rate limit (catches abuse, caps API spend) ─────────
     if (role === "customer") {
       const oneMinuteAgo = new Date(Date.now() - 60_000);

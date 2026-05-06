@@ -5,7 +5,7 @@
  */
 import { db } from "@/lib/db";
 import { sessions, users, chatEvents } from "@/lib/db/schema";
-import { eq, isNull, lt, and, or } from "drizzle-orm";
+import { eq, isNull, lt, and, or, ne } from "drizzle-orm";
 import { getPusher } from "@/lib/pusher/server";
 import { buildPrompt } from "@/lib/ai/buildPrompt";
 import { callClaude } from "@/lib/ai/callClaude";
@@ -134,6 +134,7 @@ export async function releaseToQueue({
   /** If aiEnabled and agents are online, pass a new due time; else null */
   aiClaimDueAt?: Date | null;
 }): Promise<typeof sessions.$inferSelect | null> {
+  const now = new Date();
   const [updated] = await db
     .update(sessions)
     .set({
@@ -142,6 +143,10 @@ export async function releaseToQueue({
       claimedAt: null,
       status: "waiting",
       aiClaimDueAt: aiClaimDueAt ?? null,
+      // Reset activity so the stale-sweep gives the freshly-queued session
+      // a full window to be reclaimed (by AI or another agent) before it
+      // could possibly be closed.
+      lastCustomerActivityAt: now,
     })
     .where(eq(sessions.id, sessionId))
     .returning();
@@ -282,12 +287,17 @@ export async function sweepStaleSessions(): Promise<number> {
   //  - last_customer_activity_at is old (or null)
   //  - last_heartbeat_at is old (or null)
   // This prevents closing a session that has a live tab open.
+  //
+  // Human-claimed sessions are exempt: an agent who has actively claimed a
+  // chat must close it explicitly. Otherwise a customer with a hidden tab
+  // would have their human-active conversation auto-closed in 2 minutes.
   const stale = await db
     .update(sessions)
     .set({ status: "closed", closedAt: new Date() })
     .where(
       and(
-        sql`${sessions.status} != 'closed'`,
+        ne(sessions.status, "closed"),
+        ne(sessions.status, "active_human"),
         or(
           isNull(sessions.lastCustomerActivityAt),
           lt(sessions.lastCustomerActivityAt, cutoff)
@@ -309,6 +319,19 @@ export async function sweepStaleSessions(): Promise<number> {
       await pusher.trigger("dashboard", "session-update", {
         staleClosedIds: stale.map((s) => s.id),
       });
+      // Fan out session-closed on each per-session channel so the dashboard
+      // right pane and the customer embed can react in real time. Pusher's
+      // multi-channel trigger accepts up to 100 channels per call; chunk to
+      // be safe.
+      const sessionChannels = stale.map((s) => `session-${s.id}`);
+      const CHUNK = 100;
+      for (let i = 0; i < sessionChannels.length; i += CHUNK) {
+        await pusher.trigger(
+          sessionChannels.slice(i, i + CHUNK),
+          "session-closed",
+          { reason: "stale" }
+        );
+      }
     } catch {
       // non-fatal
     }

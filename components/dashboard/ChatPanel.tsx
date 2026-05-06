@@ -56,17 +56,31 @@ export default function ChatPanel({
   const [showReassign, setShowReassign] = useState(false);
   const [onlineAgents, setOnlineAgents] = useState<OnlineAgent[]>([]);
   const [reassigning, setReassigning] = useState(false);
+  // Tracks a `session-closed` Pusher event locally so the UI flips to the
+  // closed state instantly, without waiting for the parent's session list
+  // refresh to round-trip.
+  const [closedLocal, setClosedLocal] = useState(false);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const sendInFlightRef = useRef(false);
 
   const isManager = authSession?.user?.role === "store_manager";
-  const isHuman = sessionClaimedByKind === "human" || sessionStatus === "active_human";
-  const isAi = sessionClaimedByKind === "ai" || sessionStatus === "active_ai";
-  const isUnclaimed = !sessionClaimedByKind && sessionStatus === "waiting";
+  const isClosed = closedLocal || sessionStatus === "closed";
+  const isHuman =
+    !isClosed &&
+    (sessionClaimedByKind === "human" || sessionStatus === "active_human");
+  const isAi =
+    !isClosed &&
+    (sessionClaimedByKind === "ai" || sessionStatus === "active_ai");
+  const isUnclaimed =
+    !isClosed && !sessionClaimedByKind && sessionStatus === "waiting";
   const myId = authSession?.user?.id;
-  const isMyChat = justClaimed || (isHuman && !!myId && sessionClaimedBy?.id === myId);
-  const canRelease = isMyChat || (isManager && isHuman) || (isManager && isAi);
+  const isMyChat =
+    !isClosed &&
+    (justClaimed || (isHuman && !!myId && sessionClaimedBy?.id === myId));
+  const canRelease =
+    !isClosed &&
+    (isMyChat || (isManager && isHuman) || (isManager && isAi));
 
   const fetchMessages = useCallback(async () => {
     try {
@@ -100,6 +114,7 @@ export default function ChatPanel({
       channel.unbind("new-message");
       channel.unbind("session-claimed");
       channel.unbind("session-released");
+      channel.unbind("session-closed");
 
       channel.bind("new-message", (data: Message) => {
         setMessages((prev) => {
@@ -125,6 +140,14 @@ export default function ChatPanel({
       channel.bind("session-released", () => {
         setJustClaimed(false);
         setClaimedByBanner(null);
+        onSessionUpdate?.();
+      });
+
+      channel.bind("session-closed", () => {
+        setClosedLocal(true);
+        setJustClaimed(false);
+        setClaimedByBanner(null);
+        setShowReassign(false);
         onSessionUpdate?.();
       });
     }).catch(() => {});
@@ -167,6 +190,8 @@ export default function ChatPanel({
   // Reset optimistic flag when navigating to a different session
   useEffect(() => {
     setJustClaimed(false);
+    setClosedLocal(false);
+    setClaimedByBanner(null);
   }, [sessionId]);
 
   const emitTyping = useCallback(() => {
@@ -342,7 +367,16 @@ export default function ChatPanel({
 
       <MessageThread messages={messages} />
 
-      {isMyChat && (
+      {isClosed && (
+        <div className="shrink-0 border-t border-border bg-slate-100 px-4 py-3 text-center">
+          <p className="text-xs text-slate-600">
+            This chat is closed. The customer was notified the conversation
+            ended.
+          </p>
+        </div>
+      )}
+
+      {!isClosed && isMyChat && (
         <div className="shrink-0 border-t border-border bg-surface px-4 py-3">
           <div className="flex items-center gap-2">
             <input

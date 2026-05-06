@@ -26,16 +26,6 @@ export async function GET() {
       .from(sessions)
       .where(gte(sessions.startedAt, today));
 
-    const [aiHandled] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(sessions)
-      .where(
-        and(
-          gte(sessions.startedAt, today),
-          eq(sessions.status, "active_ai")
-        )
-      );
-
     const [openChats] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(sessions)
@@ -82,8 +72,16 @@ export async function GET() {
       );
 
     const totalChats = totalToday?.count || 0;
-    const aiCount = aiHandled?.count || 0;
-    const aiPercent = totalChats > 0 ? Math.round((aiCount / totalChats) * 100) : 0;
+    // AI Handled % is the share of bot/agent responses (today) that came from AI,
+    // derived from message counts so it stays consistent with the per-session
+    // AI Ratio shown in History (which counts messages, not session status).
+    const aiMsgCount = aiMessages[0]?.count || 0;
+    const agentMsgCount = agentMessages[0]?.count || 0;
+    const totalResponses = aiMsgCount + agentMsgCount;
+    const aiPercent =
+      totalResponses > 0
+        ? Math.round((aiMsgCount / totalResponses) * 100)
+        : 0;
 
     const recentSessions = await db
       .select()
@@ -94,13 +92,17 @@ export async function GET() {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
+    // Count sessions that had at least one AI message vs total sessions per day.
+    // We can't filter on sessions.status = 'active_ai' because closed sessions
+    // (incl. AI-handled ones swept by the inactivity timer) lose that status.
     const dailyStats = await db
       .select({
         date: sql<string>`DATE(${sessions.startedAt})::text`,
-        total: sql<number>`count(*)::int`,
-        aiCount: sql<number>`count(*) FILTER (WHERE ${sessions.status} = 'active_ai')::int`,
+        total: sql<number>`count(distinct ${sessions.id})::int`,
+        aiCount: sql<number>`count(distinct CASE WHEN ${messages.role} = 'ai' THEN ${sessions.id} END)::int`,
       })
       .from(sessions)
+      .leftJoin(messages, eq(messages.sessionId, sessions.id))
       .where(gte(sessions.startedAt, sevenDaysAgo))
       .groupBy(sql`DATE(${sessions.startedAt})`)
       .orderBy(sql`DATE(${sessions.startedAt})`);

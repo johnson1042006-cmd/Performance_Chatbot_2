@@ -78,9 +78,10 @@ export default function ChatWidget() {
    *  - 'waiting'      queued, no claim yet
    *  - 'active_ai'    AI has claimed and responded
    *  - 'active_human' human agent has claimed
+   *  - 'closed'       session ended (sweep, agent close, or 410 from /api/chat)
    */
   const [sessionState, setSessionState] = useState<
-    "idle" | "waiting" | "active_ai" | "active_human"
+    "idle" | "waiting" | "active_ai" | "active_human" | "closed"
   >("idle");
   const scrollRef = useRef<HTMLDivElement>(null);
   const sessionInitStartedForKey = useRef<string | null>(null);
@@ -125,6 +126,7 @@ export default function ChatWidget() {
           if (status === "active_human") setSessionState("active_human");
           else if (status === "active_ai") setSessionState("active_ai");
           else if (status === "waiting") setSessionState("waiting");
+          else if (status === "closed") setSessionState("closed");
 
           const msgRes = await fetch(`/api/sessions/${data.session.id}/messages`);
           if (msgRes.ok) {
@@ -142,6 +144,9 @@ export default function ChatWidget() {
   // ── Customer heartbeat ─────────────────────────────────────────────────────
   useEffect(() => {
     if (!dbSessionId) return;
+    // Once the session is closed there's nothing to keep alive; skip heartbeats
+    // entirely until the customer starts a fresh session.
+    if (sessionState === "closed") return;
 
     const ping = () => {
       fetch(`/api/sessions/${dbSessionId}/heartbeat`, { method: "POST" }).catch(() => {});
@@ -173,7 +178,7 @@ export default function ChatWidget() {
       document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("beforeunload", sendEnd);
     };
-  }, [dbSessionId]);
+  }, [dbSessionId, sessionState]);
 
   // ── Polling fallback for missed Pusher events ───────────────────────────────
   useEffect(() => {
@@ -260,8 +265,16 @@ export default function ChatWidget() {
     setMessages((prev) => mergeRealMessage(prev, data));
     if (data.role === "ai" || data.role === "agent") {
       setWaitingForReply(false);
+      // Also transition from "waiting" → "active_ai" here. `session-claimed`
+      // and `new-message` are independent Pusher events; if `new-message`
+      // arrives first the session is still queued, and without this branch
+      // the amber waiting banner would persist alongside the AI's reply.
       setSessionState((prev) =>
-        data.role === "agent" ? "active_human" : prev === "idle" ? "active_ai" : prev
+        data.role === "agent"
+          ? "active_human"
+          : prev === "idle" || prev === "waiting"
+            ? "active_ai"
+            : prev
       );
     }
   }, []);
@@ -280,6 +293,33 @@ export default function ChatWidget() {
 
   const handleReleased = useCallback(() => {
     setSessionState("waiting");
+  }, []);
+
+  const handleClosed = useCallback(() => {
+    setSessionState("closed");
+    setWaitingForReply(false);
+    if (typingClearRef.current) {
+      clearTimeout(typingClearRef.current);
+      typingClearRef.current = null;
+    }
+  }, []);
+
+  // Starts a fresh session: rotate the sessionStorage key so the init effect
+  // creates a new DB session. Existing message history is cleared from view.
+  const startNewSession = useCallback(() => {
+    const fresh = `embed_${crypto.randomUUID()}`;
+    try {
+      sessionStorage.setItem(EMBED_CUSTOMER_STORAGE_KEY, fresh);
+    } catch {
+      // ignore storage failures; we still rotate in-memory
+    }
+    setMessages([]);
+    setDbSessionId(null);
+    setSessionState("idle");
+    setWaitingForReply(false);
+    setInput("");
+    sessionInitStartedForKey.current = null;
+    setVisitorKey(fresh);
   }, []);
 
   useEffect(() => {
@@ -302,10 +342,12 @@ export default function ChatWidget() {
       channel.unbind("typing");
       channel.unbind("session-claimed");
       channel.unbind("session-released");
+      channel.unbind("session-closed");
       channel.bind("new-message", handleNewMessage);
       channel.bind("typing", handleTyping);
       channel.bind("session-claimed", handleClaimed);
       channel.bind("session-released", handleReleased);
+      channel.bind("session-closed", handleClosed);
       console.log(
         "[Pusher] new-message handler count after bind:",
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -318,7 +360,7 @@ export default function ChatWidget() {
       channel?.unbind_all();
       pusherInstance?.unsubscribe(`session-${dbSessionId}`);
     };
-  }, [dbSessionId, handleNewMessage, handleTyping, handleClaimed, handleReleased]);
+  }, [dbSessionId, handleNewMessage, handleTyping, handleClaimed, handleReleased, handleClosed]);
 
   // ── Auto-scroll ─────────────────────────────────────────────────────────────
   const userScrolledUp = useRef(false);
@@ -353,6 +395,7 @@ export default function ChatWidget() {
   const sendMessage = async () => {
     const trimmed = input.trim();
     if (!trimmed || sendInFlightRef.current) return;
+    if (sessionState === "closed") return;
     sendInFlightRef.current = true;
     const content = trimmed;
     setInput("");
@@ -424,6 +467,20 @@ export default function ChatWidget() {
 
       const data = await res.json().catch(() => ({}));
 
+      if (res.status === 410 || data.code === "session_closed") {
+        // Server says this session has ended. Drop the optimistic temp,
+        // flip into closed state so the UI offers a fresh-start CTA.
+        setMessages((prev) => prev.filter((m) => m.id !== tempMsg.id));
+        setSessionState("closed");
+        setWaitingForReply(false);
+        appendLocalError(
+          typeof data.error === "string"
+            ? data.error
+            : "This conversation has ended. Please start a new chat."
+        );
+        return;
+      }
+
       if (!res.ok) {
         appendLocalError(
           typeof data.error === "string"
@@ -462,12 +519,29 @@ export default function ChatWidget() {
 
   // ── Status banner for the customer ─────────────────────────────────────────
   const renderStatusBanner = () => {
-    if (sessionState === "waiting") {
+    // Only show "Waiting for an agent" once the customer has actually said
+    // something. A freshly-created session is `waiting` server-side by default,
+    // so without this guard the amber banner would appear on the welcome screen
+    // before the customer has typed anything.
+    if (
+      sessionState === "waiting" &&
+      messages.some((m) => m.role === "customer")
+    ) {
       return (
         <div className="flex items-center gap-2 py-2 px-3 mx-1 my-1 bg-amber-50 rounded-lg border border-amber-100">
           <Clock size={13} className="text-amber-500 shrink-0 animate-pulse" />
           <span className="text-xs text-amber-700">
             Waiting for an agent — we&apos;ll be with you shortly.
+          </span>
+        </div>
+      );
+    }
+    if (sessionState === "active_ai") {
+      return (
+        <div className="flex items-center gap-2 py-2 px-3 mx-1 my-1 bg-blue-50 rounded-lg border border-blue-100">
+          <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />
+          <span className="text-xs text-blue-700">
+            AI Assistant is helping you. A team member can take over if needed.
           </span>
         </div>
       );
@@ -531,42 +605,61 @@ export default function ChatWidget() {
         )}
       </div>
       <div className="relative z-20 border-t border-border bg-surface px-3 py-3 shrink-0">
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key !== "Enter" || e.shiftKey) return;
-              e.preventDefault();
-              void sendMessage();
-            }}
-            placeholder="Type your message..."
-            data-testid="chat-input"
-            autoComplete="off"
-            className="flex-1 px-3.5 py-2.5 text-sm border border-border rounded-full focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent bg-background"
-          />
-          <button
-            type="button"
-            onClick={() => void sendMessage()}
-            disabled={!input.trim() || sending}
-            aria-busy={sending}
-            data-testid="chat-send"
-            className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors text-white shrink-0 ${
-              !input.trim()
-                ? "bg-accent/35 cursor-not-allowed opacity-60"
-                : sending
-                  ? "bg-accent/80 cursor-wait"
-                  : "bg-accent hover:bg-accent/90"
-            }`}
-          >
-            {sending ? (
-              <Loader2 size={16} className="animate-spin" aria-hidden />
-            ) : (
-              <Send size={16} aria-hidden />
-            )}
-          </button>
-        </div>
+        {sessionState === "closed" ? (
+          <div className="flex flex-col items-center gap-2 py-2">
+            <p
+              className="text-xs text-text-secondary text-center"
+              data-testid="chat-ended-message"
+            >
+              This conversation has ended.
+            </p>
+            <button
+              type="button"
+              onClick={startNewSession}
+              data-testid="chat-start-new"
+              className="px-4 py-2 text-sm font-medium rounded-full bg-accent text-white hover:bg-accent/90 transition-colors"
+            >
+              Start a new chat
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" || e.shiftKey) return;
+                e.preventDefault();
+                void sendMessage();
+              }}
+              placeholder="Type your message..."
+              data-testid="chat-input"
+              autoComplete="off"
+              className="flex-1 px-3.5 py-2.5 text-sm border border-border rounded-full focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent bg-background"
+            />
+            <button
+              type="button"
+              onClick={() => void sendMessage()}
+              disabled={!input.trim() || sending}
+              aria-busy={sending}
+              data-testid="chat-send"
+              className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors text-white shrink-0 ${
+                !input.trim()
+                  ? "bg-accent/35 cursor-not-allowed opacity-60"
+                  : sending
+                    ? "bg-accent/80 cursor-wait"
+                    : "bg-accent hover:bg-accent/90"
+              }`}
+            >
+              {sending ? (
+                <Loader2 size={16} className="animate-spin" aria-hidden />
+              ) : (
+                <Send size={16} aria-hidden />
+              )}
+            </button>
+          </div>
+        )}
         <p className="text-[10px] text-text-secondary text-center mt-2">
           Powered by Performance Cycle
         </p>
