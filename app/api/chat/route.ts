@@ -173,8 +173,40 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // If already claimed by AI, the existing session is being handled
+    // If already claimed by AI — respond inline to every follow-up
     if (session.claimedByKind === "ai") {
+      try {
+        const { system, conversationMessages } = await buildPrompt(
+          sessionId,
+          message,
+          enrichedContext
+        );
+        const aiResponse = await callClaude(system, conversationMessages);
+        const [aiMsg] = await db
+          .insert(messages)
+          .values({ sessionId, role: "ai", content: aiResponse })
+          .returning();
+        const pusher = getPusher();
+        await pusher.trigger(`session-${sessionId}`, "new-message", {
+          id: aiMsg.id,
+          role: "ai",
+          content: aiMsg.content,
+          sentAt: aiMsg.sentAt,
+        });
+        await pusher.trigger("dashboard", "session-update", {
+          sessionId,
+          lastMessage: aiMsg.content,
+          role: "ai",
+        });
+        return NextResponse.json({
+          message: savedMessage,
+          aiMessage: aiMsg,
+          sessionStatus: "active_ai",
+          productMention,
+        });
+      } catch (err) {
+        console.error("Inline AI follow-up failed:", err);
+      }
       return NextResponse.json({
         message: savedMessage,
         sessionStatus: "active_ai",

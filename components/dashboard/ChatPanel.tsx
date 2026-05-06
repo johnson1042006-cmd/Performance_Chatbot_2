@@ -57,6 +57,7 @@ export default function ChatPanel({
   const [onlineAgents, setOnlineAgents] = useState<OnlineAgent[]>([]);
   const [reassigning, setReassigning] = useState(false);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const isManager = authSession?.user?.role === "store_manager";
   const isHuman = sessionClaimedByKind === "human" || sessionStatus === "active_human";
@@ -157,6 +158,14 @@ export default function ChatPanel({
     setJustClaimed(false);
   }, [sessionId]);
 
+  const emitTyping = useCallback(() => {
+    if (typingTimeoutRef.current) return;
+    typingTimeoutRef.current = setTimeout(() => {
+      typingTimeoutRef.current = null;
+    }, 2000);
+    fetch(`/api/sessions/${sessionId}/typing`, { method: "POST" }).catch(() => {});
+  }, [sessionId]);
+
   const handleClaim = async () => {
     try {
       const res = await fetch("/api/sessions/claim", {
@@ -204,6 +213,10 @@ export default function ChatPanel({
     const content = input.trim();
     setInput("");
     setSending(true);
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
 
     try {
       await fetch("/api/chat", {
@@ -322,7 +335,7 @@ export default function ChatPanel({
             <input
               type="text"
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => { setInput(e.target.value); if (isMyChat) emitTyping(); }}
               onKeyDown={(e) =>
                 e.key === "Enter" && !e.shiftKey && sendAgentMessage()
               }

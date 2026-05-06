@@ -86,6 +86,7 @@ export default function ChatWidget() {
   const sessionInitStartedForKey = useRef<string | null>(null);
   const sendInFlightRef = useRef(false);
   const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
+  const typingClearRef = useRef<NodeJS.Timeout | null>(null);
   const dbSessionIdRef = useRef<string | null>(null);
   dbSessionIdRef.current = dbSessionId;
 
@@ -225,6 +226,12 @@ export default function ChatWidget() {
     import("@/lib/pusher/client").then(({ getPusherClient }) => {
       const pusher = getPusherClient();
       const channel = pusher.subscribe(`session-${dbSessionId}`);
+
+      channel.bind("typing", () => {
+        setWaitingForReply(true);
+        if (typingClearRef.current) clearTimeout(typingClearRef.current);
+        typingClearRef.current = setTimeout(() => setWaitingForReply(false), 3000);
+      });
 
       channel.bind("new-message", (data: Message) => {
         setMessages((prev) => {
@@ -466,9 +473,17 @@ export default function ChatWidget() {
         ))}
         {renderStatusBanner()}
         {waitingForReply && sessionState !== "waiting" && (
-          <div className="flex items-center gap-2 py-2 px-1">
+          <div className="flex items-center gap-1.5 py-2 px-1">
             <div className="w-7 h-7 bg-surface-elevated rounded-full flex items-center justify-center">
-              <Loader2 size={14} className="animate-spin text-text-secondary" />
+              <span className="flex gap-0.5">
+                {[0, 1, 2].map((i) => (
+                  <span
+                    key={i}
+                    className="w-1.5 h-1.5 rounded-full bg-text-secondary animate-bounce"
+                    style={{ animationDelay: `${i * 0.15}s` }}
+                  />
+                ))}
+              </span>
             </div>
             <span className="text-xs text-text-secondary">Typing...</span>
           </div>
