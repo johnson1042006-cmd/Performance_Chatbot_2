@@ -152,12 +152,10 @@ export default function ChatPanel({
     if (showReassign) fetchOnlineAgents();
   }, [showReassign, fetchOnlineAgents]);
 
-  // Clear optimistic flag if props confirm a different agent owns the session
+  // Reset optimistic flag when navigating to a different session
   useEffect(() => {
-    if (justClaimed && sessionClaimedBy?.id && sessionClaimedBy.id !== myId) {
-      setJustClaimed(false);
-    }
-  }, [justClaimed, sessionClaimedBy, myId]);
+    setJustClaimed(false);
+  }, [sessionId]);
 
   const handleClaim = async () => {
     try {

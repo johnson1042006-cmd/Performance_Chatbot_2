@@ -22,6 +22,7 @@ interface SessionQueueProps {
   onSelectSession: (sessionId: string) => void;
   onClaimSession: (sessionId: string) => void;
   onUnclaimedCountChange?: (count: number) => void;
+  refetchKey?: number;
 }
 
 export default function SessionQueue({
@@ -29,6 +30,7 @@ export default function SessionQueue({
   onSelectSession,
   onClaimSession,
   onUnclaimedCountChange,
+  refetchKey,
 }: SessionQueueProps) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,6 +53,11 @@ export default function SessionQueue({
   useEffect(() => {
     fetchSessions();
   }, [fetchSessions]);
+
+  useEffect(() => {
+    if (!refetchKey) return;
+    fetchSessions();
+  }, [refetchKey, fetchSessions]);
 
   // Pusher real-time updates
   useEffect(() => {

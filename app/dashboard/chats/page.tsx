@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { useSession } from "next-auth/react";
 import TopBar from "@/components/ui/TopBar";
 import Badge from "@/components/ui/Badge";
 import SessionQueue from "@/components/dashboard/SessionQueue";
@@ -17,8 +18,10 @@ interface SessionData {
 }
 
 export default function LiveChatsPage() {
+  const { data: authSession } = useSession();
   const [activeSession, setActiveSession] = useState<SessionData | null>(null);
   const [unclaimedCount, setUnclaimedCount] = useState(0);
+  const [queueRefetchKey, setQueueRefetchKey] = useState(0);
 
   const handleSelectSession = useCallback(async (sessionId: string) => {
     try {
@@ -40,11 +43,19 @@ export default function LiveChatsPage() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      if (data.session) setActiveSession(data.session);
+      if (data.session) {
+        setActiveSession({
+          ...data.session,
+          claimedBy: authSession?.user
+            ? { id: authSession.user.id!, name: authSession.user.name ?? "" }
+            : null,
+        });
+        setQueueRefetchKey((n) => n + 1);
+      }
     } catch (error) {
       console.error("Failed to claim:", error);
     }
-  }, []);
+  }, [authSession]);
 
   const handleReleaseSession = useCallback(async (sessionId: string) => {
     try {
@@ -108,6 +119,7 @@ export default function LiveChatsPage() {
             onSelectSession={handleSelectSession}
             onClaimSession={handleClaimSession}
             onUnclaimedCountChange={setUnclaimedCount}
+            refetchKey={queueRefetchKey}
           />
         </div>
         <div className="flex-1 bg-surface">
@@ -119,7 +131,19 @@ export default function LiveChatsPage() {
               sessionClaimedBy={activeSession.claimedBy}
               pageContext={activeSession.pageContext}
               onRelease={handleReleaseSession}
-              onClaim={() => { void handleSessionUpdate(); }}
+              onClaim={() => {
+                setActiveSession((prev) => {
+                  if (!prev || !authSession?.user) return prev;
+                  return {
+                    ...prev,
+                    status: "active_human",
+                    claimedByKind: "human",
+                    claimedBy: { id: authSession.user.id!, name: authSession.user.name ?? "" },
+                  };
+                });
+                setQueueRefetchKey((n) => n + 1);
+                void handleSessionUpdate();
+              }}
               onClose={handleCloseSession}
               onSessionUpdate={handleSessionUpdate}
             />
