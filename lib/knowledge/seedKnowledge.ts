@@ -2,7 +2,7 @@ import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { knowledgeBase } from "../db/schema";
 
-const entries = [
+export const entries = [
   {
     topic: "return_policy",
     content: `PERFORMANCE CYCLE RETURN & EXCHANGE POLICY (verbatim from performancecycle.com/returns-exchanges):
