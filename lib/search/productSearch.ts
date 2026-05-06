@@ -77,8 +77,8 @@ const PHRASE_SYNONYMS: [RegExp, string][] = [
   [/\bbalance\s+bike/gi, "stacyc balance bike"],
   // Model-name normalization — prevents single-char tokens (e.g. "x") from
   // being dropped by the length filter after punctuation stripping.
-  [/\bx[\s-]?fifteen\b/gi, "x-fifteen"],
-  [/\bx[\s-]?15\b/gi, "x-fifteen"],
+  [/\bx[\s-]?fifteen\b/gi, "x-15"],
+  [/\bx[\s-]?15\b/gi, "x-15"],
   [/\bs[\s-]?r[\s-]?7\b/gi, "s-r7"],
   [/\brs[\s-]?7\b/gi, "s-r7"],
   [/\bnz[\s-]?race\b/gi, "nz-race"],

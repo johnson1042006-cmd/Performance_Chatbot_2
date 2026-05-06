@@ -253,7 +253,7 @@ export async function searchProductsBC(query: string): Promise<BCProduct[]> {
   // 2. Known-model name:like lookup — direct match for model tokens that
   //    BigCommerce keyword indexing may not surface (e.g. "x-fifteen", "s-r7").
   const KNOWN_MODELS = [
-    "x-fifteen", "s-r7", "corsair-x", "nz-race",
+    "x-15", "s-r7", "corsair-x", "nz-race",
     "rf-1400", "rf-sr", "contour-x", "quantum-x", "kx-1", "r2r",
   ];
   const queryLower = query.toLowerCase();
