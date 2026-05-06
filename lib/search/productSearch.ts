@@ -400,7 +400,7 @@ function scoreRelevance(product: BCProduct, keywords: string[]): number {
   }
   if (isInStock(product)) score += 2;
   if (isPremiumBrand(product.name)) score += 1;
-  if ((product as any)._fromRaceCategory) score += 2;
+  if ((product as BCProduct & { _fromRaceCategory?: boolean })._fromRaceCategory) score += 2;
   return score;
 }
 
@@ -777,7 +777,7 @@ export async function searchProducts(
 
   // Tag race/touring category products before dedup so scoreRelevance can boost them
   for (const p of useCaseResults) {
-    (p as any)._fromRaceCategory = true;
+    (p as BCProduct & { _fromRaceCategory?: boolean })._fromRaceCategory = true;
   }
 
   // Use-case category results rank first (race/touring helmet intent)
