@@ -13,10 +13,19 @@ interface User {
   role: string;
   isActive: boolean;
   createdAt: string;
+  isOnline?: boolean;
+  lastHeartbeatAt?: string | null;
 }
 
 interface TeamTableProps {
   onInvite: () => void;
+}
+
+const ONLINE_THRESHOLD_MS = 60 * 1000;
+
+function isOnline(lastHeartbeatAt?: string | null): boolean {
+  if (!lastHeartbeatAt) return false;
+  return Date.now() - new Date(lastHeartbeatAt).getTime() < ONLINE_THRESHOLD_MS;
 }
 
 export default function TeamTable({ onInvite }: TeamTableProps) {
@@ -25,10 +34,28 @@ export default function TeamTable({ onInvite }: TeamTableProps) {
 
   const fetchUsers = useCallback(async () => {
     try {
-      const res = await fetch("/api/admin/users");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      if (data.users) setUsers(data.users);
+      const [usersRes, presenceRes] = await Promise.all([
+        fetch("/api/admin/users"),
+        fetch("/api/admin/team-presence"),
+      ]);
+      if (!usersRes.ok) throw new Error(`HTTP ${usersRes.status}`);
+      const usersData = await usersRes.json();
+      const presenceData = presenceRes.ok ? await presenceRes.json() : { agents: [] };
+
+      const presenceMap = new Map<string, { isOnline: boolean; lastHeartbeatAt: string | null }>(
+        (presenceData.agents ?? []).map((a: User & { isOnline: boolean }) => [
+          a.id,
+          { isOnline: a.isOnline, lastHeartbeatAt: a.lastHeartbeatAt ?? null },
+        ])
+      );
+
+      const merged: User[] = (usersData.users ?? []).map((u: User) => ({
+        ...u,
+        isOnline: presenceMap.get(u.id)?.isOnline ?? false,
+        lastHeartbeatAt: presenceMap.get(u.id)?.lastHeartbeatAt ?? null,
+      }));
+
+      setUsers(merged);
     } catch (error) {
       console.error("Failed to fetch users:", error);
     } finally {
@@ -38,6 +65,8 @@ export default function TeamTable({ onInvite }: TeamTableProps) {
 
   useEffect(() => {
     fetchUsers();
+    const id = setInterval(fetchUsers, 30_000);
+    return () => clearInterval(id);
   }, [fetchUsers]);
 
   const toggleActive = async (userId: string, currentActive: boolean) => {
@@ -81,6 +110,9 @@ export default function TeamTable({ onInvite }: TeamTableProps) {
                 Status
               </th>
               <th className="text-left px-6 py-3 font-medium text-text-secondary">
+                Presence
+              </th>
+              <th className="text-left px-6 py-3 font-medium text-text-secondary">
                 Joined
               </th>
               <th className="px-6 py-3"></th>
@@ -89,7 +121,7 @@ export default function TeamTable({ onInvite }: TeamTableProps) {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={6} className="px-6 py-8 text-center text-text-secondary">
+                <td colSpan={7} className="px-6 py-8 text-center text-text-secondary">
                   Loading...
                 </td>
               </tr>
@@ -119,6 +151,18 @@ export default function TeamTable({ onInvite }: TeamTableProps) {
                     >
                       {user.isActive ? "Active" : "Inactive"}
                     </Badge>
+                  </td>
+                  <td className="px-6 py-3">
+                    <span className="flex items-center gap-1.5">
+                      <span
+                        className={`w-2 h-2 rounded-full ${
+                          user.isOnline ? "bg-emerald-500" : "bg-gray-300"
+                        }`}
+                      />
+                      <span className="text-xs text-text-secondary">
+                        {user.isOnline ? "Online" : "Offline"}
+                      </span>
+                    </span>
                   </td>
                   <td className="px-6 py-3 text-text-secondary">
                     {new Date(user.createdAt).toLocaleDateString()}

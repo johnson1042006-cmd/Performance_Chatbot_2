@@ -9,6 +9,7 @@ import RecentConversations from "@/components/dashboard/manager/RecentConversati
 
 interface Analytics {
   queueSize: number;
+  unclaimedCount: number;
   chatsToday: number;
   openChats: number;
   recentSessions: Array<{
@@ -48,12 +49,12 @@ export default function AgentDashboard() {
           Welcome back, {firstName}
         </h2>
 
-        <div className="grid grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-4 gap-4 mb-6">
           <MetricCard
-            title="Queue Size"
-            value={analytics?.queueSize ?? 0}
+            title="Queued"
+            value={analytics?.unclaimedCount ?? 0}
             subtitle="Waiting for an agent"
-            accent
+            accent={Boolean(analytics?.unclaimedCount)}
           />
           <MetricCard
             title="Chats Today"

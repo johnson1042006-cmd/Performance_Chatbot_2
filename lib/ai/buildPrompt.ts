@@ -295,7 +295,7 @@ export async function buildPrompt(
         () => getProductByNameLike(accessorySubject.productName!, 3),
         [] as BCProduct[]
       );
-      if (candidates.length > 0 && candidates[0].id) return `ID:${candidates[0].id}`;
+      if (candidates.length > 0 && candidates[0].sku) return candidates[0].sku;
     }
     return null;
   }
@@ -509,14 +509,6 @@ ${AI_BEHAVIOR_RULES.map((r, i) => `${i + 1}. ${r.rule}`).join("\n\n")}
     system += `The product search returned no results for this message. This does NOT mean the store doesn't carry the item — it may just mean the search terms didn't match. DO NOT tell the customer to call the store or visit in person. Instead, ask them to be more specific (brand, product type, size, etc.) so you can search again. Performance Cycle carries over 5,000 products across helmets, jackets, boots, gloves, tires, parts, accessories, and more. CHECK THE STORE CATALOG in the knowledge base above — it lists every category and brand we carry. Use it to suggest relevant category browse links and confirm whether we likely stock what the customer is looking for.\n`;
   }
 
-  if (pairingResults.length > 0) {
-    system += `\n## PRODUCT PAIRINGS (recommended accessories/companions)\n\n`;
-    for (const pr of pairingResults) {
-      if (pr.product) {
-        system += `- ${formatProductForPrompt(pr.product)} [${pr.pairing.pairingType.replace(/_/g, " ")}]\n\n`;
-      }
-    }
-  }
 
   // Only drop the LAST message if it duplicates latestMessage. The previous
   // implementation removed every matching customer message, which broke

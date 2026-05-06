@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { runChatHistoryCleanup } from "@/lib/cleanup";
+import { runChatHistoryCleanup, sweepStaleSessions } from "@/lib/cleanup";
+import { processDueAiClaims } from "@/lib/sessions/state";
 
 export const dynamic = "force-dynamic";
 
@@ -18,8 +19,12 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const result = await runChatHistoryCleanup();
-    return NextResponse.json({ success: true, ...result });
+    const [result, staleClosed] = await Promise.all([
+      runChatHistoryCleanup(),
+      sweepStaleSessions(),
+      processDueAiClaims(),
+    ]);
+    return NextResponse.json({ success: true, staleClosed, ...result });
   } catch (error) {
     console.error("Cron cleanup error:", error);
     return NextResponse.json(

@@ -4,7 +4,28 @@ import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { sessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { releaseToQueue } from "@/lib/sessions/state";
+import { anyAgentsOnline } from "@/lib/presence";
+import { knowledgeBase } from "@/lib/db/schema";
 import { getPusher } from "@/lib/pusher/server";
+
+const DEFAULT_FALLBACK_SECONDS = 60;
+
+async function getFallbackSeconds(): Promise<number | null> {
+  try {
+    const [entry] = await db
+      .select()
+      .from(knowledgeBase)
+      .where(eq(knowledgeBase.topic, "bot_settings"))
+      .limit(1);
+    if (!entry) return null;
+    const p = JSON.parse(entry.content);
+    if (!p.aiEnabled) return null;
+    return Math.min(300, Math.max(10, Number(p.fallbackTimerSeconds) || DEFAULT_FALLBACK_SECONDS));
+  } catch {
+    return null;
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -36,6 +57,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Only the owning agent or a manager can release
     if (
       chatSession.claimedByUserId &&
       chatSession.claimedByUserId !== session.user.id &&
@@ -47,24 +69,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const [updated] = await db
-      .update(sessions)
-      .set({
-        status: "active_ai",
-        claimedByUserId: null,
-        claimedAt: null,
-      })
-      .where(eq(sessions.id, sessionId))
-      .returning();
+    // Determine new ai_claim_due_at when releasing
+    const fallbackSeconds = await getFallbackSeconds();
+    let newAiClaimDueAt: Date | null = null;
+    if (fallbackSeconds !== null) {
+      const agentsOnline = await anyAgentsOnline();
+      if (agentsOnline) {
+        newAiClaimDueAt = new Date(Date.now() + fallbackSeconds * 1000);
+      }
+    }
+
+    const updated = await releaseToQueue({
+      sessionId,
+      actorUserId: session.user.id,
+      aiClaimDueAt: newAiClaimDueAt,
+    });
 
     try {
       const pusher = getPusher();
       await pusher.trigger(`session-${sessionId}`, "session-released", {
         agentId: session.user.id,
       });
-      await pusher.trigger("dashboard", "session-released", {
-        sessionId,
-      });
+      await pusher.trigger("dashboard", "session-released", { sessionId });
     } catch (pusherError) {
       console.error("Pusher error (non-fatal):", pusherError);
     }

@@ -1,9 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import PageContextBadge from "./PageContextBadge";
-import { Clock } from "lucide-react";
+import { Clock, UserCheck } from "lucide-react";
 
 interface SessionCardProps {
   session: {
@@ -13,6 +14,9 @@ interface SessionCardProps {
     startedAt: string;
     status: string;
     claimedByUserId: string | null;
+    claimedByKind?: string | null;
+    claimedBy?: { id: string; name: string } | null;
+    waitSeconds?: number;
   };
   isActive?: boolean;
   onClaim?: (sessionId: string) => void;
@@ -21,23 +25,31 @@ interface SessionCardProps {
 
 function getDisplayName(identifier: string): string {
   if (identifier.startsWith("Customer #")) return identifier;
-  // Generate a short friendly name from non-standard identifiers
   const hash = identifier.slice(-4).toUpperCase();
   return `Customer ${hash}`;
 }
 
-function getWaitTime(startedAt: string): { text: string; variant: "success" | "warning" | "danger" } {
-  const seconds = Math.floor(
-    (Date.now() - new Date(startedAt).getTime()) / 1000
+function useWaitTimer(startedAt: string) {
+  const [seconds, setSeconds] = useState(() =>
+    Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000)
   );
-  if (seconds < 60) {
-    return { text: `${seconds}s`, variant: "success" };
-  }
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 5) {
-    return { text: `${minutes}m ${seconds % 60}s`, variant: seconds < 90 ? "success" : "warning" };
-  }
-  return { text: `${minutes}m`, variant: "danger" };
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setSeconds(Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [startedAt]);
+
+  return seconds;
+}
+
+function formatWait(seconds: number): { text: string; variant: "success" | "warning" | "danger" } {
+  if (seconds < 60) return { text: `${seconds}s`, variant: "success" };
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (m < 5) return { text: `${m}m ${s}s`, variant: seconds < 90 ? "success" : "warning" };
+  return { text: `${m}m`, variant: "danger" };
 }
 
 export default function SessionCard({
@@ -46,19 +58,34 @@ export default function SessionCard({
   onClaim,
   onSelect,
 }: SessionCardProps) {
-  const wait = getWaitTime(session.startedAt);
-  const statusBadge = {
-    waiting: { label: "Waiting", variant: "warning" as const },
-    active_human: { label: "Human", variant: "success" as const },
-    active_ai: { label: "AI Active", variant: "ai" as const },
-    closed: { label: "Closed", variant: "default" as const },
-  }[session.status] || { label: session.status, variant: "default" as const };
+  const waitSeconds = useWaitTimer(session.startedAt);
+  const wait = formatWait(waitSeconds);
+
+  const isUnclaimed = session.status === "waiting" || !session.claimedByKind;
+  const isAi = session.claimedByKind === "ai" || session.status === "active_ai";
+  const isHuman = session.claimedByKind === "human" || session.status === "active_human";
+
+  const statusBadge = isUnclaimed
+    ? { label: "In Queue", variant: "warning" as const }
+    : isAi
+    ? { label: "AI Active", variant: "ai" as const }
+    : isHuman
+    ? { label: "Human Active", variant: "success" as const }
+    : { label: session.status, variant: "default" as const };
+
+  const borderColor = isUnclaimed
+    ? "border-l-amber-400"
+    : isAi
+    ? "border-l-purple-400"
+    : isHuman
+    ? "border-l-emerald-400"
+    : "";
 
   return (
     <div
       onClick={() => onSelect?.(session.id)}
       className={`p-3 border-b border-border cursor-pointer transition-colors hover:bg-background ${
-        isActive ? "bg-accent/5 border-l-2 border-l-accent" : ""
+        isActive ? `bg-accent/5 border-l-2 ${borderColor || "border-l-accent"}` : ""
       }`}
     >
       <div className="flex items-start justify-between mb-2">
@@ -66,14 +93,28 @@ export default function SessionCard({
           <p className="text-sm font-medium text-text-primary truncate">
             {getDisplayName(session.customerIdentifier)}
           </p>
-          <div className="flex items-center gap-2 mt-1">
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
             <Badge variant={statusBadge.variant} dot>
               {statusBadge.label}
             </Badge>
-            <span className="flex items-center gap-1 text-xs text-text-secondary">
-              <Clock size={10} />
-              {wait.text}
-            </span>
+            {isUnclaimed && (
+              <span className={`flex items-center gap-1 text-xs font-medium ${
+                wait.variant === "danger"
+                  ? "text-red-600"
+                  : wait.variant === "warning"
+                  ? "text-amber-600"
+                  : "text-text-secondary"
+              }`}>
+                <Clock size={10} />
+                waiting {wait.text}
+              </span>
+            )}
+            {(isAi || isHuman) && session.claimedBy && (
+              <span className="flex items-center gap-1 text-xs text-text-secondary">
+                <UserCheck size={10} />
+                {isHuman ? session.claimedBy.name : "AI"}
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -83,7 +124,7 @@ export default function SessionCard({
         compact
       />
 
-      {session.status === "waiting" && onClaim && (
+      {isUnclaimed && onClaim && (
         <Button
           variant="primary"
           size="sm"

@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { db } from "@/lib/db";
-import { sessions } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { claimByHuman } from "@/lib/sessions/state";
 import { getPusher } from "@/lib/pusher/server";
 
 export async function POST(req: NextRequest) {
@@ -23,52 +21,39 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const [chatSession] = await db
-      .select()
-      .from(sessions)
-      .where(eq(sessions.id, sessionId))
-      .limit(1);
+    const result = await claimByHuman({
+      sessionId,
+      userId: session.user.id,
+    });
 
-    if (!chatSession) {
+    if (!result.claimed) {
       return NextResponse.json(
-        { error: "Session not found" },
-        { status: 404 }
-      );
-    }
-
-    if (chatSession.status === "active_human" && chatSession.claimedByUserId !== session.user.id) {
-      return NextResponse.json(
-        { error: "Session already claimed by another agent" },
+        {
+          error: "Session already claimed",
+          claimedBy: result.claimedByUser ?? null,
+        },
         { status: 409 }
       );
     }
-
-    const [updated] = await db
-      .update(sessions)
-      .set({
-        status: "active_human",
-        claimedByUserId: session.user.id,
-        claimedAt: new Date(),
-      })
-      .where(eq(sessions.id, sessionId))
-      .returning();
 
     try {
       const pusher = getPusher();
       await pusher.trigger(`session-${sessionId}`, "session-claimed", {
         agentId: session.user.id,
         agentName: session.user.name,
+        kind: "human",
       });
       await pusher.trigger("dashboard", "session-claimed", {
         sessionId,
         agentId: session.user.id,
         agentName: session.user.name,
+        kind: "human",
       });
     } catch (pusherError) {
       console.error("Pusher error (non-fatal):", pusherError);
     }
 
-    return NextResponse.json({ session: updated });
+    return NextResponse.json({ session: result.session });
   } catch (error) {
     console.error("Claim error:", error);
     return NextResponse.json(

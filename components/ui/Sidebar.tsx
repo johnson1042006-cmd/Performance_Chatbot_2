@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
+import { useEffect, useState, useCallback } from "react";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -62,10 +63,50 @@ export default function Sidebar() {
   const { data: session } = useSession();
   const role = session?.user?.role;
   const isManager = role === "store_manager";
+  const [unclaimedCount, setUnclaimedCount] = useState(0);
 
   const filteredItems = navItems.filter(
     (item) => !item.managerOnly || isManager
   );
+
+  const fetchUnclaimedCount = useCallback(async () => {
+    try {
+      const res = await fetch("/api/sessions");
+      if (!res.ok) return;
+      const data = await res.json();
+      setUnclaimedCount(data.unclaimedCount ?? 0);
+    } catch {
+      // non-fatal
+    }
+  }, []);
+
+  // Poll every 15s for unclaimed badge
+  useEffect(() => {
+    fetchUnclaimedCount();
+    const id = setInterval(fetchUnclaimedCount, 15_000);
+
+    // Also listen for Pusher dashboard events
+    let pusherCleanup = () => {};
+    import("@/lib/pusher/client")
+      .then(({ getPusherClient }) => {
+        const pusher = getPusherClient();
+        const channel = pusher.subscribe("dashboard");
+        channel.bind("session-update", fetchUnclaimedCount);
+        channel.bind("session-claimed", fetchUnclaimedCount);
+        channel.bind("session-released", fetchUnclaimedCount);
+        channel.bind("session-closed", fetchUnclaimedCount);
+        pusherCleanup = () => {
+          channel.unbind_all();
+          pusher.unsubscribe("dashboard");
+        };
+      })
+      .catch(() => {});
+
+    return () => {
+      clearInterval(id);
+      pusherCleanup();
+    };
+  }, [fetchUnclaimedCount]);
 
   return (
     <aside className="w-60 h-screen bg-primary flex flex-col shrink-0">
@@ -85,6 +126,7 @@ export default function Sidebar() {
           const isActive =
             pathname === item.href ||
             (item.href !== "/dashboard" && pathname.startsWith(item.href));
+          const isLiveChats = item.href === "/dashboard/chats";
           return (
             <Link
               key={item.href}
@@ -96,7 +138,12 @@ export default function Sidebar() {
               }`}
             >
               {item.icon}
-              {item.label}
+              <span className="flex-1">{item.label}</span>
+              {isLiveChats && unclaimedCount > 0 && (
+                <span className="ml-auto bg-amber-500 text-white text-xs font-bold rounded-full px-1.5 py-0.5 min-w-[18px] text-center">
+                  {unclaimedCount}
+                </span>
+              )}
             </Link>
           );
         })}

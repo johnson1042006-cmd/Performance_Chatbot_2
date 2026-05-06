@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { buildPrompt } from "@/lib/ai/buildPrompt";
 import { callClaude, CALL_CLAUDE_ERROR_MESSAGE } from "@/lib/ai/callClaude";
 import { getPusher } from "@/lib/pusher/server";
+import { claimByAi } from "@/lib/sessions/state";
 
 export const maxDuration = 60;
 
@@ -33,18 +34,23 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (session.status === "active_human") {
+    if (session.claimedByKind === "human") {
       return NextResponse.json({
         skipped: true,
         reason: "Session is handled by a human agent",
       });
     }
 
-    if (session.status === "waiting") {
-      await db
-        .update(sessions)
-        .set({ status: "active_ai" })
-        .where(eq(sessions.id, sessionId));
+    // Race-safe AI claim — a human clicking Claim at the last millisecond wins
+    if (!session.claimedByKind) {
+      const won = await claimByAi(sessionId);
+      if (!won) {
+        // A human claimed it just now
+        return NextResponse.json({
+          skipped: true,
+          reason: "Session is handled by a human agent",
+        });
+      }
     }
 
     let system: string;

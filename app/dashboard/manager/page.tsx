@@ -10,6 +10,7 @@ interface Analytics {
   chatsToday: number;
   aiPercent: number;
   openChats: number;
+  unclaimedCount: number;
   totalMessages: number;
   recentSessions: Array<{
     id: string;
@@ -42,7 +43,7 @@ export default function ManagerDashboard() {
     <>
       <TopBar title="Hub" />
       <div className="flex-1 overflow-y-auto p-6">
-        <div className="grid grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-5 gap-4 mb-6">
           <MetricCard
             title="Chats Today"
             value={analytics?.chatsToday ?? 0}
@@ -63,6 +64,12 @@ export default function ManagerDashboard() {
             title="Open Chats"
             value={analytics?.openChats ?? 0}
             subtitle="Active sessions"
+          />
+          <MetricCard
+            title="Queued"
+            value={analytics?.unclaimedCount ?? 0}
+            subtitle="Waiting for agent"
+            accent={Boolean(analytics?.unclaimedCount)}
           />
         </div>
 

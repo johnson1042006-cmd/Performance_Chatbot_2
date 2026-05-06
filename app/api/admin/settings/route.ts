@@ -52,6 +52,11 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
 
+    // Server-side validation / defence-in-depth
+    if (typeof body.fallbackTimerSeconds === "number") {
+      body.fallbackTimerSeconds = Math.min(300, Math.max(10, Math.round(body.fallbackTimerSeconds)));
+    }
+
     await db
       .insert(knowledgeBase)
       .values({

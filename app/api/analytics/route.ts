@@ -3,7 +3,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { sessions, messages } from "@/lib/db/schema";
-import { eq, gte, sql, and, ne } from "drizzle-orm";
+import { eq, gte, sql, and, ne, isNull } from "drizzle-orm";
+import { sweepStaleSessions, processDueAiClaims } from "@/lib/sessions/state";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,9 @@ export async function GET() {
     if (!session?.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    // Sweep first so open/queued counts are accurate
+    await Promise.allSettled([sweepStaleSessions(), processDueAiClaims()]);
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -41,6 +45,16 @@ export async function GET() {
       .select({ count: sql<number>`count(*)::int` })
       .from(sessions)
       .where(eq(sessions.status, "waiting"));
+
+    const [unclaimedCount] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(sessions)
+      .where(
+        and(
+          ne(sessions.status, "closed"),
+          isNull(sessions.claimedByKind)
+        )
+      );
 
     const [totalMessages] = await db
       .select({ count: sql<number>`count(*)::int` })
@@ -96,6 +110,7 @@ export async function GET() {
       aiPercent,
       openChats: openChats?.count || 0,
       queueSize: queueCount?.count || 0,
+      unclaimedCount: unclaimedCount?.count || 0,
       totalMessages: totalMessages?.count || 0,
       aiMessages: aiMessages[0]?.count || 0,
       agentMessages: agentMessages[0]?.count || 0,

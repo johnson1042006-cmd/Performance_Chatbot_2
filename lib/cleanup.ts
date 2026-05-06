@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { sessions, messages, knowledgeBase } from "@/lib/db/schema";
 import { eq, lt, inArray } from "drizzle-orm";
+export { sweepStaleSessions } from "@/lib/sessions/state";
 
 export interface CleanupResult {
   ranAt: string;

@@ -1,31 +1,53 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { sessions } from "@/lib/db/schema";
-import { and, desc, eq, lt, ne } from "drizzle-orm";
-
-const STALE_SESSION_HOURS = 24;
+import { sessions, users } from "@/lib/db/schema";
+import { and, asc, desc, eq, isNull, ne } from "drizzle-orm";
+import { processDueAiClaims, sweepStaleSessions } from "@/lib/sessions/state";
 
 export async function GET() {
   try {
-    // Auto-close sessions that have been open for more than 24 hours
-    const staleThreshold = new Date(Date.now() - STALE_SESSION_HOURS * 60 * 60 * 1000);
-    await db
-      .update(sessions)
-      .set({ status: "closed", closedAt: new Date() })
-      .where(
-        and(
-          ne(sessions.status, "closed"),
-          lt(sessions.startedAt, staleThreshold)
-        )
+    // Lazy tick: expire stale sessions and process AI claims
+    await Promise.allSettled([sweepStaleSessions(), processDueAiClaims()]);
+
+    const rows = await db
+      .select({
+        session: sessions,
+        claimerName: users.name,
+        claimerId: users.id,
+      })
+      .from(sessions)
+      .leftJoin(users, eq(sessions.claimedByUserId, users.id))
+      .where(ne(sessions.status, "closed"))
+      .orderBy(
+        // Unclaimed sessions oldest-first, then claimed sessions newest-first
+        asc(sessions.startedAt)
       );
 
-    const allSessions = await db
-      .select()
-      .from(sessions)
-      .where(ne(sessions.status, "closed"))
-      .orderBy(desc(sessions.startedAt));
+    const enriched = rows.map(({ session, claimerName, claimerId }) => ({
+      ...session,
+      claimedBy: claimerId ? { id: claimerId, name: claimerName } : null,
+      waitSeconds: Math.floor(
+        (Date.now() - new Date(session.startedAt).getTime()) / 1000
+      ),
+    }));
 
-    return NextResponse.json({ sessions: allSessions });
+    // Sort: unclaimed (waiting) oldest first, claimed newest first
+    enriched.sort((a, b) => {
+      const aUnclaimed = a.status === "waiting";
+      const bUnclaimed = b.status === "waiting";
+      if (aUnclaimed && !bUnclaimed) return -1;
+      if (!aUnclaimed && bUnclaimed) return 1;
+      if (aUnclaimed && bUnclaimed) {
+        // Both unclaimed — oldest first
+        return new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime();
+      }
+      // Both claimed — newest first
+      return new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime();
+    });
+
+    const unclaimedCount = enriched.filter((s) => s.status === "waiting").length;
+
+    return NextResponse.json({ sessions: enriched, unclaimedCount });
   } catch (error) {
     console.error("Failed to fetch sessions:", error);
     return NextResponse.json(
@@ -40,10 +62,6 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { customerIdentifier, pageContext } = body;
 
-    // Use the client-supplied identifier when present (preserves session
-    // continuity for embed.js, which generates a stable per-visitor id);
-    // otherwise generate one on the server so direct visits to /embed and
-    // /chat without a sessionId still get a working session.
     const effectiveId =
       typeof customerIdentifier === "string" && customerIdentifier.length > 0
         ? customerIdentifier

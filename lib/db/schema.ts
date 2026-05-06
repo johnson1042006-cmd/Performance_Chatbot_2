@@ -37,6 +37,17 @@ export const pairingTypeEnum = pgEnum("pairing_type", [
   "frequently_bought",
 ]);
 
+export const claimKindEnum = pgEnum("claim_kind", ["ai", "human"]);
+
+export const chatEventTypeEnum = pgEnum("chat_event_type", [
+  "claimed_by_human",
+  "claimed_by_ai",
+  "released_to_queue",
+  "reassigned",
+  "closed",
+  "stale_closed",
+]);
+
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
   email: varchar("email", { length: 255 }).notNull().unique(),
@@ -46,6 +57,7 @@ export const users = pgTable("users", {
   avatarUrl: varchar("avatar_url", { length: 500 }),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  lastHeartbeatAt: timestamp("last_heartbeat_at"),
 });
 
 export const sessions = pgTable("sessions", {
@@ -57,6 +69,14 @@ export const sessions = pgTable("sessions", {
   claimedAt: timestamp("claimed_at"),
   status: sessionStatusEnum("status").notNull().default("waiting"),
   closedAt: timestamp("closed_at"),
+  // Claim kind is the source of truth; status is kept in sync for backward compat
+  claimedByKind: claimKindEnum("claimed_by_kind"),
+  // When this timestamp is in the past and claimedByUserId IS NULL, the AI auto-claims
+  aiClaimDueAt: timestamp("ai_claim_due_at"),
+  // Used to detect stale/abandoned customer sessions
+  lastCustomerActivityAt: timestamp("last_customer_activity_at").defaultNow().notNull(),
+  // Heartbeat from the embed widget while the tab is open
+  lastHeartbeatAt: timestamp("last_heartbeat_at"),
 });
 
 export const messages = pgTable("messages", {
@@ -122,6 +142,18 @@ export const productColorways = pgTable("product_colorways", {
   url: text("url"),
 });
 
+export const chatEvents = pgTable("chat_events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  sessionId: uuid("session_id")
+    .notNull()
+    .references(() => sessions.id),
+  type: chatEventTypeEnum("type").notNull(),
+  actorUserId: uuid("actor_user_id").references(() => users.id),
+  targetUserId: uuid("target_user_id").references(() => users.id),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
@@ -133,3 +165,5 @@ export type ProductPairing = typeof productPairings.$inferSelect;
 export type KnowledgeEntry = typeof knowledgeBase.$inferSelect;
 export type LocalCatalogEntry = typeof localCatalog.$inferSelect;
 export type ProductColorway = typeof productColorways.$inferSelect;
+export type ChatEvent = typeof chatEvents.$inferSelect;
+export type NewChatEvent = typeof chatEvents.$inferInsert;

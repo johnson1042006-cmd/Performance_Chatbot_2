@@ -11,11 +11,14 @@ import { MessageSquare } from "lucide-react";
 interface SessionData {
   id: string;
   status: string;
+  claimedByKind?: string | null;
+  claimedBy?: { id: string; name: string } | null;
   pageContext: Record<string, unknown> | null;
 }
 
 export default function LiveChatsPage() {
   const [activeSession, setActiveSession] = useState<SessionData | null>(null);
+  const [unclaimedCount, setUnclaimedCount] = useState(0);
 
   const handleSelectSession = useCallback(async (sessionId: string) => {
     try {
@@ -51,9 +54,8 @@ export default function LiveChatsPage() {
         body: JSON.stringify({ sessionId }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setActiveSession((prev) =>
-        prev?.id === sessionId ? { ...prev, status: "active_ai" } : prev
-      );
+      const data = await res.json();
+      if (data.session) setActiveSession(data.session);
     } catch (error) {
       console.error("Failed to release:", error);
     }
@@ -72,12 +74,29 @@ export default function LiveChatsPage() {
     }
   }, []);
 
+  const handleSessionUpdate = useCallback(async () => {
+    if (!activeSession) return;
+    try {
+      const res = await fetch(`/api/sessions/${activeSession.id}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.session) setActiveSession(data.session);
+    } catch {
+      // non-fatal
+    }
+  }, [activeSession]);
+
   return (
     <>
       <TopBar title="Live Chats">
         <Badge variant="success" dot>
           Online
         </Badge>
+        {unclaimedCount > 0 && (
+          <Badge variant="warning">
+            {unclaimedCount} queued
+          </Badge>
+        )}
       </TopBar>
       <div className="flex-1 flex overflow-hidden">
         <div className="w-[360px] border-r border-border bg-surface shrink-0 flex flex-col">
@@ -88,6 +107,7 @@ export default function LiveChatsPage() {
             activeSessionId={activeSession?.id || null}
             onSelectSession={handleSelectSession}
             onClaimSession={handleClaimSession}
+            onUnclaimedCountChange={setUnclaimedCount}
           />
         </div>
         <div className="flex-1 bg-surface">
@@ -95,10 +115,13 @@ export default function LiveChatsPage() {
             <ChatPanel
               sessionId={activeSession.id}
               sessionStatus={activeSession.status}
+              sessionClaimedByKind={activeSession.claimedByKind}
+              sessionClaimedBy={activeSession.claimedBy}
               pageContext={activeSession.pageContext}
               onRelease={handleReleaseSession}
               onClaim={handleClaimSession}
               onClose={handleCloseSession}
+              onSessionUpdate={handleSessionUpdate}
             />
           ) : (
             <EmptyState

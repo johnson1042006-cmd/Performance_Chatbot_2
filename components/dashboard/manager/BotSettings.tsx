@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import { Save, Bot, Trash2 } from "lucide-react";
@@ -19,31 +19,69 @@ const RETENTION_OPTIONS: { value: number; label: string }[] = [
   { value: 12, label: "12 months" },
 ];
 
+function clampTimer(n: number): number {
+  return Math.min(300, Math.max(10, n));
+}
+
 export default function BotSettings() {
   const [settings, setSettings] = useState<Settings>({
     aiEnabled: true,
     fallbackTimerSeconds: 60,
     historyRetentionMonths: 0,
   });
+  // Separate string state so users can type freely without mid-type clamping
+  const [fallbackInput, setFallbackInput] = useState("60");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  // Track whether the user has typed (dirty) so a server refetch doesn't overwrite
+  const dirtyRef = useRef(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetch("/api/admin/settings")
       .then((res) => res.json())
       .then((data) => {
-        if (data.settings) setSettings(data.settings);
+        if (!data.settings) return;
+        // Only overwrite local state when the field is not focused and not dirty
+        const focused = document.activeElement === inputRef.current;
+        if (!focused && !dirtyRef.current) {
+          setSettings(data.settings);
+          setFallbackInput(String(data.settings.fallbackTimerSeconds ?? 60));
+        }
       })
       .catch(console.error);
   }, []);
 
+  /** Commit the text field: validate, clamp, and sync into `settings`. */
+  function commitFallbackInput() {
+    const parsed = parseInt(fallbackInput, 10);
+    const clamped = Number.isNaN(parsed)
+      ? settings.fallbackTimerSeconds
+      : clampTimer(parsed);
+    setSettings((s) => ({ ...s, fallbackTimerSeconds: clamped }));
+    setFallbackInput(String(clamped));
+    dirtyRef.current = false;
+  }
+
   const handleSave = async () => {
+    // Always commit the text field before saving
+    commitFallbackInput();
+    // Read committed value directly (state update is async, so re-derive)
+    const parsed = parseInt(fallbackInput, 10);
+    const timerValue = Number.isNaN(parsed)
+      ? settings.fallbackTimerSeconds
+      : clampTimer(parsed);
+    const payload: Settings = {
+      ...settings,
+      fallbackTimerSeconds: timerValue,
+    };
+
     setSaving(true);
     try {
       const res = await fetch("/api/admin/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(settings),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error("Save failed");
       setSaved(true);
@@ -96,23 +134,21 @@ export default function BotSettings() {
               Fallback Timer (seconds)
             </label>
             <input
-              type="number"
-              min={10}
-              max={300}
-              value={settings.fallbackTimerSeconds}
-              onChange={(e) =>
-                setSettings((s) => ({
-                  ...s,
-                  fallbackTimerSeconds: parseInt(e.target.value) || 60,
-                }))
-              }
+              ref={inputRef}
+              type="text"
+              inputMode="numeric"
+              value={fallbackInput}
+              onChange={(e) => {
+                setFallbackInput(e.target.value);
+                dirtyRef.current = true;
+              }}
+              onBlur={commitFallbackInput}
               className="w-32 px-3 py-2 text-sm border border-border rounded-button focus:outline-none focus:ring-2 focus:ring-accent/20"
             />
             <p className="text-xs text-text-secondary mt-1">
-              Wait this many seconds before AI takes over (10-300)
+              Wait this many seconds before AI takes over (10–300)
             </p>
           </div>
-
         </div>
 
         <div className="py-3">

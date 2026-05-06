@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import ChatHeader from "./ChatHeader";
 import MessageBubble from "./MessageBubble";
-import { Send, Loader2 } from "lucide-react";
+import { Send, Loader2, Clock } from "lucide-react";
 
 interface Message {
   id: string;
@@ -23,17 +23,10 @@ interface PageContext {
   searchQuery: string | null;
 }
 
-interface BotSettings {
-  aiEnabled: boolean;
-  fallbackTimerSeconds: number;
-}
-
 const EMBED_CUSTOMER_STORAGE_KEY = "pc-embed-customer-id";
-/** On `/embed`, never wait longer than this before invoking AI (human-first window). */
-const EMBED_MAX_HUMAN_FIRST_WAIT_SECONDS = 6;
-
 const SESSION_FETCH_MS = 25_000;
 const CHAT_POST_MS = 55_000;
+const HEARTBEAT_INTERVAL_MS = 30_000;
 
 async function fetchWithTimeout(
   url: string,
@@ -53,8 +46,6 @@ export default function ChatWidget() {
   const searchParams = useSearchParams();
   const urlSessionId = searchParams.get("sessionId")?.trim() ?? "";
 
-  // Stable ID when embed.js omits sessionId: without this each POST used anon_UUID()
-  // and init skipped entirely (`customerIdentifier` was falsy), breaking continuity.
   const [visitorKey, setVisitorKey] = useState("");
   useEffect(() => {
     if (urlSessionId) {
@@ -81,28 +72,24 @@ export default function ChatWidget() {
   const [sending, setSending] = useState(false);
   const [waitingForReply, setWaitingForReply] = useState(false);
   const [pageContext, setPageContext] = useState<PageContext | null>(null);
-  const [agentClaimed, setAgentClaimed] = useState(false);
-  const [botSettings, setBotSettings] = useState<BotSettings>({
-    aiEnabled: true,
-    fallbackTimerSeconds: 60,
-  });
+  /**
+   * sessionState tracks what the server told us about claim status.
+   *  - 'idle'         initial / session not yet started
+   *  - 'waiting'      queued, no claim yet
+   *  - 'active_ai'    AI has claimed and responded
+   *  - 'active_human' human agent has claimed
+   */
+  const [sessionState, setSessionState] = useState<
+    "idle" | "waiting" | "active_ai" | "active_human"
+  >("idle");
   const scrollRef = useRef<HTMLDivElement>(null);
   const sessionInitStartedForKey = useRef<string | null>(null);
-  const fallbackTimerRef = useRef<NodeJS.Timeout | null>(null);
-  /** Sync guard so rapid double-clicks cannot enqueue two sends before React re-renders. */
   const sendInFlightRef = useRef(false);
+  const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
+  const dbSessionIdRef = useRef<string | null>(null);
+  dbSessionIdRef.current = dbSessionId;
 
-  const appendAiNotice = useCallback((text: string) => {
-    const notice: Message = {
-      id: `notice-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-      role: "ai",
-      content: text,
-      sentAt: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, notice]);
-    setWaitingForReply(false);
-  }, []);
-
+  // ── Page context from parent frame ─────────────────────────────────────────
   useEffect(() => {
     const handler = (event: MessageEvent) => {
       if (event.data?.type === "pc-page-context") {
@@ -113,13 +100,7 @@ export default function ChatWidget() {
     return () => window.removeEventListener("message", handler);
   }, []);
 
-  useEffect(() => {
-    fetch("/api/chat/settings")
-      .then((res) => res.json())
-      .then((data) => setBotSettings(data))
-      .catch(() => {});
-  }, []);
-
+  // ── Session init ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!customerIdentifier) return;
     if (sessionInitStartedForKey.current === customerIdentifier) return;
@@ -139,6 +120,11 @@ export default function ChatWidget() {
         const data = await res.json();
         if (data.session?.id) {
           setDbSessionId(data.session.id);
+          const status = data.session.status;
+          if (status === "active_human") setSessionState("active_human");
+          else if (status === "active_ai") setSessionState("active_ai");
+          else if (status === "waiting") setSessionState("waiting");
+
           const msgRes = await fetch(`/api/sessions/${data.session.id}/messages`);
           if (msgRes.ok) {
             const msgData = await msgRes.json();
@@ -152,17 +138,58 @@ export default function ChatWidget() {
     initSession();
   }, [customerIdentifier]);
 
+  // ── Customer heartbeat ─────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!dbSessionId) return;
+
+    const ping = () => {
+      fetch(`/api/sessions/${dbSessionId}/heartbeat`, { method: "POST" }).catch(() => {});
+    };
+
+    const sendEnd = () => {
+      navigator.sendBeacon(`/api/sessions/${dbSessionId}/end`);
+    };
+
+    // Start heartbeat
+    ping();
+    heartbeatRef.current = setInterval(() => {
+      if (document.visibilityState === "visible") ping();
+    }, HEARTBEAT_INTERVAL_MS);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        ping();
+      } else {
+        sendEnd();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("beforeunload", sendEnd);
+
+    return () => {
+      if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("beforeunload", sendEnd);
+    };
+  }, [dbSessionId]);
+
+  // ── Pusher subscription ─────────────────────────────────────────────────────
   const subscribeToChannel = useCallback(() => {
     if (!dbSessionId) return () => {};
     let cleanup = () => {};
     import("@/lib/pusher/client").then(({ getPusherClient }) => {
       const pusher = getPusherClient();
       const channel = pusher.subscribe(`session-${dbSessionId}`);
+
       channel.bind("new-message", (data: Message) => {
         setMessages((prev) => {
           if (prev.some((m) => m.id === data.id)) return prev;
           const tempMatch = prev.find(
-            (m) => m.id.startsWith("temp-") && m.content === data.content && m.role === data.role
+            (m) =>
+              m.id.startsWith("temp-") &&
+              m.content === data.content &&
+              m.role === data.role
           );
           if (tempMatch) {
             return prev.map((m) => (m.id === tempMatch.id ? data : m));
@@ -171,15 +198,25 @@ export default function ChatWidget() {
         });
         if (data.role === "ai" || data.role === "agent") {
           setWaitingForReply(false);
+          setSessionState((prev) =>
+            data.role === "agent" ? "active_human" : prev === "idle" ? "active_ai" : prev
+          );
         }
       });
-      channel.bind("session-claimed", () => {
-        setAgentClaimed(true);
-        if (fallbackTimerRef.current) {
-          clearTimeout(fallbackTimerRef.current);
-          fallbackTimerRef.current = null;
+
+      channel.bind(
+        "session-claimed",
+        (data: { kind?: string }) => {
+          if (data.kind === "human") setSessionState("active_human");
+          else if (data.kind === "ai") setSessionState("active_ai");
+          setWaitingForReply(false);
         }
+      );
+
+      channel.bind("session-released", () => {
+        setSessionState("waiting");
       });
+
       cleanup = () => {
         channel.unbind_all();
         pusher.unsubscribe(`session-${dbSessionId}`);
@@ -194,13 +231,12 @@ export default function ChatWidget() {
     return () => cleanup();
   }, [dbSessionId, subscribeToChannel]);
 
+  // ── Auto-scroll ─────────────────────────────────────────────────────────────
   const userScrolledUp = useRef(false);
-
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    userScrolledUp.current = distFromBottom > 80;
+    userScrolledUp.current = el.scrollHeight - el.scrollTop - el.clientHeight > 80;
   }, []);
 
   useEffect(() => {
@@ -211,43 +247,19 @@ export default function ChatWidget() {
     });
   }, [messages]);
 
-  const triggerAIFallback = async (latestMessage: string, sid: string) => {
-    try {
-      const res = await fetch("/api/chat/ai-fallback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: sid,
-          latestMessage,
-          pageContext,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (data.message) {
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === data.message.id)) return prev;
-          return [...prev, data.message];
-        });
-        setWaitingForReply(false);
-        return;
-      }
-      if (data.skipped && data.reason === "Session is handled by a human agent") {
-        appendAiNotice(
-          "A team member is handling this chat — they'll reply shortly."
-        );
-        return;
-      }
-      appendAiNotice(
-        typeof data.error === "string"
-          ? `${data.error} Please try sending your message again.`
-          : "Something went wrong generating a reply. Please try again."
-      );
-    } catch {
-      appendAiNotice(
-        "We couldn't reach the assistant. Check your connection and try again."
-      );
-    }
-  };
+  // ── Send message ────────────────────────────────────────────────────────────
+  const appendLocalError = useCallback((text: string) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `notice-${Date.now()}`,
+        role: "ai",
+        content: text,
+        sentAt: new Date().toISOString(),
+      },
+    ]);
+    setWaitingForReply(false);
+  }, []);
 
   const sendMessage = async () => {
     const trimmed = input.trim();
@@ -283,7 +295,7 @@ export default function ChatWidget() {
             SESSION_FETCH_MS
           );
         } catch {
-          appendAiNotice(
+          appendLocalError(
             "Could not reach the server to start chat (timed out). Check your connection and try again."
           );
           return;
@@ -296,8 +308,8 @@ export default function ChatWidget() {
       }
 
       if (!sid) {
-        appendAiNotice(
-          "We couldn't start your chat session (connection issue). Refresh and try again."
+        appendLocalError(
+          "We couldn't start your chat session. Refresh and try again."
         );
         return;
       }
@@ -309,26 +321,21 @@ export default function ChatWidget() {
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              message: content,
-              sessionId: sid,
-              pageContext,
-            }),
+            body: JSON.stringify({ message: content, sessionId: sid, pageContext }),
           },
           CHAT_POST_MS
         );
       } catch {
-        appendAiNotice(
-          "Your message timed out before the server responded. Try again."
-        );
+        appendLocalError("Your message timed out. Try again.");
         return;
       }
+
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        appendAiNotice(
+        appendLocalError(
           typeof data.error === "string"
-            ? `${data.error} Try again in a moment.`
+            ? `${data.error} Try again.`
             : "Your message didn't go through. Please try again."
         );
         return;
@@ -340,48 +347,48 @@ export default function ChatWidget() {
         );
       }
 
-      const onEmbed =
-        typeof window !== "undefined" &&
-        window.location.pathname.includes("/embed");
-      const humanFirstSeconds = onEmbed
-        ? Math.min(
-            botSettings.fallbackTimerSeconds,
-            EMBED_MAX_HUMAN_FIRST_WAIT_SECONDS
-          )
-        : botSettings.fallbackTimerSeconds;
-
-      // Sync agentClaimed from server session state — catches sessions claimed
-      // in a prior browser session where the Pusher event was missed
-      if (data.sessionStatus === "active_human") {
-        setAgentClaimed(true);
-        appendAiNotice(
-          "You're connected with our team — someone will reply shortly."
-        );
-      } else if (botSettings.aiEnabled && !agentClaimed) {
-        // waiting: give human agents the fallback window before AI takes over.
-        // On `/embed`, cap wait so visitors aren't staring at a blank chat for 60s.
-        const delay =
-          data.sessionStatus === "active_ai"
-            ? 2000
-            : humanFirstSeconds * 1000;
-
-        if (fallbackTimerRef.current) clearTimeout(fallbackTimerRef.current);
-        fallbackTimerRef.current = setTimeout(() => {
-          triggerAIFallback(content, sid!);
-        }, delay);
-      } else {
-        appendAiNotice(
-          "AI replies are turned off — our staff will respond when available."
-        );
+      // Update session state from server response
+      const serverStatus = data.sessionStatus as string | undefined;
+      if (serverStatus === "active_human") setSessionState("active_human");
+      else if (serverStatus === "active_ai") {
+        setSessionState("active_ai");
+        setWaitingForReply(false);
+      } else if (serverStatus === "waiting") {
+        setSessionState("waiting");
+        // Don't show "typing…" indefinitely when queued
+        setWaitingForReply(false);
       }
     } catch {
-      appendAiNotice(
-        "Something went wrong. Please refresh and try again."
-      );
+      appendLocalError("Something went wrong. Please refresh and try again.");
     } finally {
       sendInFlightRef.current = false;
       setSending(false);
     }
+  };
+
+  // ── Status banner for the customer ─────────────────────────────────────────
+  const renderStatusBanner = () => {
+    if (sessionState === "waiting") {
+      return (
+        <div className="flex items-center gap-2 py-2 px-3 mx-1 my-1 bg-amber-50 rounded-lg border border-amber-100">
+          <Clock size={13} className="text-amber-500 shrink-0 animate-pulse" />
+          <span className="text-xs text-amber-700">
+            Waiting for an agent… We'll be with you shortly.
+          </span>
+        </div>
+      );
+    }
+    if (sessionState === "active_human") {
+      return (
+        <div className="flex items-center gap-2 py-2 px-3 mx-1 my-1 bg-emerald-50 rounded-lg border border-emerald-100">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+          <span className="text-xs text-emerald-700">
+            You're connected with our team — they'll reply shortly.
+          </span>
+        </div>
+      );
+    }
+    return null;
   };
 
   return (
@@ -411,7 +418,8 @@ export default function ChatWidget() {
             agentName={msg.agentName}
           />
         ))}
-        {waitingForReply && (
+        {renderStatusBanner()}
+        {waitingForReply && sessionState !== "waiting" && (
           <div className="flex items-center gap-2 py-2 px-1">
             <div className="w-7 h-7 bg-surface-elevated rounded-full flex items-center justify-center">
               <Loader2 size={14} className="animate-spin text-text-secondary" />

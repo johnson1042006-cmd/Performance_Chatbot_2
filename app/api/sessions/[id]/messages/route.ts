@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { messages } from "@/lib/db/schema";
 import { eq, asc } from "drizzle-orm";
+import { processDueAiClaims, sweepStaleSessions } from "@/lib/sessions/state";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +11,9 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    // Lazy tick — run on each dashboard poll
+    await Promise.allSettled([sweepStaleSessions(), processDueAiClaims()]);
+
     const sessionMessages = await db
       .select()
       .from(messages)

@@ -12,20 +12,26 @@ interface Session {
   startedAt: string;
   status: string;
   claimedByUserId: string | null;
+  claimedByKind?: string | null;
+  claimedBy?: { id: string; name: string } | null;
+  waitSeconds?: number;
 }
 
 interface SessionQueueProps {
   activeSessionId: string | null;
   onSelectSession: (sessionId: string) => void;
   onClaimSession: (sessionId: string) => void;
+  onUnclaimedCountChange?: (count: number) => void;
 }
 
 export default function SessionQueue({
   activeSessionId,
   onSelectSession,
   onClaimSession,
+  onUnclaimedCountChange,
 }: SessionQueueProps) {
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [unclaimedCount, setUnclaimedCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -35,12 +41,15 @@ export default function SessionQueue({
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.sessions) setSessions(data.sessions);
+      const count = data.unclaimedCount ?? 0;
+      setUnclaimedCount(count);
+      onUnclaimedCountChange?.(count);
     } catch (error) {
       console.error("Failed to fetch sessions:", error);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [onUnclaimedCountChange]);
 
   useEffect(() => {
     fetchSessions();
@@ -62,13 +71,11 @@ export default function SessionQueue({
         channel.unbind_all();
         pusher.unsubscribe("dashboard");
       };
-    }).catch(() => {
-      // Pusher unavailable — handled by polling below
-    });
+    }).catch(() => {});
     return () => cleanup();
   }, [fetchSessions]);
 
-  // Polling fallback — refresh session list every 5 seconds
+  // Polling fallback — refresh every 5 seconds
   useEffect(() => {
     pollRef.current = setInterval(fetchSessions, 5000);
     return () => {
@@ -90,6 +97,9 @@ export default function SessionQueue({
     );
   }
 
+  const unclaimed = sessions.filter((s) => s.status === "waiting");
+  const claimed = sessions.filter((s) => s.status !== "waiting");
+
   if (sessions.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
@@ -107,16 +117,43 @@ export default function SessionQueue({
   }
 
   return (
-    <div className="overflow-y-auto">
-      {sessions.map((session) => (
-        <SessionCard
-          key={session.id}
-          session={session}
-          isActive={session.id === activeSessionId}
-          onSelect={onSelectSession}
-          onClaim={onClaimSession}
-        />
-      ))}
+    <div className="overflow-y-auto flex-1">
+      {unclaimed.length > 0 && (
+        <>
+          <div className="px-3 py-1.5 bg-amber-50 border-b border-amber-100">
+            <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
+              In Queue ({unclaimed.length})
+            </span>
+          </div>
+          {unclaimed.map((session) => (
+            <SessionCard
+              key={session.id}
+              session={session}
+              isActive={session.id === activeSessionId}
+              onSelect={onSelectSession}
+              onClaim={onClaimSession}
+            />
+          ))}
+        </>
+      )}
+      {claimed.length > 0 && (
+        <>
+          <div className="px-3 py-1.5 bg-background border-b border-border">
+            <span className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
+              Active ({claimed.length})
+            </span>
+          </div>
+          {claimed.map((session) => (
+            <SessionCard
+              key={session.id}
+              session={session}
+              isActive={session.id === activeSessionId}
+              onSelect={onSelectSession}
+              onClaim={onClaimSession}
+            />
+          ))}
+        </>
+      )}
     </div>
   );
 }
