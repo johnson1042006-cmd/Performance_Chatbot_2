@@ -250,35 +250,61 @@ export async function searchProductsBC(query: string): Promise<BCProduct[]> {
   const keywordResults = await getProductByKeyword(query);
   addResults(keywordResults);
 
-  // 2. Brand search — check if any word in the query matches a brand
-  const words = query.split(/\s+/);
-  for (const word of words) {
-    if (word.length < 2) continue;
-    const brand = await findBrandByName(word);
-    if (brand) {
-      const otherWords = words.filter((w) => w.toLowerCase() !== word.toLowerCase()).join(" ");
-      if (otherWords.length > 0) {
-        const brandKeyword = await getProductByKeyword(otherWords);
-        const brandFiltered = brandKeyword.filter((p) => p.brand_id === brand.id);
-        if (brandFiltered.length > 0) {
-          addResults(brandFiltered);
-        } else {
-          addResults(await getProductsByBrand(brand.id));
-        }
-      } else {
-        addResults(await getProductsByBrand(brand.id));
-      }
-      break;
+  // 2. Known-model name:like lookup — direct match for model tokens that
+  //    BigCommerce keyword indexing may not surface (e.g. "x-fifteen", "s-r7").
+  const KNOWN_MODELS = [
+    "x-fifteen", "s-r7", "corsair-x", "nz-race",
+    "rf-1400", "rf-sr", "contour-x", "quantum-x", "kx-1", "r2r",
+  ];
+  const queryLower = query.toLowerCase();
+  for (const model of KNOWN_MODELS) {
+    if (queryLower.includes(model)) {
+      const modelResults = await getProductByNameLike(model);
+      addResults(modelResults);
     }
   }
 
-  // 3. name:like fallback if keyword search missed things
+  // 3. Brand search — collect ALL brand matches, then search each (cap at 3).
+  //    Previously broke after the first brand, missing queries with two brands.
+  const words = query.split(/\s+/);
+  const detectedBrands: BCBrand[] = [];
+  for (const word of words) {
+    if (word.length < 2) continue;
+    const brand = await findBrandByName(word);
+    if (brand && !detectedBrands.find((b) => b.id === brand.id)) {
+      detectedBrands.push(brand);
+    }
+  }
+
+  const brandWordsLower = new Set(
+    words
+      .filter((w) => w.length >= 2)
+      .filter((w) => detectedBrands.some((b) => b.name.toLowerCase() === w.toLowerCase()))
+      .map((w) => w.toLowerCase())
+  );
+
+  for (const brand of detectedBrands.slice(0, 3)) {
+    const otherWords = words.filter((w) => !brandWordsLower.has(w.toLowerCase())).join(" ");
+    if (otherWords.length > 0) {
+      const brandKeyword = await getProductByKeyword(otherWords);
+      const brandFiltered = brandKeyword.filter((p) => p.brand_id === brand.id);
+      if (brandFiltered.length > 0) {
+        addResults(brandFiltered);
+      } else {
+        addResults(await getProductsByBrand(brand.id));
+      }
+    } else {
+      addResults(await getProductsByBrand(brand.id));
+    }
+  }
+
+  // 4. name:like fallback if keyword search missed things
   if (deduped.size < 3) {
     const nameLike = await getProductByNameLike(query);
     addResults(nameLike);
   }
 
-  // 4. Single-word fallback (longest first) — also fires when we have <3 results
+  // 5. Single-word fallback (longest first) — also fires when we have <3 results
   if (deduped.size < 3 && words.length > 1) {
     const sorted = [...words].filter((w) => w.length > 2).sort((a, b) => b.length - a.length);
     for (const word of sorted) {

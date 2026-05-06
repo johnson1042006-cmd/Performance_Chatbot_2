@@ -58,6 +58,7 @@ export default function ChatPanel({
   const [reassigning, setReassigning] = useState(false);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const sendInFlightRef = useRef(false);
 
   const isManager = authSession?.user?.role === "store_manager";
   const isHuman = sessionClaimedByKind === "human" || sessionStatus === "active_human";
@@ -209,7 +210,8 @@ export default function ChatPanel({
   };
 
   const sendAgentMessage = async () => {
-    if (!input.trim() || sending) return;
+    if (!input.trim() || sending || sendInFlightRef.current) return;
+    sendInFlightRef.current = true;
     const content = input.trim();
     setInput("");
     setSending(true);
@@ -233,6 +235,7 @@ export default function ChatPanel({
     } catch (error) {
       console.error("Failed to send:", error);
     } finally {
+      sendInFlightRef.current = false;
       setSending(false);
     }
   };

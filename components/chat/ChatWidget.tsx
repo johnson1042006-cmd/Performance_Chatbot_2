@@ -220,67 +220,68 @@ export default function ChatWidget() {
   }, [dbSessionId, sessionState]);
 
   // ── Pusher subscription ─────────────────────────────────────────────────────
-  const subscribeToChannel = useCallback(() => {
-    if (!dbSessionId) return () => {};
-    let cleanup = () => {};
-    import("@/lib/pusher/client").then(({ getPusherClient }) => {
-      const pusher = getPusherClient();
-      const channel = pusher.subscribe(`session-${dbSessionId}`);
-
-      channel.bind("typing", () => {
-        setWaitingForReply(true);
-        if (typingClearRef.current) clearTimeout(typingClearRef.current);
-        typingClearRef.current = setTimeout(() => setWaitingForReply(false), 3000);
-      });
-
-      channel.bind("new-message", (data: Message) => {
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === data.id)) return prev;
-          const tempMatch = prev.find(
-            (m) =>
-              m.id.startsWith("temp-") &&
-              m.content === data.content &&
-              m.role === data.role
-          );
-          if (tempMatch) {
-            return prev.map((m) => (m.id === tempMatch.id ? data : m));
-          }
-          return [...prev, data];
-        });
-        if (data.role === "ai" || data.role === "agent") {
-          setWaitingForReply(false);
-          setSessionState((prev) =>
-            data.role === "agent" ? "active_human" : prev === "idle" ? "active_ai" : prev
-          );
-        }
-      });
-
-      channel.bind(
-        "session-claimed",
-        (data: { kind?: string }) => {
-          if (data.kind === "human") setSessionState("active_human");
-          else if (data.kind === "ai") setSessionState("active_ai");
-          setWaitingForReply(false);
-        }
+  const handleNewMessage = useCallback((data: Message) => {
+    setMessages((prev) => {
+      if (prev.some((m) => m.id === data.id)) return prev;
+      const tempMatch = prev.find(
+        (m) =>
+          m.id.startsWith("temp-") &&
+          m.content === data.content &&
+          m.role === data.role
       );
-
-      channel.bind("session-released", () => {
-        setSessionState("waiting");
-      });
-
-      cleanup = () => {
-        channel.unbind_all();
-        pusher.unsubscribe(`session-${dbSessionId}`);
-      };
+      if (tempMatch) {
+        return prev.map((m) => (m.id === tempMatch.id ? data : m));
+      }
+      return [...prev, data];
     });
-    return cleanup;
-  }, [dbSessionId]);
+    if (data.role === "ai" || data.role === "agent") {
+      setWaitingForReply(false);
+      setSessionState((prev) =>
+        data.role === "agent" ? "active_human" : prev === "idle" ? "active_ai" : prev
+      );
+    }
+  }, []);
+
+  const handleTyping = useCallback(() => {
+    setWaitingForReply(true);
+    if (typingClearRef.current) clearTimeout(typingClearRef.current);
+    typingClearRef.current = setTimeout(() => setWaitingForReply(false), 3000);
+  }, []);
+
+  const handleClaimed = useCallback((data: { kind?: string }) => {
+    if (data.kind === "human") setSessionState("active_human");
+    else if (data.kind === "ai") setSessionState("active_ai");
+    setWaitingForReply(false);
+  }, []);
+
+  const handleReleased = useCallback(() => {
+    setSessionState("waiting");
+  }, []);
 
   useEffect(() => {
     if (!dbSessionId) return;
-    const cleanup = subscribeToChannel();
-    return () => cleanup();
-  }, [dbSessionId, subscribeToChannel]);
+    let cancelled = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let channel: any = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let pusherInstance: any = null;
+
+    import("@/lib/pusher/client").then(({ getPusherClient }) => {
+      if (cancelled) return;
+      pusherInstance = getPusherClient();
+      channel = pusherInstance.subscribe(`session-${dbSessionId}`);
+      channel.bind("new-message", handleNewMessage);
+      channel.bind("typing", handleTyping);
+      channel.bind("session-claimed", handleClaimed);
+      channel.bind("session-released", handleReleased);
+    });
+
+    return () => {
+      cancelled = true;
+      channel?.unbind_all();
+      pusherInstance?.unsubscribe(`session-${dbSessionId}`);
+    };
+  }, [dbSessionId, handleNewMessage, handleTyping, handleClaimed, handleReleased]);
 
   // ── Auto-scroll ─────────────────────────────────────────────────────────────
   const userScrolledUp = useRef(false);
@@ -393,9 +394,12 @@ export default function ChatWidget() {
       }
 
       if (data.message) {
-        setMessages((prev) =>
-          prev.map((m) => (m.id === tempMsg.id ? data.message : m))
-        );
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === data.message.id)) {
+            return prev.filter((m) => m.id !== tempMsg.id);
+          }
+          return prev.map((m) => (m.id === tempMsg.id ? data.message : m));
+        });
       }
 
       // Update session state from server response
@@ -508,7 +512,7 @@ export default function ChatWidget() {
           <button
             type="button"
             onClick={() => void sendMessage()}
-            disabled={!input.trim()}
+            disabled={!input.trim() || sending}
             aria-busy={sending}
             data-testid="chat-send"
             className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors text-white shrink-0 ${

@@ -75,6 +75,20 @@ const PHRASE_SYNONYMS: [RegExp, string][] = [
   [/\belectric\s+bike/gi, "ebike e-bike electric"],
   [/\belectric\s+motorcycle/gi, "ebike e-bike electric"],
   [/\bbalance\s+bike/gi, "stacyc balance bike"],
+  // Model-name normalization — prevents single-char tokens (e.g. "x") from
+  // being dropped by the length filter after punctuation stripping.
+  [/\bx[\s-]?fifteen\b/gi, "x-fifteen"],
+  [/\bx[\s-]?15\b/gi, "x-fifteen"],
+  [/\bs[\s-]?r[\s-]?7\b/gi, "s-r7"],
+  [/\brs[\s-]?7\b/gi, "s-r7"],
+  [/\bnz[\s-]?race\b/gi, "nz-race"],
+  [/\brf[\s-]?1400\b/gi, "rf-1400"],
+  [/\brf[\s-]?sr\b/gi, "rf-sr"],
+  [/\br2r\b/gi, "r2r"],
+  [/\bkx[\s-]?1\b/gi, "kx-1"],
+  [/\bcorsair[\s-]?x\b/gi, "corsair-x"],
+  [/\bcontour[\s-]?x\b/gi, "contour-x"],
+  [/\bquantum[\s-]?x\b/gi, "quantum-x"],
 ];
 
 const QUERY_SYNONYMS: Record<string, string> = {

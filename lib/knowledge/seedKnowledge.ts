@@ -314,10 +314,8 @@ export async function seedKnowledge() {
     await db
       .insert(knowledgeBase)
       .values(entry)
-      .onConflictDoUpdate({
-        target: knowledgeBase.topic,
-        set: { content: entry.content, updatedAt: new Date() },
-      });
+      // Seed is first-run only. Edit KB via the dashboard.
+      .onConflictDoNothing();
   }
 
   console.log(`Seeded ${entries.length} knowledge base entries`);
