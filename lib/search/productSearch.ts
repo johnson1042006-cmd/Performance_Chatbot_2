@@ -400,6 +400,7 @@ function scoreRelevance(product: BCProduct, keywords: string[]): number {
   }
   if (isInStock(product)) score += 2;
   if (isPremiumBrand(product.name)) score += 1;
+  if ((product as any)._fromRaceCategory) score += 2;
   return score;
 }
 
@@ -591,7 +592,7 @@ const CATEGORY_SYNONYMS: Record<string, string[]> = {
   sport: ["street", "sport", "race"],
   adventure: ["adventure", "dual sport"],
   street: ["street"],
-  race: ["race", "street"],
+  race: ["race"],
   cruiser: ["cruiser", "street"],
   electronics: ["electronics"],
   communication: ["electronics"],
@@ -739,17 +740,31 @@ export async function searchProducts(
   }
 
   // 2. Run ALL search sources in parallel — local catalog, BC keyword, category, and colorway index
+  const earlyProductType = extractProductType(normalizedQuery);
+  const earlyUseCase = extractUseCase(normalizedQuery);
+
+  const useCaseKeywords: string[] =
+    earlyProductType === "helmet" && earlyUseCase === "sport"
+      ? ["race"]
+      : earlyProductType === "helmet" && earlyUseCase === "touring"
+      ? ["touring"]
+      : [];
+
   const keywordsForLocal = keywords.join(" ");
   const keywordQuery = keywords.slice(0, 6).join(" ");
 
-  const [localMatches, bcKeywordResults, categoryResults, colorwayResults] = await Promise.all([
-    searchLocalCatalog(keywordsForLocal, 10).catch(() => [] as LocalMatch[]),
-    searchProductsBC(keywordQuery).catch(() => [] as BCProduct[]),
-    searchByCategory(keywords).catch(() => [] as BCProduct[]),
-    detectedColor
-      ? searchByColorway(detectedColor, keywords).catch(() => [] as BCProduct[])
-      : Promise.resolve([] as BCProduct[]),
-  ]);
+  const [localMatches, bcKeywordResults, categoryResults, useCaseResults, colorwayResults] =
+    await Promise.all([
+      searchLocalCatalog(keywordsForLocal, 10).catch(() => [] as LocalMatch[]),
+      searchProductsBC(keywordQuery).catch(() => [] as BCProduct[]),
+      searchByCategory(keywords).catch(() => [] as BCProduct[]),
+      useCaseKeywords.length > 0
+        ? searchByCategory(useCaseKeywords).catch(() => [] as BCProduct[])
+        : Promise.resolve([] as BCProduct[]),
+      detectedColor
+        ? searchByColorway(detectedColor, keywords).catch(() => [] as BCProduct[])
+        : Promise.resolve([] as BCProduct[]),
+    ]);
 
   const deduped = new Map<number, BCProduct>();
   function addProducts(products: BCProduct[]) {
@@ -759,6 +774,14 @@ export async function searchProducts(
       }
     }
   }
+
+  // Tag race/touring category products before dedup so scoreRelevance can boost them
+  for (const p of useCaseResults) {
+    (p as any)._fromRaceCategory = true;
+  }
+
+  // Use-case category results rank first (race/touring helmet intent)
+  addProducts(useCaseResults);
 
   // Colorway index results are highest priority for color+type queries
   addProducts(colorwayResults);
