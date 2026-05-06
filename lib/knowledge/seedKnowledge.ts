@@ -100,6 +100,15 @@ CRITICAL E-BIKE RULES:
 
 NOTE TO AI: Specific general service offerings, pricing, turnaround, scheduling process, and warranty terms have NOT yet been confirmed with the owner. Do NOT make up specific pricing or turnaround times for general service. The Tech-Air section below IS verified from the website and may be quoted with confidence.
 
+TIRE & WHEEL SERVICES (verified — listed on website):
+Performance Cycle offers tire mounting, balancing, and related wheel services in-store at the Centennial location. Full details: https://performancecycle.com/tire-and-wheel-services/. Specific pricing and turnaround for tire/wheel services have NOT been confirmed with the owner — for current rates, route the customer to the live service team via chat or have them call 303-744-2011.
+
+HELMET FITTING (verified — listed on website):
+Free in-store helmet fitting is available at the Centennial location during store hours. No appointment required.
+
+BUY ONLINE, PICK UP IN STORE (verified — listed on website):
+Customers can select pickup at checkout and collect their order at 7375 S Fulton St., Centennial, CO 80112 during store hours.
+
 ALPINESTARS TECH-AIR SERVICE (FACTORY AUTHORIZED — verbatim from website):
 
 Performance Cycle is one of only TWO Alpinestars Factory Authorized Tech-Air Service Centers in the United States. Our expert staff is fully trained to ensure downtime is kept to a minimum. In most cases, next business day turnaround on service items like cartridge replacements.
@@ -276,23 +285,32 @@ POPULAR BRANDS: AGV, Airoh, Alpinestars, Arai, Bell, Cardo, Continental, Dunlop,
 Performance Cycle is a motorcycle GEAR, PARTS, and ACCESSORIES retailer in Centennial, CO. We are NOT a motorcycle dealership.
 
 WE SELL:
-- Helmets (street, full-face, modular, half, off-road, MX, adventure)
+- Helmets (street, full-face, modular, open-face, off-road/MX, adventure, race)
 - Jackets, pants, suits, vests
 - Boots, gloves
-- Body armor and protection (chest protectors, back protectors, knee guards)
+- Body armor and protection (chest protectors, back protectors, knee guards, neck braces)
 - Tech-Air airbag systems (we are a Factory Authorized Tech-Air Service Center)
-- Tires (street, sport, sport-touring, dual-sport, MX/dirt)
-- Parts (chains, sprockets, brake pads and rotors, batteries, levers, mirrors, controls, stands)
-- Exhaust systems, slip-ons, and components
-- Communication systems (intercoms, headsets, Bluetooth)
-- Accessories (phone mounts, GPS, action cameras, tank bags, luggage)
+- Tires (sportbike, sport-touring, cruiser, dual-sport, adventure, offroad/MX, ATV, inner tubes)
+- Parts — extensive catalog including: chains, sprockets, brake pads and rotors, batteries, levers, mirrors, controls, foot pegs, handlebars, exhaust systems, suspension parts, plastics, fender eliminator kits, motorcycle covers, stands
+- Maintenance — oil filters, air filters, spark plugs, chemicals, repair manuals, tools (Motion Pro, etc.)
+- Communication systems (Cardo, Sena intercoms and headsets)
+- Electronics (Garmin GPS, Insta360 cameras, Quadlock, Ram Mount)
 - Snow gear and snow plows
-- E-bikes (browse https://performancecycle.com/ebikes/ — handle e-bike inquiries via the e-bike routing rules)
+- E-bikes (Stacyc, Super73, Stage2, 79Bike, E-Ride — see ebike_info KB entry)
+
+WE ALSO OFFER LIMITED IN-STORE SERVICES (verified — listed on website):
+- **Tire & Wheel Services** — mounting, balancing, tube installation. Details: https://performancecycle.com/tire-and-wheel-services/
+- **Helmet Fitting** — free in-store sizing assistance during store hours
+- **Tech-Air Service** — Factory Authorized service center for Alpinestars Tech-Air airbags (see service_info KB entry for the verified workflow)
+- **Buy Online, Pick Up In Store** — available at checkout
+
+We do NOT operate a full motorcycle service department. We do NOT do oil changes, engine work, suspension rebuilds, or general bike service like a dealership shop. For service questions outside Tech-Air and Tire & Wheel, route to the live service team via chat handoff.
 
 WE DO NOT SELL:
-- Motorcycles. We are NOT a motorcycle dealership. We sell GEAR for motorcycles, not the motorcycles themselves.
-- Cars, ATVs, side-by-sides, dirt bikes (the vehicles), or scooters (other than e-scooters in our e-bike section).
-- Used gear or used parts (everything we sell is new).
+- Motorcycles. We are NOT a motorcycle dealership. We sell GEAR, PARTS, and ACCESSORIES for motorcycles, not the motorcycles themselves.
+- Cars, ATVs (gear yes, vehicles no), side-by-sides, dirt bikes (the vehicles), or scooters (other than e-scooters in the e-bike section).
+- Used gear or used parts — everything we sell is new.
+- Bicycle (non-motorized) parts or accessories.
 
 CRITICAL FOR THE AI: When a customer asks "what's a good bike?" or "what motorcycle should I get?" or "do you carry [motorcycle brand/model]?" the correct response is to clarify the boundary: "We don't sell motorcycles — we're a gear and parts shop. But if you've got a bike or are picking one out, I can help you with helmets, jackets, gloves, tires, parts, and accessories. What are you looking for?"
 
@@ -302,7 +320,52 @@ Do NOT offer to help them pick out a motorcycle. Do NOT compare motorcycle model
     topic: "arai_vas_system",
     content: `What is the Arai VAS system?
 
-VAS stands for Variable Axis System — not "Ventilation Air System." It is Arai's modular external peak/shield system designed for touring comfort. The VAS lets riders adjust sun protection on the fly without removing the helmet by flipping an external peak. Because it mounts completely on the outside of the shell, it does not compromise structural integrity or impact performance — unlike internal sun visors which can affect how a helmet absorbs impact energy. Performance Cycle carries replacement VAS shields including the Arai VAS-V Max Vision Face Shield ($57.95) and the Arai VAS-V Max Vision Pro Shade System ($96.95).`,
+VAS stands for **Variable Axis System** — Arai's face shield mounting/pivot system. The side pods that hold the shield pivot were redesigned so the pivot point sits closer to the bottom edge of the shell. This keeps the helmet's outer surface as smooth and continuous as possible, which is core to Arai's safety philosophy: a rounder, less interrupted shell is better at deflecting glancing blows and redirecting impact energy. VAS appears on Arai's premium full-face helmets including the Corsair-X, Quantum-X, Signet-X, Defiant-X, Regent-X, and DT-X.
+
+Importantly, VAS is NOT a sun visor or peak. Internal drop-down sun visors (common on other brands) sit between the outer and inner shell, and Arai believes that interferes with how the shell absorbs impact. With VAS, all sun protection is handled by accessories that mount externally:
+
+- The **Arai Pro Shade System** is a SEPARATE accessory — an external flip-down peak that bolts onto VAS-equipped helmets. Sold at Performance Cycle as the "VAS-V Max Vision Pro Shade System" — $96.95.
+- **Replacement face shields** for VAS-equipped helmets are sold separately. Performance Cycle stocks the "VAS-V Max Vision Face Shield" — $57.95 — in Silver Mirror, Red Mirror, Clear, and Dark Smoke.
+
+CRITICAL FOR THE AI: Do NOT describe VAS itself as a "peak," "sun visor," "sun shade," or anything that "flips down." That is the Pro Shade System (a separate accessory). VAS itself is the face shield mounting system. When a customer asks about VAS, lead with that distinction.`,
+  },
+  {
+    topic: "shipping_policy",
+    content: `PERFORMANCE CYCLE SHIPPING POLICY (verbatim from performancecycle.com/shipping-info/ and FAQ):
+
+FREE SHIPPING:
+- Most orders over $99.00 ship FREE within the contiguous United States.
+
+EXCEPTIONS TO FREE SHIPPING (still ship, just not free):
+- Tires: $12.95 PER TIRE shipping charge, regardless of order total.
+- Oversize items.
+- Overweight items.
+- Hazardous materials (chemicals, batteries).
+These items require specialized packaging and shipping procedures and incur additional charges shown at checkout.
+
+ORDERS UNDER $99:
+- Standard shipping charges apply, calculated at checkout based on weight and destination.
+
+PROCESSING:
+- Orders are typically processed within 1-2 business days.
+- Order status progresses: Awaiting Fulfillment → Awaiting Shipment → Shipped.
+- Once an order is in "Awaiting Shipment" status, it CANNOT be modified or cancelled.
+
+CARRIERS:
+- Standard ground shipping via UPS, FedEx, or USPS depending on item and destination.
+
+INTERNATIONAL / OUTSIDE CONTIGUOUS US:
+- Not confirmed in current notes. If asked, route to the live service team or direct the customer to call 303-744-2011 or use https://performancecycle.com/contact-us/.
+
+BUY ONLINE, PICK UP IN STORE:
+- Available at the Centennial, CO storefront. Customer selects the option at checkout and picks up at 7375 S Fulton St., Centennial, CO 80112 during store hours.
+
+LINKS:
+- Full Shipping Info: https://performancecycle.com/shipping-info/
+- FAQ: https://performancecycle.com/faq/
+- Contact: 303-744-2011 or https://performancecycle.com/contact-us/
+
+CRITICAL FOR THE AI: When asked about shipping, lead with the $99 free shipping threshold and the per-tire surcharge if relevant. NEVER invent international rates, expedited rates, or specific delivery times — those are not in this entry. If a customer asks about something not covered above (international, expedited, specific transit time), say "I don't have specifics on [topic] in my notes — give the team a call at 303-744-2011 or check https://performancecycle.com/shipping-info/" rather than guessing.`,
   },
 ];
 

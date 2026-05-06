@@ -14,9 +14,11 @@ interface KnowledgeEntry {
 
 const TABS = [
   { id: "return_policy", label: "Return Policy" },
+  { id: "what_we_sell", label: "What We Sell" },
   { id: "service_info", label: "Service Info" },
   { id: "ebike_info", label: "E-Bikes" },
   { id: "store_hours", label: "Store Hours" },
+  { id: "shipping_policy", label: "Shipping Policy" },
   { id: "pairings", label: "Product Pairings" },
 ];
 

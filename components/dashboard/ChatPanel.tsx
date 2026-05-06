@@ -85,10 +85,21 @@ export default function ChatPanel({
 
   // Pusher real-time subscription
   useEffect(() => {
-    let cleanup = () => {};
+    let cancelled = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let channel: any = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let pusherInstance: any = null;
+
     import("@/lib/pusher/client").then(({ getPusherClient }) => {
-      const pusher = getPusherClient();
-      const channel = pusher.subscribe(`session-${sessionId}`);
+      if (cancelled) return;
+      pusherInstance = getPusherClient();
+      channel = pusherInstance.subscribe(`session-${sessionId}`);
+      // Unbind before binding to prevent handler accumulation when Pusher
+      // returns a channel that hasn't been fully unsubscribed server-side yet.
+      channel.unbind("new-message");
+      channel.unbind("session-claimed");
+      channel.unbind("session-released");
 
       channel.bind("new-message", (data: Message) => {
         setMessages((prev) => {
@@ -100,7 +111,6 @@ export default function ChatPanel({
       channel.bind(
         "session-claimed",
         (data: { agentId?: string; agentName?: string; kind?: string; reassigned?: boolean }) => {
-          // If another agent claimed while we're viewing
           if (data.agentId && data.agentId !== myId) {
             setClaimedByBanner(
               data.reassigned
@@ -117,13 +127,13 @@ export default function ChatPanel({
         setClaimedByBanner(null);
         onSessionUpdate?.();
       });
-
-      cleanup = () => {
-        channel.unbind_all();
-        pusher.unsubscribe(`session-${sessionId}`);
-      };
     }).catch(() => {});
-    return () => cleanup();
+
+    return () => {
+      cancelled = true;
+      channel?.unbind_all();
+      pusherInstance?.unsubscribe(`session-${sessionId}`);
+    };
   }, [sessionId, myId, onSessionUpdate]);
 
   // Polling fallback — refresh messages every 3 seconds

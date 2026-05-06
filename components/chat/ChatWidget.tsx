@@ -270,10 +270,23 @@ export default function ChatWidget() {
       if (cancelled) return;
       pusherInstance = getPusherClient();
       channel = pusherInstance.subscribe(`session-${dbSessionId}`);
+      // Unbind before binding — guards against Pusher reusing a channel object
+      // that still holds handlers from a previous subscription cycle (the server-side
+      // unsubscribe acknowledgment is async, so the channel can be handed back with
+      // stale listeners still attached).
+      channel.unbind("new-message");
+      channel.unbind("typing");
+      channel.unbind("session-claimed");
+      channel.unbind("session-released");
       channel.bind("new-message", handleNewMessage);
       channel.bind("typing", handleTyping);
       channel.bind("session-claimed", handleClaimed);
       channel.bind("session-released", handleReleased);
+      console.log(
+        "[Pusher] new-message handler count after bind:",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (channel as any).callbacks?._callbacks?.["new-message"]?.length ?? "unknown"
+      );
     });
 
     return () => {
