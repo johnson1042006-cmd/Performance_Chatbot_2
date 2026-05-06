@@ -142,3 +142,20 @@ Open the deployed site in two browser tabs (or one normal + one private window):
 - Vitest specs live under `**/__tests__/*.test.ts`. The most security-relevant suite is [`app/api/__tests__/security.test.ts`](app/api/__tests__/security.test.ts), which exercises authz on every admin/analytics/session endpoint.
 - Playwright smoke tests are in [`e2e/smoke.spec.ts`](e2e/smoke.spec.ts). They expect seeded manager + agent users (use `E2E_*` env vars to override the defaults).
 - Set `E2E_BASE_URL=https://your-app.vercel.app` to run the smoke suite against a deployed environment.
+
+## Production setup
+
+### Required environment variables
+See `.env.example` for the full list.
+
+### Cron jobs
+This app uses two scheduled jobs (defined in `vercel.json`):
+
+- `/api/cron/tick` — every minute. Sweeps stale sessions and fires the AI fallback for queued chats whose timer has expired. Required for the AI fallback timer to work reliably regardless of whether the dashboard is open. **Requires Vercel Pro plan** (Hobby plan does not support sub-daily crons). On Hobby, the heartbeat endpoint provides a backstop that fires the sweep whenever a customer tab is open.
+
+- `/api/cron/cleanup` — monthly. Deletes chat history older than the configured retention period (set via the manager dashboard).
+
+Both endpoints are auth-gated by `CRON_SECRET`. Vercel automatically includes this in cron requests once the env var is set.
+
+### External cron alternative
+If staying on Vercel Hobby and the heartbeat backstop isn't sufficient (e.g. you want the timer to work even when no customer tab is open), schedule an external service (cron-job.org, GitHub Actions schedule, etc.) to GET `/api/cron/tick` every minute with the header `Authorization: Bearer <CRON_SECRET>`.

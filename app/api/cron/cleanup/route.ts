@@ -19,12 +19,22 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const [result, staleClosed] = await Promise.all([
+    const [cleanupRes, staleRes, aiRes] = await Promise.allSettled([
       runChatHistoryCleanup(),
       sweepStaleSessions(),
       processDueAiClaims(),
     ]);
-    return NextResponse.json({ success: true, staleClosed, ...result });
+
+    const result = cleanupRes.status === "fulfilled" ? cleanupRes.value : { error: "cleanup failed" };
+    const staleClosed = staleRes.status === "fulfilled" ? staleRes.value : 0;
+    const aiClaimedOk = aiRes.status === "fulfilled";
+
+    return NextResponse.json({
+      success: true,
+      staleClosed,
+      aiClaimedOk,
+      ...(typeof result === "object" && result ? result : {}),
+    });
   } catch (error) {
     console.error("Cron cleanup error:", error);
     return NextResponse.json(

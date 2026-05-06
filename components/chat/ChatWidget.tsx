@@ -187,9 +187,11 @@ export default function ChatWidget() {
         const fetched: Message[] = data.messages ?? [];
         if (fetched.length === 0) return;
         setMessages((prev) => {
-          const ids = new Set(prev.map((m) => m.id));
-          const incoming = fetched.filter((m) => !ids.has(m.id));
-          return incoming.length ? [...prev, ...incoming] : prev;
+          let next = prev;
+          for (const m of fetched) {
+            next = mergeRealMessage(next, m);
+          }
+          return next;
         });
       } catch {
         // non-fatal
@@ -219,21 +221,43 @@ export default function ChatWidget() {
     return () => clearInterval(tid);
   }, [dbSessionId, sessionState]);
 
+  // Merge a single real (non-temp) message into the list. Drops it if the
+  // ID is already present, otherwise replaces the FIRST matching temp by
+  // content+role, otherwise appends. Any OTHER temps that match content+role
+  // are dropped — those are orphans from earlier failed sends.
+  const mergeRealMessage = (prev: Message[], incoming: Message): Message[] => {
+    if (incoming.id.startsWith("temp-")) return prev;
+    if (prev.some((m) => m.id === incoming.id)) {
+      return prev.filter(
+        (m) =>
+          !(m.id.startsWith("temp-") &&
+            m.content === incoming.content &&
+            m.role === incoming.role)
+      );
+    }
+    let replaced = false;
+    const out: Message[] = [];
+    for (const m of prev) {
+      const isOrphanMatch =
+        m.id.startsWith("temp-") &&
+        m.content === incoming.content &&
+        m.role === incoming.role;
+      if (isOrphanMatch && !replaced) {
+        out.push(incoming);
+        replaced = true;
+      } else if (isOrphanMatch) {
+        continue;
+      } else {
+        out.push(m);
+      }
+    }
+    if (!replaced) out.push(incoming);
+    return out;
+  };
+
   // ── Pusher subscription ─────────────────────────────────────────────────────
   const handleNewMessage = useCallback((data: Message) => {
-    setMessages((prev) => {
-      if (prev.some((m) => m.id === data.id)) return prev;
-      const tempMatch = prev.find(
-        (m) =>
-          m.id.startsWith("temp-") &&
-          m.content === data.content &&
-          m.role === data.role
-      );
-      if (tempMatch) {
-        return prev.map((m) => (m.id === tempMatch.id ? data : m));
-      }
-      return [...prev, data];
-    });
+    setMessages((prev) => mergeRealMessage(prev, data));
     if (data.role === "ai" || data.role === "agent") {
       setWaitingForReply(false);
       setSessionState((prev) =>
@@ -363,6 +387,7 @@ export default function ChatWidget() {
           appendLocalError(
             "Could not reach the server to start chat (timed out). Check your connection and try again."
           );
+          setMessages((prev) => prev.filter((m) => m.id !== tempMsg.id));
           return;
         }
         const sData = await sRes.json().catch(() => ({}));
@@ -376,6 +401,7 @@ export default function ChatWidget() {
         appendLocalError(
           "We couldn't start your chat session. Refresh and try again."
         );
+        setMessages((prev) => prev.filter((m) => m.id !== tempMsg.id));
         return;
       }
 
@@ -392,6 +418,7 @@ export default function ChatWidget() {
         );
       } catch {
         appendLocalError("Your message timed out. Try again.");
+        setMessages((prev) => prev.filter((m) => m.id !== tempMsg.id));
         return;
       }
 
@@ -403,16 +430,12 @@ export default function ChatWidget() {
             ? `${data.error} Try again.`
             : "Your message didn't go through. Please try again."
         );
+        setMessages((prev) => prev.filter((m) => m.id !== tempMsg.id));
         return;
       }
 
       if (data.message) {
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === data.message.id)) {
-            return prev.filter((m) => m.id !== tempMsg.id);
-          }
-          return prev.map((m) => (m.id === tempMsg.id ? data.message : m));
-        });
+        setMessages((prev) => mergeRealMessage(prev, data.message));
       }
 
       // Update session state from server response
@@ -429,6 +452,7 @@ export default function ChatWidget() {
         setWaitingForReply(false);
       }
     } catch {
+      setMessages((prev) => prev.filter((m) => m.id !== tempMsg.id));
       appendLocalError("Something went wrong. Please refresh and try again.");
     } finally {
       sendInFlightRef.current = false;

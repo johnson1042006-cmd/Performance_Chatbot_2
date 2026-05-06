@@ -8,6 +8,7 @@ import {
   integer,
   boolean,
   decimal,
+  index,
   serial,
   pgEnum,
 } from "drizzle-orm/pg-core";
@@ -58,7 +59,9 @@ export const users = pgTable("users", {
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   lastHeartbeatAt: timestamp("last_heartbeat_at"),
-});
+}, (table) => ({
+  heartbeatIdx: index("users_heartbeat_idx").on(table.lastHeartbeatAt),
+}));
 
 export const sessions = pgTable("sessions", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -77,7 +80,13 @@ export const sessions = pgTable("sessions", {
   lastCustomerActivityAt: timestamp("last_customer_activity_at").defaultNow().notNull(),
   // Heartbeat from the embed widget while the tab is open
   lastHeartbeatAt: timestamp("last_heartbeat_at"),
-});
+}, (table) => ({
+  aiClaimDueIdx: index("sessions_ai_claim_due_idx").on(table.aiClaimDueAt),
+  customerIdentifierIdx: index("sessions_customer_identifier_idx").on(table.customerIdentifier),
+  statusIdx: index("sessions_status_idx").on(table.status),
+  heartbeatIdx: index("sessions_heartbeat_idx").on(table.lastHeartbeatAt),
+  activityIdx: index("sessions_activity_idx").on(table.lastCustomerActivityAt),
+}));
 
 export const messages = pgTable("messages", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -88,7 +97,9 @@ export const messages = pgTable("messages", {
   content: text("content").notNull(),
   sentAt: timestamp("sent_at").defaultNow().notNull(),
   pageContext: jsonb("page_context"),
-});
+}, (table) => ({
+  sessionIdSentAtIdx: index("messages_session_id_sent_at_idx").on(table.sessionId, table.sentAt),
+}));
 
 export const products = pgTable("products", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -140,7 +151,10 @@ export const productColorways = pgTable("product_colorways", {
   baseSku: text("base_sku"),
   price: decimal("price", { precision: 10, scale: 2 }),
   url: text("url"),
-});
+}, (table) => ({
+  bcProductIdIdx: index("product_colorways_bc_product_id_idx").on(table.bcProductId),
+  colorwayLowerIdx: index("product_colorways_colorway_lower_idx").on(table.colorwayLower),
+}));
 
 export const chatEvents = pgTable("chat_events", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -152,7 +166,10 @@ export const chatEvents = pgTable("chat_events", {
   targetUserId: uuid("target_user_id").references(() => users.id),
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => ({
+  sessionIdIdx: index("chat_events_session_id_idx").on(table.sessionId),
+  createdAtIdx: index("chat_events_created_at_idx").on(table.createdAt),
+}));
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;

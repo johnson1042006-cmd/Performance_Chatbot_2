@@ -4,6 +4,10 @@ import { getProductById } from "@/lib/bigcommerce/client";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  if (process.env.NODE_ENV === "production") {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
   const testId = 6010; // Shoei RF-SR Fullface Helmet (known blue helmet)
 
   let result: unknown = null;

@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { sessions, messages, knowledgeBase } from "@/lib/db/schema";
+import { sessions, messages, knowledgeBase, chatEvents } from "@/lib/db/schema";
 import { eq, lt, inArray } from "drizzle-orm";
 export { sweepStaleSessions } from "@/lib/sessions/state";
 
@@ -72,6 +72,10 @@ export async function runChatHistoryCleanup(
   }
 
   const ids = stale.map((s) => s.id);
+
+  await db
+    .delete(chatEvents)
+    .where(inArray(chatEvents.sessionId, ids));
 
   const deletedMsgs = await db
     .delete(messages)

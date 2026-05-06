@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { messages, sessions, knowledgeBase } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import { getPusher } from "@/lib/pusher/server";
 import { getProductBySKU, getProductByName } from "@/lib/bigcommerce/client";
 import { extractSKUFromText } from "@/lib/search/productSearch";
@@ -68,6 +68,32 @@ export async function POST(req: NextRequest) {
         { error: "Session not found" },
         { status: 404 }
       );
+    }
+
+    // ── Per-session rate limit (catches abuse, caps API spend) ─────────
+    if (role === "customer") {
+      const oneMinuteAgo = new Date(Date.now() - 60_000);
+      const recentRows = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(messages)
+        .where(
+          and(
+            eq(messages.sessionId, sessionId),
+            eq(messages.role, "customer"),
+            gt(messages.sentAt, oneMinuteAgo)
+          )
+        );
+      const recentCount = Number(recentRows[0]?.count ?? 0);
+      const PER_SESSION_PER_MINUTE = 30;
+      if (recentCount >= PER_SESSION_PER_MINUTE) {
+        return NextResponse.json(
+          {
+            error:
+              "You're sending messages a bit too fast — give it a few seconds and try again.",
+          },
+          { status: 429 }
+        );
+      }
     }
 
     // Enrich page context with live BC data when available
