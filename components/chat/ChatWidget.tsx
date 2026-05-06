@@ -174,6 +174,30 @@ export default function ChatWidget() {
     };
   }, [dbSessionId]);
 
+  // ── Polling fallback for missed Pusher events ───────────────────────────────
+  useEffect(() => {
+    if (!dbSessionId) return;
+    const POLL_MS = 8_000;
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/sessions/${dbSessionId}/messages`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const fetched: Message[] = data.messages ?? [];
+        if (fetched.length === 0) return;
+        setMessages((prev) => {
+          const ids = new Set(prev.map((m) => m.id));
+          const incoming = fetched.filter((m) => !ids.has(m.id));
+          return incoming.length ? [...prev, ...incoming] : prev;
+        });
+      } catch {
+        // non-fatal
+      }
+    };
+    const tid = setInterval(poll, POLL_MS);
+    return () => clearInterval(tid);
+  }, [dbSessionId]);
+
   // ── Pusher subscription ─────────────────────────────────────────────────────
   const subscribeToChannel = useCallback(() => {
     if (!dbSessionId) return () => {};
@@ -349,8 +373,10 @@ export default function ChatWidget() {
 
       // Update session state from server response
       const serverStatus = data.sessionStatus as string | undefined;
-      if (serverStatus === "active_human") setSessionState("active_human");
-      else if (serverStatus === "active_ai") {
+      if (serverStatus === "active_human") {
+        setSessionState("active_human");
+        setWaitingForReply(false);
+      } else if (serverStatus === "active_ai") {
         setSessionState("active_ai");
         setWaitingForReply(false);
       } else if (serverStatus === "waiting") {

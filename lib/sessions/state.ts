@@ -110,7 +110,8 @@ export async function claimByAi(
     .where(
       and(
         eq(sessions.id, sessionId),
-        isNull(sessions.claimedByUserId)
+        isNull(sessions.claimedByUserId),
+        isNull(sessions.claimedByKind)
       )
     )
     .returning();
@@ -220,6 +221,7 @@ export async function processDueAiClaims(): Promise<void> {
     .where(
       and(
         isNull(sessions.claimedByUserId),
+        isNull(sessions.claimedByKind),
         lt(sessions.aiClaimDueAt, now),
         sql`${sessions.status} != 'closed'`
       )

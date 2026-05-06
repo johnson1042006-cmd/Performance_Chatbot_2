@@ -119,7 +119,7 @@ export default function LiveChatsPage() {
               sessionClaimedBy={activeSession.claimedBy}
               pageContext={activeSession.pageContext}
               onRelease={handleReleaseSession}
-              onClaim={handleClaimSession}
+              onClaim={() => { void handleSessionUpdate(); }}
               onClose={handleCloseSession}
               onSessionUpdate={handleSessionUpdate}
             />
