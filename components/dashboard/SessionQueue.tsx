@@ -31,7 +31,6 @@ export default function SessionQueue({
   onUnclaimedCountChange,
 }: SessionQueueProps) {
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [unclaimedCount, setUnclaimedCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -41,9 +40,7 @@ export default function SessionQueue({
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.sessions) setSessions(data.sessions);
-      const count = data.unclaimedCount ?? 0;
-      setUnclaimedCount(count);
-      onUnclaimedCountChange?.(count);
+      onUnclaimedCountChange?.(data.unclaimedCount ?? 0);
     } catch (error) {
       console.error("Failed to fetch sessions:", error);
     } finally {

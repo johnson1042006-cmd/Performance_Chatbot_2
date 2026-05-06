@@ -6,7 +6,7 @@ import MessageThread from "./MessageThread";
 import PageContextBadge from "./PageContextBadge";
 import Button from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
-import { Send, Bot, UserCheck, X, Users, RotateCcw } from "lucide-react";
+import { Send, UserCheck, X, Users, RotateCcw } from "lucide-react";
 
 interface Message {
   id: string;

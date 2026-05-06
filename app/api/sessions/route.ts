@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { sessions, users } from "@/lib/db/schema";
-import { and, asc, desc, eq, isNull, ne } from "drizzle-orm";
+import { asc, desc, eq, ne } from "drizzle-orm";
 import { processDueAiClaims, sweepStaleSessions } from "@/lib/sessions/state";
 
 export async function GET() {

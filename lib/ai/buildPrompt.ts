@@ -303,7 +303,7 @@ export async function buildPrompt(
   // Run searches in parallel: the focused query + just the latest message
   // to maximize chances of hitting BigCommerce results, plus pairings for the
   // resolved subject SKU.
-  const [primarySearch, latestSearch, pairingResults, discussedProduct] =
+  const [primarySearch, latestSearch, , discussedProduct] =
     await Promise.all([
       safeFetch(() => searchProducts(searchQuery), emptySearch),
       searchQuery !== effectiveLatest

@@ -373,7 +373,7 @@ export default function ChatWidget() {
         <div className="flex items-center gap-2 py-2 px-3 mx-1 my-1 bg-amber-50 rounded-lg border border-amber-100">
           <Clock size={13} className="text-amber-500 shrink-0 animate-pulse" />
           <span className="text-xs text-amber-700">
-            Waiting for an agent… We'll be with you shortly.
+            Waiting for an agent — we&apos;ll be with you shortly.
           </span>
         </div>
       );
@@ -383,7 +383,7 @@ export default function ChatWidget() {
         <div className="flex items-center gap-2 py-2 px-3 mx-1 my-1 bg-emerald-50 rounded-lg border border-emerald-100">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
           <span className="text-xs text-emerald-700">
-            You're connected with our team — they'll reply shortly.
+            You&apos;re connected with our team — they&apos;ll reply shortly.
           </span>
         </div>
       );

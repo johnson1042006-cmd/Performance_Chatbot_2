@@ -13,7 +13,7 @@ import {
   claimByAi,
 } from "@/lib/sessions/state";
 import { buildPrompt } from "@/lib/ai/buildPrompt";
-import { callClaude, CALL_CLAUDE_ERROR_MESSAGE } from "@/lib/ai/callClaude";
+import { callClaude } from "@/lib/ai/callClaude";
 
 const DEFAULT_FALLBACK_SECONDS = 60;
 

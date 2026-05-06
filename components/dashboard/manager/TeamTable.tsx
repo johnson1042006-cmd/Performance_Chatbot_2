@@ -21,13 +21,6 @@ interface TeamTableProps {
   onInvite: () => void;
 }
 
-const ONLINE_THRESHOLD_MS = 60 * 1000;
-
-function isOnline(lastHeartbeatAt?: string | null): boolean {
-  if (!lastHeartbeatAt) return false;
-  return Date.now() - new Date(lastHeartbeatAt).getTime() < ONLINE_THRESHOLD_MS;
-}
-
 export default function TeamTable({ onInvite }: TeamTableProps) {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);

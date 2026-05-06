@@ -5,7 +5,7 @@
  */
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
-import { and, eq, gt, isNotNull, sql } from "drizzle-orm";
+import { and, eq, gt, isNotNull } from "drizzle-orm";
 
 export const ONLINE_THRESHOLD_SECONDS = 60;
 
