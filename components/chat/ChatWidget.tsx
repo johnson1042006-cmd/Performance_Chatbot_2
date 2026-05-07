@@ -23,6 +23,8 @@ interface PageContext {
   searchQuery: string | null;
 }
 
+import { type SessionState, resolveSessionState } from "./sessionState";
+
 const EMBED_CUSTOMER_STORAGE_KEY = "pc-embed-customer-id";
 const SESSION_FETCH_MS = 25_000;
 const CHAT_POST_MS = 55_000;
@@ -269,13 +271,7 @@ export default function ChatWidget() {
       // and `new-message` are independent Pusher events; if `new-message`
       // arrives first the session is still queued, and without this branch
       // the amber waiting banner would persist alongside the AI's reply.
-      setSessionState((prev) =>
-        data.role === "agent"
-          ? "active_human"
-          : prev === "idle" || prev === "waiting"
-            ? "active_ai"
-            : prev
-      );
+      setSessionState((prev) => resolveSessionState(prev, data.role));
     }
   }, []);
 
