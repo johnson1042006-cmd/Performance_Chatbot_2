@@ -532,3 +532,41 @@ test.describe("Bot quality — 50 questions across the catalog", () => {
     ).toBeLessThanOrEqual(5);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Hallucination guard — multi-turn gloves refinement (May 7 regression)
+// ---------------------------------------------------------------------------
+
+test.describe("Hallucination guard — gloves follow-up", () => {
+  test.setTimeout(3 * 35_000);
+
+  test("does not fabricate product names on follow-up refinement", async ({ page }) => {
+    const sessionId = `hallucination-gloves-${Date.now()}`;
+    await page.goto(`/embed?sessionId=${sessionId}`);
+    await page.waitForLoadState("networkidle");
+
+    // Turn 1 — establish glove context
+    await ask(page, "i need street riding gloves good for summer weather");
+
+    // Turn 2 — the refinement that triggered hallucinations in production
+    const reply2 = await ask(page, "i need some with more protection than these");
+
+    // Known hallucinated product strings from the May 7 production test
+    expect(reply2).not.toMatch(/SMX-1 R v2 Gloves/i);
+    expect(reply2).not.toMatch(/Masai Gloves/i);
+    expect(reply2).not.toMatch(/\bTimax\b/i);
+
+    // Reply must either reference known-real PC glove brands OR explicitly
+    // admit it doesn't have a strong match — both are acceptable honest behaviors
+    const admitsNoMatch =
+      /not finding|don't have|no great match|closest match|don't see|can't find/i.test(
+        reply2
+      );
+    const mentionsRealBrand =
+      /alpinestars|rev'?it|klim|dainese|held|icon|cortech|joe rocket/i.test(reply2);
+    expect(
+      admitsNoMatch || mentionsRealBrand,
+      `Reply 2 neither admits no match nor mentions a known real brand:\n${reply2}`
+    ).toBe(true);
+  });
+});

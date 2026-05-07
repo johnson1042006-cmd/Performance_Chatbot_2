@@ -505,8 +505,8 @@ ${AI_BEHAVIOR_RULES.map((r, i) => `${i + 1}. ${r.rule}`).join("\n\n")}
       system += renderProductEntry(p) + `\n\n`;
     }
   } else {
-    system += `\n## NO PRODUCTS FOUND FOR THIS QUERY\n`;
-    system += `The product search returned no results for this message. This does NOT mean the store doesn't carry the item — it may just mean the search terms didn't match. DO NOT tell the customer to call the store or visit in person. Instead, ask them to be more specific (brand, product type, size, etc.) so you can search again. Performance Cycle carries over 5,000 products across helmets, jackets, boots, gloves, tires, parts, accessories, and more. CHECK THE STORE CATALOG in the knowledge base above — it lists every category and brand we carry. Use it to suggest relevant category browse links and confirm whether we likely stock what the customer is looking for.\n`;
+    system += `\n## RELEVANT PRODUCTS FROM CATALOG\n\n`;
+    system += `(no matching products found — be honest with the customer that you don't have a great match in your current results)\n`;
   }
 
 

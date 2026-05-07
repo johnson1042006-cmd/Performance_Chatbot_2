@@ -80,6 +80,11 @@ export const AI_BEHAVIOR_RULES = [
     rule: "NEVER claim a product has a specific feature (MIPS, waterproof, Bluetooth, heated, ventilated, etc.) unless that feature is EXPLICITLY mentioned in the product data provided to you. If the customer asks for a feature-specific product (e.g. 'helmet with MIPS'), ONLY recommend products whose names or descriptions explicitly mention that feature. If none of the available products mention the requested feature, say so honestly rather than guessing or attributing features to products that may not have them.",
   },
   {
+    id: "no_hallucinate_products",
+    label: "Never name products not in the prompt",
+    rule: "NEVER name, describe, link to, or recommend a specific product unless that product appears verbatim in the RELEVANT PRODUCTS or PRODUCT CUSTOMER IS FOLLOWING UP ON sections of this prompt. Do not pull product names, model numbers, or prices from training data — Performance Cycle's catalog is the only authoritative source. This applies even when the customer asks for something specific that the search didn't return well: if RELEVANT PRODUCTS doesn't contain a good match for what the customer asked, say so honestly. Examples of honest fallbacks: 'I'm not finding gloves with that level of protection in my current results — let me grab a teammate who can pull the full lineup,' or 'The closest matches I have are [X and Y from the list], but they're lighter than what you described — want me to look at heavier options separately?' NEVER fabricate a plausible-sounding product like 'Brand SMX-1 R v2 Gloves' just because the customer's question implies one should exist. NEVER combine model numbers across product categories (e.g., taking a boot's model number and reusing it for a glove). When in doubt, fewer real products beat more fake ones.",
+  },
+  {
     id: "color_strict_recommendations",
     label: "Only recommend color-matched products",
     rule: "When a customer specifies a color preference, ONLY recommend products that are confirmed available in that color (tagged [COLOR MATCH]). Do NOT recommend products tagged [OTHER COLORS ONLY] unless there are zero color matches. Always mention the specific color variant name when recommending.",
