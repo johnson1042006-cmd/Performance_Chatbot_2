@@ -556,17 +556,22 @@ test.describe("Hallucination guard — gloves follow-up", () => {
     expect(reply2).not.toMatch(/Masai Gloves/i);
     expect(reply2).not.toMatch(/\bTimax\b/i);
 
-    // Reply must either reference known-real PC glove brands OR explicitly
-    // admit it doesn't have a strong match — both are acceptable honest behaviors
+    // Honest outcomes: cite real brands, admit a weak match, or ask a clarifying
+    // question instead of inventing SKUs (the May 7 regression was fake names).
     const admitsNoMatch =
       /not finding|don't have|no great match|closest match|don't see|can't find/i.test(
         reply2
       );
     const mentionsRealBrand =
       /alpinestars|rev'?it|klim|dainese|held|icon|cortech|joe rocket/i.test(reply2);
+    const asksHonestFollowUp =
+      /\?/.test(reply2) &&
+      /gauntlet|mid-?length|wrist|knuckle|quick detail|which (type|kind|style)|narrow/i.test(
+        reply2
+      );
     expect(
-      admitsNoMatch || mentionsRealBrand,
-      `Reply 2 neither admits no match nor mentions a known real brand:\n${reply2}`
+      admitsNoMatch || mentionsRealBrand || asksHonestFollowUp,
+      `Reply 2 must admit no match, mention a known real brand, or ask an honest follow-up — got:\n${reply2}`
     ).toBe(true);
   });
 });
