@@ -23,7 +23,7 @@ interface PageContext {
   searchQuery: string | null;
 }
 
-import { type SessionState, resolveSessionState } from "./sessionState";
+import { resolveSessionState } from "./sessionState";
 
 const EMBED_CUSTOMER_STORAGE_KEY = "pc-embed-customer-id";
 const SESSION_FETCH_MS = 25_000;
