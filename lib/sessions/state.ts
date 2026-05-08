@@ -11,6 +11,7 @@ import { runAiTurn } from "@/lib/ai/runAi";
 import { sql } from "drizzle-orm";
 import { log, serializeError } from "@/lib/log";
 import { enqueueTag } from "@/lib/ai/tagger";
+import { enqueueAutoTicket } from "@/lib/tickets/autoCreate";
 
 type ClaimKind = "ai" | "human";
 type SessionStatus = "waiting" | "active_human" | "active_ai" | "closed";
@@ -315,6 +316,9 @@ export async function sweepStaleSessions(): Promise<number> {
       // any drops are picked up by the next sweep because intent stays
       // null until persisted.
       enqueueTag(id);
+      // Phase 5.5: auto-ticket for stale-closed sessions that match the
+      // escalation criteria (own settings + dedupe + semaphore).
+      enqueueAutoTicket(id);
     }
     try {
       const pusher = getPusher();

@@ -52,6 +52,8 @@ export const chatEventTypeEnum = pgEnum("chat_event_type", [
   "tool_call",
   "auto_escalated",
   "internal_note",
+  "ticket_created",
+  "ticket_status_changed",
 ]);
 
 export const users = pgTable("users", {
@@ -381,3 +383,106 @@ export type AlertThreshold = typeof alertThresholds.$inferSelect;
 export type NewAlertThreshold = typeof alertThresholds.$inferInsert;
 export type AlertEvent = typeof alertEvents.$inferSelect;
 export type NewAlertEvent = typeof alertEvents.$inferInsert;
+
+// Phase 5.5: support tickets. Auto-created when a chat session closes with
+// negative sentiment / explicit auto_escalated event / resolved=false from
+// the tagger, or manually via /api/tickets POST. SLA window comes from
+// bot_settings.slaWindowsHours[priority]; status flips to 'resolved' or
+// 'closed' via PATCH which logs a chat_events row when a session is linked.
+export const tickets = pgTable(
+  "tickets",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    ticketNumber: serial("ticket_number").notNull().unique(),
+    sessionId: uuid("session_id").references(() => sessions.id, {
+      onDelete: "set null",
+    }),
+    subject: varchar("subject", { length: 200 }).notNull(),
+    description: text("description"),
+    // 'open' | 'pending' | 'resolved' | 'closed'
+    status: varchar("status", { length: 20 }).notNull().default("open"),
+    // 'urgent' | 'high' | 'normal' | 'low'
+    priority: varchar("priority", { length: 10 }).notNull().default("normal"),
+    category: varchar("category", { length: 40 }),
+    // 'auto' | 'manual' | 'chat'
+    source: varchar("source", { length: 20 }).notNull().default("auto"),
+    customerEmail: varchar("customer_email", { length: 255 }),
+    customerName: varchar("customer_name", { length: 255 }),
+    assignedTo: uuid("assigned_to").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdBy: uuid("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    firstResponseAt: timestamp("first_response_at", { withTimezone: true }),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    slaBreached: boolean("sla_breached").notNull().default(false),
+    metadata: jsonb("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    statusPriorityIdx: index("tickets_status_priority_idx").on(
+      table.status,
+      table.priority
+    ),
+    dueAtIdx: index("tickets_due_at_idx").on(table.dueAt),
+    createdAtIdx: index("tickets_created_at_idx").on(table.createdAt),
+    sessionIdIdx: index("tickets_session_id_idx").on(table.sessionId),
+    assignedToIdx: index("tickets_assigned_to_idx").on(table.assignedTo),
+  })
+);
+
+export const ticketComments = pgTable(
+  "ticket_comments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    ticketId: uuid("ticket_id")
+      .notNull()
+      .references(() => tickets.id, { onDelete: "cascade" }),
+    authorId: uuid("author_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    body: text("body").notNull(),
+    isInternal: boolean("is_internal").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    ticketIdIdx: index("ticket_comments_ticket_id_idx").on(
+      table.ticketId,
+      table.createdAt
+    ),
+  })
+);
+
+export const ticketTags = pgTable(
+  "ticket_tags",
+  {
+    ticketId: uuid("ticket_id")
+      .notNull()
+      .references(() => tickets.id, { onDelete: "cascade" }),
+    tag: varchar("tag", { length: 40 }).notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.ticketId, table.tag] }),
+    tagIdx: index("ticket_tags_tag_idx").on(table.tag),
+  })
+);
+
+export type Ticket = typeof tickets.$inferSelect;
+export type NewTicket = typeof tickets.$inferInsert;
+export type TicketComment = typeof ticketComments.$inferSelect;
+export type NewTicketComment = typeof ticketComments.$inferInsert;
+export type TicketTag = typeof ticketTags.$inferSelect;
+export type NewTicketTag = typeof ticketTags.$inferInsert;
+export type TicketStatus = "open" | "pending" | "resolved" | "closed";
+export type TicketPriority = "urgent" | "high" | "normal" | "low";
+export type TicketSource = "auto" | "manual" | "chat";

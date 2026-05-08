@@ -47,9 +47,20 @@ export default defineConfig({
           // TAGGER_TEST_MODE=1 makes lib/ai/tagger short-circuit the
           // Anthropic call and persist a deterministic result keyed off
           // the transcript. Keeps the tagger e2e suite hermetic.
+          //
+          // Phase 5.5:
+          //   TICKET_AUTO_CREATE_TEST_MODE=1 makes lib/tickets/autoCreate
+          //   skip the recent-messages signal load and use a deterministic
+          //   keyword-based decision so the auto-create e2e specs stay
+          //   hermetic.
+          //   E2E_EMAIL_MOCK=1 routes lib/email/sender through the in-
+          //   process mock instead of Resend, so ticket-resolved emails
+          //   can be asserted without network.
           env: {
             NEXTAUTH_URL: baseURL,
             TAGGER_TEST_MODE: "1",
+            TICKET_AUTO_CREATE_TEST_MODE: "1",
+            E2E_EMAIL_MOCK: "1",
           },
         },
 });

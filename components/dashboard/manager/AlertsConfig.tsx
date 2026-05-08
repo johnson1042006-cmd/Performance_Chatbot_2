@@ -23,6 +23,7 @@ const KINDS = [
     value: "no_agents_online_during_hours",
     label: "No agents online during hours",
   },
+  { value: "ticket_sla_breach", label: "Ticket SLA breach (count)" },
 ];
 
 const COMPARATORS = [">", ">=", "<", "<=", "=="];

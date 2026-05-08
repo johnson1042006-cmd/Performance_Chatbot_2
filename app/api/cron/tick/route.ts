@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { processDueAiClaims, sweepStaleSessions } from "@/lib/sessions/state";
 import { evaluateAlertThresholds } from "@/lib/alerts/evaluator";
+import { sweepBreachedTickets } from "@/lib/tickets/sla";
 import { log, serializeError } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
@@ -26,17 +27,21 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const [staleClosed, aiClaimed, alerts] = await Promise.allSettled([
-      sweepStaleSessions(),
-      processDueAiClaims().then(() => undefined),
-      evaluateAlertThresholds(),
-    ]);
+    const [staleClosed, aiClaimed, alerts, breachedTickets] =
+      await Promise.allSettled([
+        sweepStaleSessions(),
+        processDueAiClaims().then(() => undefined),
+        evaluateAlertThresholds(),
+        sweepBreachedTickets(),
+      ]);
 
     return NextResponse.json({
       success: true,
       staleClosed: staleClosed.status === "fulfilled" ? staleClosed.value : 0,
       aiClaimed: aiClaimed.status === "fulfilled" ? true : false,
       alerts: alerts.status === "fulfilled" ? alerts.value : [],
+      breachedTickets:
+        breachedTickets.status === "fulfilled" ? breachedTickets.value : 0,
     });
   } catch (error) {
     log.error("cron.tick_failed", { requestId, error: serializeError(error) });

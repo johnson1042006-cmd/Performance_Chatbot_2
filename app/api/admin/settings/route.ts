@@ -16,6 +16,14 @@ const DEFAULT_SETTINGS = {
   // Phase 4: agent hotkeys (J/K navigate, C claim, R release, X close,
   // / focus reply, Cmd/Ctrl+Enter send). Manager-controlled.
   hotkeysEnabled: true,
+  // Phase 5.5: ticketing. autoTicketOnEscalation gates the autoCreate hook
+  // off /api/sessions/close + sweepStaleSessions. autoTicketEmailEnabled
+  // toggles the customer "ticket received" email on auto-create. The
+  // slaWindowsHours map is used for `due_at = now() + slaWindowsHours[priority]`
+  // and the cron breach sweep.
+  autoTicketOnEscalation: true,
+  autoTicketEmailEnabled: true,
+  slaWindowsHours: { urgent: 2, high: 4, normal: 24, low: 72 },
 };
 
 export async function GET() {

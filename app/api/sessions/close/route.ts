@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm";
 import { getPusher } from "@/lib/pusher/server";
 import { log, serializeError } from "@/lib/log";
 import { enqueueTag } from "@/lib/ai/tagger";
+import { enqueueAutoTicket } from "@/lib/tickets/autoCreate";
 
 export async function POST(req: NextRequest) {
   const requestId = crypto.randomUUID();
@@ -50,6 +51,10 @@ export async function POST(req: NextRequest) {
     // Phase 5: fire-and-forget AI tagging. Drops if the in-memory
     // semaphore is full; never blocks the close response.
     enqueueTag(sessionId);
+    // Phase 5.5: same fire-and-forget pattern. The auto-ticket helper
+    // dedupes against existing tickets for this session and reads its
+    // own settings/decision matrix; safe to call unconditionally.
+    enqueueAutoTicket(sessionId);
 
     return NextResponse.json({ session: updated });
   } catch (error) {

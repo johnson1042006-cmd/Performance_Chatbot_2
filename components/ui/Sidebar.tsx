@@ -16,6 +16,8 @@ import {
   Search,
   TrendingUp,
   ListChecks,
+  Ticket,
+  ClipboardList,
 } from "lucide-react";
 import Badge from "./Badge";
 import AlertsBell from "@/components/dashboard/AlertsBell";
@@ -44,6 +46,11 @@ const navItems: NavItem[] = [
     icon: <History size={20} />,
   },
   {
+    label: "Tickets",
+    href: "/dashboard/tickets",
+    icon: <Ticket size={20} />,
+  },
+  {
     label: "Search",
     href: "/dashboard/manager/search",
     icon: <Search size={20} />,
@@ -53,6 +60,12 @@ const navItems: NavItem[] = [
     label: "Insights",
     href: "/dashboard/manager/insights",
     icon: <TrendingUp size={20} />,
+    managerOnly: true,
+  },
+  {
+    label: "Ticket Stats",
+    href: "/dashboard/manager/tickets",
+    icon: <ClipboardList size={20} />,
     managerOnly: true,
   },
   {

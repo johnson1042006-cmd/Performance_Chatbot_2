@@ -19,7 +19,8 @@ import { sendSlackAlert } from "./notify";
 export type AlertKind =
   | "queue_depth"
   | "ai_failure_rate_pct"
-  | "no_agents_online_during_hours";
+  | "no_agents_online_during_hours"
+  | "ticket_sla_breach";
 
 export interface EvaluationResult {
   kind: AlertKind;
@@ -85,6 +86,30 @@ async function evalAiFailureRatePct(windowMinutes = 60): Promise<number> {
   const row = arr[0];
   if (!row || row.total === 0) return 0;
   return Math.round((row.escalated / row.total) * 100);
+}
+
+async function evalTicketSlaBreachCount(): Promise<number> {
+  // Number of tickets currently flagged as SLA-breached and not yet
+  // resolved/closed. The cron sweep fires per-breach Slack/Pusher
+  // unconditionally; this evaluator is the meta-alarm so a manager can
+  // also page when N+ tickets are simultaneously past due.
+  try {
+    const result = await db.execute(sql`
+      SELECT count(*)::int AS c
+      FROM tickets
+      WHERE sla_breached = true
+        AND status NOT IN ('resolved','closed')
+    `);
+    const arr =
+      (result as unknown as { rows?: { c: number }[] }).rows ??
+      (Array.isArray(result) ? (result as { c: number }[]) : []);
+    return arr[0]?.c ?? 0;
+  } catch (error) {
+    log.warn("alerts.eval_ticket_sla_breach_failed", {
+      error: serializeError(error),
+    });
+    return 0;
+  }
 }
 
 async function evalNoAgentsOnlineDuringHours(
@@ -159,6 +184,9 @@ export async function evaluateAlertThresholds(): Promise<EvaluationResult[]> {
           inWindow = r.inWindow;
           break;
         }
+        case "ticket_sla_breach":
+          value = await evalTicketSlaBreachCount();
+          break;
         default:
           continue;
       }
