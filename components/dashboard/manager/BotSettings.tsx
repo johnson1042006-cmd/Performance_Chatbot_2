@@ -326,7 +326,7 @@ export default function BotSettings() {
                 Email customer when ticket is created
               </p>
               <p className="text-xs text-text-secondary">
-                Send a "we got your request" email when a ticket is auto- or
+                Send a &quot;we got your request&quot; email when a ticket is auto- or
                 manually-created (skipped if no consented email is on file).
               </p>
             </div>
@@ -354,8 +354,8 @@ export default function BotSettings() {
               SLA windows (hours)
             </label>
             <p className="text-xs text-text-secondary mb-3">
-              Tickets become "breached" when due_at is in the past. due_at is
-              computed as ticket created time + this priority's window.
+              Tickets become &quot;breached&quot; when due_at is in the past. due_at is
+              computed as ticket created time + this priority&apos;s window.
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {(
