@@ -189,6 +189,31 @@ interface PromptResult {
   conversationMessages: { role: "user" | "assistant"; content: string }[];
 }
 
+/**
+ * Phase 3: when `USE_AI_TOOLS=true` the model is given a tool catalog and is
+ * expected to call `search_products` itself instead of receiving a pre-rendered
+ * RELEVANT PRODUCTS dump. We compute the env flag once here so callers and
+ * tests can stub `process.env.USE_AI_TOOLS` and re-import.
+ */
+function aiToolsEnabled(): boolean {
+  return process.env.USE_AI_TOOLS === "true";
+}
+
+const TOOL_MODE_INSTRUCTIONS = `\n## TOOLS
+
+You have a tool catalog you MUST use. The proactive "RELEVANT PRODUCTS FROM CATALOG" section is REPLACED by these tools — call them yourself when you need product data.
+
+- \`search_products({ query, productType?, budgetMax?, color?, inStockOnly? })\` — search the catalog. Always call BEFORE naming any product not on the current page or in conversation history.
+- \`get_product_details({ sku })\` — full product info including variants. Always call BEFORE stating stock, price, or variant info.
+- \`get_product_by_variant_sku({ variantSku })\` — resolve a customer-pasted variant SKU (e.g. from an invoice) to its parent product.
+- \`get_pairings({ sku })\` — curated pairings (matching pants/jacket, common accessories) for a parent SKU.
+- \`lookup_order({ email, orderId })\` — order status, tracking, and items shipped. Use whenever the customer asks about an order they placed.
+- \`lookup_helmet_sizing()\` — canonical helmet sizing-guide URL. Use whenever a customer asks how a helmet fits.
+- \`lookup_tire_services()\` — tire and wheel services URL. Use for tire mounting/balancing questions.
+- \`escalate_to_human({ reason, urgency })\` — hand the conversation to a human teammate.
+
+Always call search_products before naming any product not on the current page or in conversation history. Always call get_product_details before stating stock/price/variant info. Call escalate_to_human({reason: 'complex_fitment'}) for VIN-level fitment, suspension setup, custom service work — never guess fitment. Call escalate_to_human({reason: 'tech_air_service'}) for any Tech-Air service question.\n`;
+
 async function safeFetch<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
   try {
     return await fn();
@@ -507,7 +532,13 @@ ${AI_BEHAVIOR_RULES.map((r, i) => `${i + 1}. ${r.rule}`).join("\n\n")}
     return tags.join(" ") + " " + formatProductForPrompt(p);
   }
 
-  if (displayProducts.length > 0) {
+  if (aiToolsEnabled()) {
+    // Tool mode: skip the proactive RELEVANT PRODUCTS dump and append a
+    // tool-use directive section instead. The model calls search_products /
+    // get_product_details / etc. on demand. Page-context-product, follow-up
+    // product block, knowledge base, and taxonomy still appear above.
+    system += TOOL_MODE_INSTRUCTIONS;
+  } else if (displayProducts.length > 0) {
     system += `\n## RELEVANT PRODUCTS FROM CATALOG\n\n`;
     for (const p of displayProducts) {
       system += renderProductEntry(p) + `\n\n`;

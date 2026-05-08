@@ -49,6 +49,8 @@ export const chatEventTypeEnum = pgEnum("chat_event_type", [
   "reassigned",
   "closed",
   "stale_closed",
+  "tool_call",
+  "auto_escalated",
 ]);
 
 export const users = pgTable("users", {
@@ -114,6 +116,11 @@ export const messages = pgTable("messages", {
     .array()
     .notNull()
     .default(sql`'{}'::text[]`),
+  // Phase 3: heuristic confidence/sentiment computed at AI insert time.
+  // Confidence is one of "high" | "medium" | "low"; sentiment is -1 | 0 | 1.
+  // Both null for non-AI rows and for AI rows persisted before Phase 3.
+  confidence: varchar("confidence", { length: 8 }),
+  sentiment: integer("sentiment"),
 }, (table) => ({
   sessionIdSentAtIdx: index("messages_session_id_sent_at_idx").on(table.sessionId, table.sentAt),
 }));

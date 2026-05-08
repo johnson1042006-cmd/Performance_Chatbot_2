@@ -17,6 +17,11 @@ interface SessionCardProps {
     claimedByKind?: string | null;
     claimedBy?: { id: string; name: string } | null;
     waitSeconds?: number;
+    // Phase 3: derived quality indicator computed in /api/sessions GET.
+    qualityFlag?: {
+      lowConfidenceLatest: boolean;
+      negativeSentimentEver: boolean;
+    };
   };
   isActive?: boolean;
   onClaim?: (sessionId: string) => void;
@@ -90,8 +95,20 @@ export default function SessionCard({
     >
       <div className="flex items-start justify-between mb-2">
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-text-primary truncate">
+          <p className="text-sm font-medium text-text-primary truncate flex items-center gap-1.5">
             {getDisplayName(session.customerIdentifier)}
+            {(session.qualityFlag?.lowConfidenceLatest ||
+              session.qualityFlag?.negativeSentimentEver) && (
+              <span
+                data-testid="session-quality-flag"
+                title={
+                  session.qualityFlag?.negativeSentimentEver
+                    ? "Customer frustration detected"
+                    : "AI low-confidence reply"
+                }
+                className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"
+              />
+            )}
           </p>
           <div className="flex items-center gap-2 mt-1 flex-wrap">
             <Badge variant={statusBadge.variant} dot>

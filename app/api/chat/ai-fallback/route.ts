@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { messages, sessions } from "@/lib/db/schema";
+import { sessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { buildPrompt } from "@/lib/ai/buildPrompt";
-import { callClaude, CALL_CLAUDE_ERROR_MESSAGE } from "@/lib/ai/callClaude";
-import { getPusher } from "@/lib/pusher/server";
+import { runAiTurn } from "@/lib/ai/runAi";
+import { CALL_CLAUDE_ERROR_MESSAGE } from "@/lib/ai/callClaude";
 import { claimByAi } from "@/lib/sessions/state";
 import { log, serializeError } from "@/lib/log";
+import { createSseStream, SSE_RESPONSE_HEADERS, wantsSse } from "@/lib/ai/sse";
 
 export const maxDuration = 60;
 
@@ -15,6 +15,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { sessionId, latestMessage, pageContext } = body;
+    const useSse = wantsSse(req);
 
     if (!sessionId) {
       return NextResponse.json(
@@ -55,37 +56,61 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    let system: string;
-    let conversationMessages: { role: "user" | "assistant"; content: string }[];
-    try {
-      const result = await buildPrompt(
-        sessionId,
-        latestMessage || "",
-        pageContext
-      );
-      system = result.system;
-      conversationMessages = result.conversationMessages;
-    } catch (buildErr) {
-      log.error("chat.ai_fallback.build_prompt_failed", {
-        requestId,
-        sessionId,
-        error: serializeError(buildErr),
+    if (useSse) {
+      const stream = createSseStream(async ({ send }) => {
+        try {
+          const result = await runAiTurn({
+            sessionId,
+            latestMessage: latestMessage || "",
+            pageContext,
+            requestId,
+            stream: {
+              onToken: (text) => send({ event: "token", data: { text } }),
+              onToolUse: (e) => send({ event: "tool_use", data: e }),
+            },
+          });
+          send({
+            event: "message",
+            data: {
+              id: result.message.id,
+              sentAt: result.message.sentAt,
+              confidence: result.confidence.confidence,
+              sentiment: result.sentiment.score,
+              autoEscalated: result.autoEscalated,
+            },
+          });
+          send({ event: "done", data: {} });
+        } catch (err) {
+          log.error("chat.ai_fallback.sse_failed", {
+            requestId,
+            sessionId,
+            error: serializeError(err),
+          });
+          send({
+            event: "error",
+            data: { message: "AI fallback failed" },
+          });
+        }
       });
-      return NextResponse.json(
-        {
-          error:
-            "I'm having trouble looking that up right now. Could you try rephrasing or asking again in a moment?",
-        },
-        { status: 503 }
-      );
+      return new Response(stream, { headers: SSE_RESPONSE_HEADERS });
     }
 
-    let aiResponse: string;
     try {
-      aiResponse = await callClaude(system, conversationMessages);
+      const result = await runAiTurn({
+        sessionId,
+        latestMessage: latestMessage || "",
+        pageContext,
+        requestId,
+      });
+      return NextResponse.json({ message: result.message });
     } catch (err) {
       const isClaudeFailure =
         err && typeof err === "object" && "isCallClaudeFailure" in err;
+      log.error("chat.ai_fallback.claude_failed", {
+        requestId,
+        sessionId,
+        error: serializeError(err),
+      });
       return NextResponse.json(
         {
           error: isClaudeFailure
@@ -95,39 +120,6 @@ export async function POST(req: NextRequest) {
         { status: 503 }
       );
     }
-
-    const [savedMessage] = await db
-      .insert(messages)
-      .values({
-        sessionId,
-        role: "ai",
-        content: aiResponse,
-      })
-      .returning();
-
-    try {
-      const pusher = getPusher();
-      await pusher.trigger(`session-${sessionId}`, "new-message", {
-        id: savedMessage.id,
-        role: "ai",
-        content: savedMessage.content,
-        sentAt: savedMessage.sentAt,
-      });
-
-      await pusher.trigger("dashboard", "session-update", {
-        sessionId,
-        lastMessage: savedMessage.content,
-        role: "ai",
-      });
-    } catch (pusherError) {
-      log.warn("chat.ai_fallback.pusher_failed", {
-        requestId,
-        sessionId,
-        error: serializeError(pusherError),
-      });
-    }
-
-    return NextResponse.json({ message: savedMessage });
   } catch (error) {
     log.error("chat.ai_fallback_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(

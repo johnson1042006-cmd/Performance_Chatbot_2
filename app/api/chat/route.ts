@@ -12,11 +12,11 @@ import {
   recordCustomerActivity,
   claimByAi,
 } from "@/lib/sessions/state";
-import { buildPrompt } from "@/lib/ai/buildPrompt";
-import { callClaude } from "@/lib/ai/callClaude";
+import { runAiTurn } from "@/lib/ai/runAi";
 import { redactPII } from "@/lib/utils/redactPII";
 import { enforce, getClientIp } from "@/lib/rateLimit";
 import { log, serializeError } from "@/lib/log";
+import { createSseStream, SSE_RESPONSE_HEADERS, wantsSse } from "@/lib/ai/sse";
 
 const DEFAULT_FALLBACK_SECONDS = 60;
 
@@ -41,11 +41,21 @@ async function getBotSettings(): Promise<{
   }
 }
 
+interface AiInlineContext {
+  sessionId: string;
+  storedContent: string;
+  latestMessageRaw: string;
+  enrichedContext: Record<string, unknown> | null | undefined;
+  requestId: string;
+  alsoFireSessionClaimed: boolean;
+}
+
 export async function POST(req: NextRequest) {
   const requestId = crypto.randomUUID();
   try {
     const body = await req.json();
     const { message, sessionId, pageContext, role = "customer", agentName } = body;
+    const useSse = wantsSse(req) && role === "customer";
 
     if (!message || !sessionId) {
       return NextResponse.json(
@@ -262,35 +272,31 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    const aiCtx: AiInlineContext = {
+      sessionId,
+      storedContent,
+      latestMessageRaw,
+      enrichedContext,
+      requestId,
+      alsoFireSessionClaimed: false,
+    };
+
     // If already claimed by AI — respond inline to every follow-up
     if (session.claimedByKind === "ai") {
+      if (useSse) {
+        return sseAiResponse(aiCtx, savedMessage, productMention);
+      }
       try {
-        const { system, conversationMessages } = await buildPrompt(
+        const result = await runAiTurn({
           sessionId,
-          storedContent,
-          enrichedContext,
-          latestMessageRaw
-        );
-        const aiResponse = await callClaude(system, conversationMessages);
-        const [aiMsg] = await db
-          .insert(messages)
-          .values({ sessionId, role: "ai", content: aiResponse })
-          .returning();
-        const pusher = getPusher();
-        await pusher.trigger(`session-${sessionId}`, "new-message", {
-          id: aiMsg.id,
-          role: "ai",
-          content: aiMsg.content,
-          sentAt: aiMsg.sentAt,
-        });
-        await pusher.trigger("dashboard", "session-update", {
-          sessionId,
-          lastMessage: aiMsg.content,
-          role: "ai",
+          latestMessage: storedContent,
+          latestMessageRaw,
+          pageContext: enrichedContext,
+          requestId,
         });
         return NextResponse.json({
           message: savedMessage,
-          aiMessage: aiMsg,
+          aiMessage: result.message,
           sessionStatus: "active_ai",
           productMention,
         });
@@ -328,43 +334,22 @@ export async function POST(req: NextRequest) {
       // No agents — AI claims immediately
       const won = await claimByAi(sessionId);
       if (won) {
-        // Fire AI response inline
+        aiCtx.alsoFireSessionClaimed = true;
+        if (useSse) {
+          return sseAiResponse(aiCtx, savedMessage, productMention);
+        }
         try {
-          const { system, conversationMessages } = await buildPrompt(
+          const result = await runAiTurn({
             sessionId,
-            storedContent,
-            enrichedContext,
-            latestMessageRaw
-          );
-          const aiResponse = await callClaude(system, conversationMessages);
-          const [aiMsg] = await db
-            .insert(messages)
-            .values({ sessionId, role: "ai", content: aiResponse })
-            .returning();
-
-          const pusher = getPusher();
-          await pusher.trigger(`session-${sessionId}`, "new-message", {
-            id: aiMsg.id,
-            role: "ai",
-            content: aiMsg.content,
-            sentAt: aiMsg.sentAt,
+            latestMessage: storedContent,
+            latestMessageRaw,
+            pageContext: enrichedContext,
+            requestId,
           });
-          await pusher.trigger("dashboard", "session-update", {
-            sessionId,
-            lastMessage: aiMsg.content,
-            role: "ai",
-          });
-          await pusher.trigger(`session-${sessionId}`, "session-claimed", {
-            kind: "ai",
-          });
-          await pusher.trigger("dashboard", "session-claimed", {
-            sessionId,
-            kind: "ai",
-          });
-
+          await fireSessionClaimedEvents(sessionId, requestId);
           return NextResponse.json({
             message: savedMessage,
-            aiMessage: aiMsg,
+            aiMessage: result.message,
             sessionStatus: "active_ai",
             productMention,
           });
@@ -404,4 +389,83 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+async function fireSessionClaimedEvents(sessionId: string, requestId: string): Promise<void> {
+  try {
+    const pusher = getPusher();
+    await pusher.trigger(`session-${sessionId}`, "session-claimed", {
+      kind: "ai",
+    });
+    await pusher.trigger("dashboard", "session-claimed", {
+      sessionId,
+      kind: "ai",
+    });
+  } catch (err) {
+    log.warn("chat.session_claimed_pusher_failed", {
+      requestId,
+      sessionId,
+      error: serializeError(err),
+    });
+  }
+}
+
+/**
+ * SSE branch: streams tokens to the client while runAiTurn streams from
+ * Anthropic, persists the final message, fires Pusher fan-out, and emits
+ * `done`. Falls back to a JSON 500 if the stream fails to initialize.
+ */
+function sseAiResponse(
+  ctx: AiInlineContext,
+  savedCustomerMessage: typeof messages.$inferSelect,
+  productMention: unknown
+): Response {
+  const stream = createSseStream(async ({ send }) => {
+    send({
+      event: "customer_message",
+      data: {
+        id: savedCustomerMessage.id,
+        sentAt: savedCustomerMessage.sentAt,
+        productMention,
+      },
+    });
+    try {
+      const result = await runAiTurn({
+        sessionId: ctx.sessionId,
+        latestMessage: ctx.storedContent,
+        latestMessageRaw: ctx.latestMessageRaw,
+        pageContext: ctx.enrichedContext,
+        requestId: ctx.requestId,
+        stream: {
+          onToken: (text) => send({ event: "token", data: { text } }),
+          onToolUse: (e) => send({ event: "tool_use", data: e }),
+        },
+      });
+      if (ctx.alsoFireSessionClaimed) {
+        await fireSessionClaimedEvents(ctx.sessionId, ctx.requestId);
+      }
+      send({
+        event: "message",
+        data: {
+          id: result.message.id,
+          sentAt: result.message.sentAt,
+          confidence: result.confidence.confidence,
+          sentiment: result.sentiment.score,
+          autoEscalated: result.autoEscalated,
+        },
+      });
+      send({ event: "done", data: {} });
+    } catch (err) {
+      log.error("chat.sse_ai_failed", {
+        requestId: ctx.requestId,
+        sessionId: ctx.sessionId,
+        error: serializeError(err),
+      });
+      send({
+        event: "error",
+        data: { message: "AI response failed" },
+      });
+    }
+  });
+  return new Response(stream, { headers: SSE_RESPONSE_HEADERS });
 }

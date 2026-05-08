@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
 import MessageThread from "./MessageThread";
 import PageContextBadge from "./PageContextBadge";
+import AITrace from "./AITrace";
 import Button from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { Send, UserCheck, X, Users, RotateCcw } from "lucide-react";
@@ -366,6 +367,8 @@ export default function ChatPanel({
       </div>
 
       <MessageThread messages={messages} />
+
+      <AITrace sessionId={sessionId} />
 
       {isClosed && (
         <div className="shrink-0 border-t border-border bg-slate-100 px-4 py-3 text-center">

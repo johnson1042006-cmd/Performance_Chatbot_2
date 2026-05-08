@@ -266,6 +266,9 @@ describe("Session status edge cases", () => {
 // ---------------------------------------------------------------------------
 describe("Pairing search edge cases", () => {
   it("findPairings returns empty array for non-existent SKU", async () => {
+    // Reset modules so prior tests' partial schema mocks (which omit
+    // productPairings) don't get re-used for the pairingSearch import.
+    vi.resetModules();
     vi.doMock("@/lib/db", () => ({
       db: {
         select: vi.fn().mockReturnValue({

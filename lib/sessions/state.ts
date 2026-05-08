@@ -7,9 +7,7 @@ import { db } from "@/lib/db";
 import { sessions, users, chatEvents } from "@/lib/db/schema";
 import { eq, isNull, lt, and, or, ne } from "drizzle-orm";
 import { getPusher } from "@/lib/pusher/server";
-import { buildPrompt } from "@/lib/ai/buildPrompt";
-import { callClaude } from "@/lib/ai/callClaude";
-import { messages } from "@/lib/db/schema";
+import { runAiTurn } from "@/lib/ai/runAi";
 import { sql } from "drizzle-orm";
 import { log, serializeError } from "@/lib/log";
 
@@ -238,39 +236,33 @@ export async function processDueAiClaims(): Promise<void> {
     const won = await claimByAi(session.id);
     if (!won) continue; // human beat us
 
-    // Fire the AI response
+    // Fire the AI response. runAiTurn handles buildPrompt + callClaude
+    // (with optional tool use), persistence with confidence/sentiment,
+    // new-message + session-update Pusher events, and auto-escalation.
+    // We still need to fire the session-claimed events here because the
+    // sweep is the actor that just transitioned the session into AI hands.
     try {
-      const { system, conversationMessages } = await buildPrompt(
-        session.id,
-        "",
-        session.pageContext as Record<string, unknown> | null
-      );
-      const aiResponse = await callClaude(system, conversationMessages);
-
-      const [savedMessage] = await db
-        .insert(messages)
-        .values({ sessionId: session.id, role: "ai", content: aiResponse })
-        .returning();
-
-      const pusher = getPusher();
-      await pusher.trigger(`session-${session.id}`, "new-message", {
-        id: savedMessage.id,
-        role: "ai",
-        content: savedMessage.content,
-        sentAt: savedMessage.sentAt,
-      });
-      await pusher.trigger("dashboard", "session-update", {
+      await runAiTurn({
         sessionId: session.id,
-        lastMessage: savedMessage.content,
-        role: "ai",
+        latestMessage: "",
+        pageContext: session.pageContext as Record<string, unknown> | null,
       });
-      await pusher.trigger(`session-${session.id}`, "session-claimed", {
-        kind: "ai",
-      });
-      await pusher.trigger("dashboard", "session-claimed", {
-        sessionId: session.id,
-        kind: "ai",
-      });
+
+      try {
+        const pusher = getPusher();
+        await pusher.trigger(`session-${session.id}`, "session-claimed", {
+          kind: "ai",
+        });
+        await pusher.trigger("dashboard", "session-claimed", {
+          sessionId: session.id,
+          kind: "ai",
+        });
+      } catch (pusherErr) {
+        log.warn("sessions.ai_fallback_session_claimed_pusher_failed", {
+          sessionId: session.id,
+          error: serializeError(pusherErr),
+        });
+      }
     } catch (err) {
       log.error("sessions.ai_fallback_failed", {
         sessionId: session.id,

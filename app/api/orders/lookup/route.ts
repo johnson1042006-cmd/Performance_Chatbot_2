@@ -2,13 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { messages, sessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import {
-  getOrderByEmailAndOrderId,
-  getOrderShipments,
-  BC_ORDER_STATUS,
-  type BCOrder,
-  type BCShipment,
-} from "@/lib/bigcommerce/client";
+import { BC_ORDER_STATUS } from "@/lib/bigcommerce/client";
+import { lookupOrder, buildTrackingUrl } from "@/lib/orders/lookup";
 import { getPusher } from "@/lib/pusher/server";
 import { enforce, getClientIp } from "@/lib/rateLimit";
 import { log, serializeError } from "@/lib/log";
@@ -19,78 +14,6 @@ import { log, serializeError } from "@/lib/log";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/**
- * Build a customer-facing tracking URL from a carrier name + tracking number.
- * BC's `tracking_link` field is sometimes populated, sometimes not; if it is,
- * prefer it. Otherwise we synthesize the canonical link for the carrier.
- * Returns null when we can't build a sensible link.
- */
-function buildTrackingUrl(shipment: BCShipment): string | null {
-  if (shipment.tracking_link && shipment.tracking_link.length > 0) {
-    return shipment.tracking_link;
-  }
-  if (!shipment.tracking_number) return null;
-  const carrier = (shipment.tracking_carrier || shipment.shipping_provider || "")
-    .toLowerCase()
-    .trim();
-  const num = encodeURIComponent(shipment.tracking_number);
-  if (carrier.includes("ups")) {
-    return `https://www.ups.com/track?tracknum=${num}`;
-  }
-  if (carrier.includes("fedex")) {
-    return `https://www.fedex.com/fedextrack/?tracknumbers=${num}`;
-  }
-  if (carrier.includes("usps")) {
-    return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${num}`;
-  }
-  return null;
-}
-
-function formatDate(iso: string): string {
-  // BC returns RFC 1123 strings ("Mon, 12 Jan 2026 09:14:25 +0000"); fall back
-  // to the raw value if Date parsing fails so we never crash the summary.
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
-
-function formatTotal(order: BCOrder): string {
-  const num = Number(order.total_inc_tax);
-  if (Number.isNaN(num)) return `${order.currency_code} ${order.total_inc_tax}`;
-  return `$${num.toFixed(2)}`;
-}
-
-function buildSummary(order: BCOrder, shipments: BCShipment[]): string {
-  const statusLabel =
-    BC_ORDER_STATUS[order.status_id] || order.status || "Unknown status";
-  const lines: string[] = [];
-  lines.push(`**Order #${order.id}** — *${statusLabel}* (${formatDate(order.date_created)})`);
-  lines.push(`Total: **${formatTotal(order)}**`);
-  lines.push(`Items shipped: ${order.items_shipped} / ${order.items_total}`);
-
-  // Only emit a tracking line for orders that have at least one shipment with
-  // a tracking number. The label "Tracking" stays out of the summary entirely
-  // for unshipped orders so we don't show a half-empty row.
-  const tracked = shipments.filter((s) => s.tracking_number);
-  if (tracked.length > 0) {
-    const links = tracked
-      .map((s) => {
-        const url = buildTrackingUrl(s);
-        return url
-          ? `[${s.tracking_number}](${url})`
-          : `${s.tracking_number}`;
-      })
-      .join(", ");
-    lines.push(`Tracking: ${links}`);
-  }
-
-  return lines.join("\n");
-}
 
 export async function POST(req: NextRequest) {
   const requestId = crypto.randomUUID();
@@ -144,20 +67,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
-    const order = await getOrderByEmailAndOrderId(email, orderId);
-    if (!order) {
+    const result = await lookupOrder(email, orderId);
+    if (!result.found || !result.order) {
       return NextResponse.json({ found: false });
     }
-
-    // Only fetch shipments for statuses where they're meaningful. Saves a
-    // round-trip on Pending / Awaiting Payment orders that BC will return
-    // empty for anyway.
-    const SHIPPED_STATUSES = new Set([2, 3, 10]);
-    const shipments = SHIPPED_STATUSES.has(order.status_id)
-      ? await getOrderShipments(order.id)
-      : [];
-
-    const summary = buildSummary(order, shipments);
+    const order = result.order;
+    const shipments = result.shipments ?? [];
+    const summary = result.summary!;
 
     const [savedMessage] = await db
       .insert(messages)

@@ -67,6 +67,13 @@ async function fetchWithTimeout(
   }
 }
 
+// Phase 3 helper: identifies optimistic ("temp-") and streaming
+// ("streaming-") message ids so mergeRealMessage can swap them for the
+// persisted server-generated id when it arrives. Hoisted outside the
+// component so it stays referentially stable across renders.
+const isTempId = (id: string): boolean =>
+  id.startsWith("temp-") || id.startsWith("streaming-");
+
 export default function ChatWidget() {
   const searchParams = useSearchParams();
   const urlSessionId = searchParams.get("sessionId")?.trim() ?? "";
@@ -282,12 +289,15 @@ export default function ChatWidget() {
   // ID is already present, otherwise replaces the FIRST matching temp by
   // content+role, otherwise appends. Any OTHER temps that match content+role
   // are dropped — those are orphans from earlier failed sends.
+  // Phase 3: also treats `streaming-` prefix as temp so the in-progress
+  // SSE bubble gets replaced when the real persisted message id arrives
+  // via Pusher (or via the `message` SSE event).
   const mergeRealMessage = (prev: Message[], incoming: Message): Message[] => {
-    if (incoming.id.startsWith("temp-")) return prev;
+    if (isTempId(incoming.id)) return prev;
     if (prev.some((m) => m.id === incoming.id)) {
       return prev.filter(
         (m) =>
-          !(m.id.startsWith("temp-") &&
+          !(isTempId(m.id) &&
             m.content === incoming.content &&
             m.role === incoming.role)
       );
@@ -296,7 +306,7 @@ export default function ChatWidget() {
     const out: Message[] = [];
     for (const m of prev) {
       const isOrphanMatch =
-        m.id.startsWith("temp-") &&
+        isTempId(m.id) &&
         m.content === incoming.content &&
         m.role === incoming.role;
       if (isOrphanMatch && !replaced) {
@@ -389,11 +399,18 @@ export default function ChatWidget() {
       channel.unbind("session-claimed");
       channel.unbind("session-released");
       channel.unbind("session-closed");
+      channel.unbind("request-contact");
       channel.bind("new-message", handleNewMessage);
       channel.bind("typing", handleTyping);
       channel.bind("session-claimed", handleClaimed);
       channel.bind("session-released", handleReleased);
       channel.bind("session-closed", handleClosed);
+      // Phase 3: server fires `request-contact` after auto-escalation when
+      // no agents are online so we render the email-capture form without
+      // requiring the customer to tap "Talk to a human".
+      channel.bind("request-contact", () => {
+        setChipForm("email_capture");
+      });
       console.log(
         "[Pusher] new-message handler count after bind:",
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -437,6 +454,152 @@ export default function ChatWidget() {
     ]);
     setWaitingForReply(false);
   }, []);
+
+  /**
+   * POSTs /api/chat with `Accept: text/event-stream`. The route returns SSE
+   * only for the AI inline branches; otherwise it returns JSON (queued,
+   * human-claimed, errors). Outcomes:
+   *  - "sse_done"    — SSE consumed cleanly; Pusher will deliver real id.
+   *  - "sse_error"   — SSE started but errored mid-stream; caller surfaces a
+   *                    notice (do NOT re-POST — the customer message has
+   *                    already been persisted server-side).
+   *  - "json"        — server returned a JSON response; payload is forwarded
+   *                    to the caller for the existing handling path.
+   *  - "transport"   — fetch threw before any response; safe to retry/notify.
+   */
+  type SseOutcome =
+    | { kind: "sse_done" }
+    | { kind: "sse_error"; error?: string }
+    | { kind: "json"; status: number; data: Record<string, unknown> }
+    | { kind: "transport" };
+
+  const streamAiOverSse = async (
+    sid: string,
+    content: string,
+    ctx: PageContext | null
+  ): Promise<SseOutcome> => {
+    let res: Response;
+    try {
+      res = await fetch("/api/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+        },
+        body: JSON.stringify({ message: content, sessionId: sid, pageContext: ctx }),
+      });
+    } catch {
+      return { kind: "transport" };
+    }
+    const ct = res.headers.get("content-type") || "";
+    if (!ct.includes("text/event-stream") || !res.body) {
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      return { kind: "json", status: res.status, data };
+    }
+
+    const streamingId = `streaming-${Date.now()}`;
+    let bubbleAdded = false;
+    let assembled = "";
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    const flushEvent = (evt: { event: string; data: string }) => {
+      if (evt.event === "token") {
+        try {
+          const parsed = JSON.parse(evt.data) as { text?: string };
+          if (parsed.text) {
+            assembled += parsed.text;
+            if (!bubbleAdded) {
+              bubbleAdded = true;
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: streamingId,
+                  role: "ai",
+                  content: assembled,
+                  sentAt: new Date().toISOString(),
+                },
+              ]);
+            } else {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === streamingId ? { ...m, content: assembled } : m
+                )
+              );
+            }
+            setWaitingForReply(false);
+            setSessionState((p) => resolveSessionState(p, "ai"));
+          }
+        } catch {
+          // malformed event — ignore
+        }
+      } else if (evt.event === "tool_use") {
+        // Best-effort hint inside the bubble. We don't surface tool inputs
+        // to the customer to avoid leaking raw JSON.
+        if (!bubbleAdded) {
+          bubbleAdded = true;
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: streamingId,
+              role: "ai",
+              content: assembled || "_(looking that up…)_",
+              sentAt: new Date().toISOString(),
+            },
+          ]);
+          setWaitingForReply(false);
+        }
+      } else if (evt.event === "error") {
+        try {
+          const parsed = JSON.parse(evt.data) as { message?: string };
+          throw new Error(parsed.message || "stream_error");
+        } catch (err) {
+          throw err instanceof Error ? err : new Error("stream_error");
+        }
+      }
+    };
+
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let nlIdx: number;
+        while ((nlIdx = buffer.indexOf("\n\n")) >= 0) {
+          const chunk = buffer.slice(0, nlIdx);
+          buffer = buffer.slice(nlIdx + 2);
+          const lines = chunk.split("\n");
+          let event = "message";
+          const dataLines: string[] = [];
+          for (const line of lines) {
+            if (line.startsWith("event:")) event = line.slice(6).trim();
+            else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+          }
+          if (dataLines.length === 0) continue;
+          flushEvent({ event, data: dataLines.join("\n") });
+        }
+      }
+    } catch (err) {
+      // Drop the partial bubble; rely on Pusher's `new-message` delivering
+      // the persisted final text if the server still managed to save it.
+      if (bubbleAdded) {
+        setMessages((prev) => prev.filter((m) => m.id !== streamingId));
+      }
+      return { kind: "sse_error", error: err instanceof Error ? err.message : undefined };
+    }
+
+    // If the server emitted only events (no message text yet), it may have
+    // had a pre-stream error. The Pusher `new-message` event will still
+    // arrive with the final saved text — leave the bubble in place if we
+    // assembled anything, otherwise drop it.
+    if (bubbleAdded && assembled.length === 0) {
+      setMessages((prev) => prev.filter((m) => m.id !== streamingId));
+    }
+
+    return { kind: "sse_done" };
+  };
 
   const sendMessage = async (override?: string) => {
     const candidate = override ?? input;
@@ -495,24 +658,48 @@ export default function ChatWidget() {
         return;
       }
 
-      let res: Response;
-      try {
-        res = await fetchWithTimeout(
-          "/api/chat",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message: content, sessionId: sid, pageContext }),
-          },
-          CHAT_POST_MS
+      // Phase 3: POST with `Accept: text/event-stream`. The server returns
+      // SSE for the AI inline branches and JSON for queued / human-claimed
+      // / error cases. The helper handles both — we only need to retry on
+      // a true transport failure (fetch threw before getting any response).
+      const sseOutcome = await streamAiOverSse(sid, content, pageContext);
+      if (sseOutcome.kind === "sse_done") {
+        setSessionState((p) => resolveSessionState(p, "ai"));
+        return;
+      }
+      if (sseOutcome.kind === "sse_error") {
+        appendLocalError(
+          "We had trouble streaming the reply. Please try again in a moment."
         );
-      } catch {
-        appendLocalError("Your message timed out. Try again.");
-        setMessages((prev) => prev.filter((m) => m.id !== tempMsg.id));
         return;
       }
 
-      const data = await res.json().catch(() => ({}));
+      let res: Response;
+      let data: Record<string, unknown>;
+      if (sseOutcome.kind === "json") {
+        // Synthesize a Response-like shape so the existing branches below
+        // keep working without a second POST.
+        data = sseOutcome.data;
+        res = { ok: sseOutcome.status >= 200 && sseOutcome.status < 300, status: sseOutcome.status } as Response;
+      } else {
+        // True transport failure — POST again over plain JSON as a last resort.
+        try {
+          res = await fetchWithTimeout(
+            "/api/chat",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ message: content, sessionId: sid, pageContext }),
+            },
+            CHAT_POST_MS
+          );
+        } catch {
+          appendLocalError("Your message timed out. Try again.");
+          setMessages((prev) => prev.filter((m) => m.id !== tempMsg.id));
+          return;
+        }
+        data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      }
 
       if (res.status === 410 || data.code === "session_closed") {
         // Server says this session has ended. Drop the optimistic temp,
@@ -539,7 +726,7 @@ export default function ChatWidget() {
       }
 
       if (data.message) {
-        setMessages((prev) => mergeRealMessage(prev, data.message));
+        setMessages((prev) => mergeRealMessage(prev, data.message as Message));
       }
 
       // Update session state from server response
