@@ -1,5 +1,26 @@
 (function () {
-  var PC_CHAT_URL = "https://performance-chatbot2-2.vercel.app";
+  // Base URL for the Next app (iframe + `/api/embed/config`). Prefer the
+  // origin of *this* script so local `widget-test.html` (which loads
+  // `/embed.js` from the dev server) talks to `http://localhost:3000` instead
+  // of a hardcoded production host — otherwise `fetch(PC_CHAT_URL + ...)` hits
+  // CORS from localhost. Production: keep using the full script URL in the
+  // storefront tag, e.g. `https://your-app.vercel.app/embed.js`.
+  var PC_CHAT_DEFAULT = "https://performance-chatbot2-2.vercel.app";
+  var PC_CHAT_URL = PC_CHAT_DEFAULT;
+  try {
+    var cs = document.currentScript;
+    if (cs && cs.src) {
+      PC_CHAT_URL = new URL(cs.src).origin;
+    } else {
+      var nodes = document.querySelectorAll('script[src*="embed.js"]');
+      if (nodes.length) {
+        var el = nodes[nodes.length - 1];
+        if (el.src) PC_CHAT_URL = new URL(el.src).origin;
+      }
+    }
+  } catch (e) {
+    PC_CHAT_URL = PC_CHAT_DEFAULT;
+  }
 
   // Pages where the chat bubble is suppressed entirely. Checkout-flow
   // pages get no widget at all so the iframe never competes with the cart.

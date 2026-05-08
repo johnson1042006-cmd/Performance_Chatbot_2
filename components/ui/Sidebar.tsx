@@ -174,7 +174,14 @@ export default function Sidebar() {
           <span className="w-2 h-2 rounded-full bg-success" />
           <span className="text-white/60 text-xs">Online</span>
           <button
-            onClick={() => signOut({ callbackUrl: "/login" })}
+            onClick={() => {
+              // Clear agent presence before signing out so anyAgentsOnline()
+              // returns false immediately rather than waiting up to 60 s for
+              // the heartbeat window to expire. Best-effort — sign-out
+              // proceeds regardless of whether the beacon lands.
+              navigator.sendBeacon("/api/presence/offline");
+              signOut({ callbackUrl: "/login" });
+            }}
             className="ml-auto text-white/40 hover:text-white transition-colors"
           >
             <LogOut size={16} />

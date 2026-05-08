@@ -90,11 +90,18 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
     stream,
   } = opts;
 
+  // Look up agent presence ONCE per turn so buildPrompt can tell the model
+  // whether it's safe to promise human follow-up. Same value is reused below
+  // for the auto-escalation branch — saves a duplicate query and guarantees
+  // the prompt and the escalation routing agree on what "online" means.
+  const agentsOnline = await anyAgentsOnline();
+
   const { system, conversationMessages } = await buildPrompt(
     sessionId,
     latestMessage,
     pageContext as never,
-    latestMessageRaw
+    latestMessageRaw,
+    agentsOnline
   );
 
   const useTools = aiToolsEnabled();
@@ -218,7 +225,6 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
         });
       }
 
-      const agentsOnline = await anyAgentsOnline();
       try {
         const pusher = getPusher();
         if (agentsOnline) {

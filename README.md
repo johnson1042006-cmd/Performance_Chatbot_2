@@ -83,7 +83,7 @@ Add to any storefront page (e.g. BigCommerce theme footer):
 <script src="https://your-app.vercel.app/embed.js" async></script>
 ```
 
-The script in [`public/embed.js`](public/embed.js) hardcodes the chat host URL at the top of the file — update `PC_CHAT_URL` if you deploy under a different domain. The same applies to [`public/fbt-widget.js`](public/fbt-widget.js) (`PC_FBT_URL`) for the frequently-bought-together widget.
+The script in [`public/embed.js`](public/embed.js) hardcodes the chat host URL at the top of the file — update `PC_CHAT_URL` if you deploy under a different domain.
 
 ## Pre-launch checklist
 
@@ -118,7 +118,7 @@ For Vercel deployments, the env vars must also be configured in the Vercel proje
 
 ### 3. Embed URL alignment
 
-Open [`public/embed.js`](public/embed.js) and [`public/fbt-widget.js`](public/fbt-widget.js) and confirm `PC_CHAT_URL` / `PC_FBT_URL` match the production deployment URL exactly. The embed snippet on the storefront should also point to the same host.
+Open [`public/embed.js`](public/embed.js) and confirm `PC_CHAT_URL` matches the production deployment URL exactly. The embed snippet on the storefront should also point to the same host.
 
 ### 4. Manual end-to-end walkthrough
 

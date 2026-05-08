@@ -245,7 +245,8 @@ export async function buildPrompt(
   sessionId: string,
   latestMessage: string,
   pageContext?: PageContext | null,
-  latestMessageRaw?: string
+  latestMessageRaw?: string,
+  agentsOnline?: boolean
 ): Promise<PromptResult> {
   // Caller passes the un-redacted current-turn message as `latestMessageRaw`
   // so the model can answer about PII in this turn (e.g. "your card 4111…")
@@ -424,6 +425,14 @@ You are a live chat support agent at Performance Cycle — Colorado's largest in
 
 ${AI_BEHAVIOR_RULES.map((r, i) => `${i + 1}. ${r.rule}`).join("\n\n")}
 `;
+
+  if (agentsOnline === true) {
+    system += `\n## AGENT AVAILABILITY\n`;
+    system += `A human teammate IS currently online. If the customer asks for a person, says they want to talk to a human, or sounds frustrated, you may say things like "let me get a teammate involved" or "a teammate will jump in shortly" — those statements will be true.\n`;
+  } else if (agentsOnline === false) {
+    system += `\n## AGENT AVAILABILITY\n`;
+    system += `No human teammates are online right now. NEVER promise that "a manager will jump in shortly", "our team monitors this chat", "a teammate will be with you", or anything implying a live person is reading along — those statements would be false. Instead, when the customer asks for a person or sounds frustrated, acknowledge it honestly: "Our team is offline right now, but you can leave your email and we'll get back to you as soon as we're back" or "I can take down your contact info and have someone follow up." The widget will surface an email-capture form for them automatically.\n`;
+  }
 
   if (pageContext) {
     system += `\n## CURRENT PAGE CONTEXT\n`;

@@ -551,6 +551,22 @@ export default function ChatWidget() {
           ]);
           setWaitingForReply(false);
         }
+      } else if (evt.event === "message") {
+        // The server sends a `message` event once the AI turn is fully
+        // persisted. If it carries `autoEscalated` with agentsOnline=false
+        // we show the email-capture form inline — this is the reliable path
+        // when Pusher's `request-contact` races with the subscription setup
+        // (dynamic import) and the event is missed.
+        try {
+          const parsed = JSON.parse(evt.data) as {
+            autoEscalated?: { reason: string; agentsOnline: boolean } | null;
+          };
+          if (parsed.autoEscalated && !parsed.autoEscalated.agentsOnline) {
+            setChipForm("email_capture");
+          }
+        } catch {
+          // malformed — ignore
+        }
       } else if (evt.event === "error") {
         try {
           const parsed = JSON.parse(evt.data) as { message?: string };
