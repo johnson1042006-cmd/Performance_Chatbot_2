@@ -53,7 +53,7 @@ export default function TopIntentsCompact({ days = 7 }: { days?: number }) {
               </div>
               <div className="h-1.5 bg-background rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-accent"
+                  className="h-full bg-accent-solid"
                   style={{ width: `${(r.count / max) * 100}%` }}
                 />
               </div>

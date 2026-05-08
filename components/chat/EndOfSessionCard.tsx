@@ -184,7 +184,7 @@ export default function EndOfSessionCard({ sessionId, onStartNew }: Props) {
               onClick={submitTranscriptEmail}
               disabled={emailState === "submitting"}
               data-testid="transcript-submit"
-              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium rounded-button bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-60"
+              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium rounded-button bg-accent-solid text-white hover:brightness-[0.95] transition-[filter] disabled:opacity-60"
             >
               {emailState === "submitting" ? (
                 <>
@@ -208,7 +208,7 @@ export default function EndOfSessionCard({ sessionId, onStartNew }: Props) {
         type="button"
         onClick={onStartNew}
         data-testid="chat-start-new"
-        className="px-4 py-2 text-sm font-medium rounded-full bg-accent text-white hover:bg-accent/90 transition-colors mx-auto"
+        className="px-4 py-2 text-sm font-medium rounded-full bg-accent-solid text-white hover:brightness-[0.95] transition-[filter] mx-auto"
       >
         Start a new chat
       </button>

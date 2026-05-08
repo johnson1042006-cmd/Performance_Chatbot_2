@@ -214,7 +214,7 @@ export default function SessionQueue({
             onClick={() => handleFilterChange(f.id)}
             className={`px-2 py-1 text-[11px] font-medium rounded-full border transition-colors ${
               filter === f.id
-                ? "bg-accent text-white border-accent"
+                ? "bg-accent-solid text-white border-accent-solid"
                 : "bg-surface text-text-secondary border-border hover:bg-background"
             }`}
           >

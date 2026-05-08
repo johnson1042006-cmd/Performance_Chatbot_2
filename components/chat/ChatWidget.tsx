@@ -1,14 +1,18 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
 import ChatHeader from "./ChatHeader";
 import MessageBubble from "./MessageBubble";
 import QuickReplyChips, { type QuickReplyChipId } from "./QuickReplyChips";
 import OrderLookupForm from "./OrderLookupForm";
 import EmailCaptureForm from "./EmailCaptureForm";
 import EndOfSessionCard from "./EndOfSessionCard";
+import TechAirRequestForm from "./TechAirRequestForm";
+import TireFitmentForm, { type TireFitmentPayload } from "./TireFitmentForm";
+import ActionChips from "./ActionChips";
 import { Send, Loader2, Clock } from "lucide-react";
+import { Headphones } from "lucide-react";
+import { tireCatalogUrlForRidingType } from "@/lib/search/tireCatalog";
 
 interface Message {
   id: string;
@@ -75,13 +79,18 @@ const isTempId = (id: string): boolean =>
   id.startsWith("temp-") || id.startsWith("streaming-");
 
 export default function ChatWidget() {
-  const searchParams = useSearchParams();
-  const urlSessionId = searchParams.get("sessionId")?.trim() ?? "";
-
+  // Read `sessionId` from the URL in the browser. Do not use `useSearchParams()`:
+  // in production builds it keeps this subtree suspended, so `/embed` and `/chat`
+  // stayed on their Suspense "Loading chat..." fallback indefinitely in Playwright.
   const [visitorKey, setVisitorKey] = useState("");
   useEffect(() => {
-    if (urlSessionId) {
-      setVisitorKey(urlSessionId);
+    const fromUrl =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("sessionId")?.trim() ??
+          ""
+        : "";
+    if (fromUrl) {
+      setVisitorKey(fromUrl);
       return;
     }
     try {
@@ -94,7 +103,7 @@ export default function ChatWidget() {
     } catch {
       setVisitorKey(`embed_${crypto.randomUUID()}`);
     }
-  }, [urlSessionId]);
+  }, []);
 
   const customerIdentifier = visitorKey;
 
@@ -106,9 +115,10 @@ export default function ChatWidget() {
   const [pageContext, setPageContext] = useState<PageContext | null>(null);
   const [persona, setPersona] = useState<Persona>(DEFAULT_PERSONA);
   const [chipForm, setChipForm] = useState<
-    "none" | "order_lookup" | "email_capture"
+    "none" | "order_lookup" | "email_capture" | "tech_air" | "tire_fitment"
   >("none");
   const [humanBannerVisible, setHumanBannerVisible] = useState(false);
+  const [tireContext, setTireContext] = useState<TireFitmentPayload | null>(null);
   /**
    * sessionState tracks what the server told us about claim status.
    *  - 'idle'         initial / session not yet started
@@ -622,6 +632,84 @@ export default function ChatWidget() {
     const trimmed = candidate.trim();
     if (!trimmed || sendInFlightRef.current) return;
     if (sessionState === "closed") return;
+
+    // Lightweight intent match for customer-typed messages that should open
+    // a structured flow instead of sending free-text.
+    const lower = trimmed.toLowerCase();
+    const wantsTechAir =
+      lower.includes("tech-air") ||
+      lower.includes("tech air") ||
+      lower.includes("airbag service");
+    if (wantsTechAir) {
+      if (!override) setInput("");
+      const ensureSession = async (): Promise<string | null> => {
+        if (dbSessionIdRef.current) return dbSessionIdRef.current;
+        try {
+          const sRes = await fetchWithTimeout(
+            "/api/sessions",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ customerIdentifier, pageContext }),
+            },
+            SESSION_FETCH_MS
+          );
+          const sData = await sRes.json().catch(() => ({}));
+          if (sData.session?.id) {
+            setDbSessionId(sData.session.id);
+            return sData.session.id as string;
+          }
+          return null;
+        } catch {
+          return null;
+        }
+      };
+      const sid = await ensureSession();
+      if (sid) setChipForm("tech_air");
+      else
+        appendLocalError(
+          "We couldn't start the Tech-Air form right now. Please try again."
+        );
+      return;
+    }
+
+    const wantsTires =
+      lower.includes("tires for my") ||
+      lower.includes("tire fitment") ||
+      lower.includes("what tires fit");
+    if (wantsTires) {
+      if (!override) setInput("");
+      const ensureSession = async (): Promise<string | null> => {
+        if (dbSessionIdRef.current) return dbSessionIdRef.current;
+        try {
+          const sRes = await fetchWithTimeout(
+            "/api/sessions",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ customerIdentifier, pageContext }),
+            },
+            SESSION_FETCH_MS
+          );
+          const sData = await sRes.json().catch(() => ({}));
+          if (sData.session?.id) {
+            setDbSessionId(sData.session.id);
+            return sData.session.id as string;
+          }
+          return null;
+        } catch {
+          return null;
+        }
+      };
+      const sid = await ensureSession();
+      if (sid) setChipForm("tire_fitment");
+      else
+        appendLocalError(
+          "We couldn't start the tire fitment form right now. Please try again."
+        );
+      return;
+    }
+
     sendInFlightRef.current = true;
     const content = trimmed;
     if (!override) setInput("");
@@ -775,6 +863,55 @@ export default function ChatWidget() {
         setChipForm("order_lookup");
         return;
       }
+      if (id === "tech_air") {
+        // Ensure we have a session before opening the form.
+        if (!dbSessionIdRef.current) {
+          try {
+            const sRes = await fetchWithTimeout(
+              "/api/sessions",
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ customerIdentifier, pageContext }),
+              },
+              SESSION_FETCH_MS
+            );
+            const sData = await sRes.json().catch(() => ({}));
+            if (sData.session?.id) setDbSessionId(sData.session.id);
+          } catch {
+            appendLocalError(
+              "We couldn't start your chat session. Please try again."
+            );
+            return;
+          }
+        }
+        setChipForm("tech_air");
+        return;
+      }
+      if (id === "find_tires") {
+        if (!dbSessionIdRef.current) {
+          try {
+            const sRes = await fetchWithTimeout(
+              "/api/sessions",
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ customerIdentifier, pageContext }),
+              },
+              SESSION_FETCH_MS
+            );
+            const sData = await sRes.json().catch(() => ({}));
+            if (sData.session?.id) setDbSessionId(sData.session.id);
+          } catch {
+            appendLocalError(
+              "We couldn't start your chat session. Please try again."
+            );
+            return;
+          }
+        }
+        setChipForm("tire_fitment");
+        return;
+      }
       if (id === "talk_to_human") {
         // Need a session id to ask the server about agents.
         if (!dbSessionId) return;
@@ -801,6 +938,48 @@ export default function ChatWidget() {
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [dbSessionId]
+  );
+
+  const submitTireFitment = useCallback((payload: TireFitmentPayload) => {
+    const url = tireCatalogUrlForRidingType(payload.ridingType);
+    const content = `Thanks — for a **${payload.year} ${payload.make} ${payload.model}** used for **${payload.ridingType}**, the team can confirm exact fitment and recommend the right **Continental / Dunlop / Metzeler / Michelin / MotoZ / Shinko** options.\n\nStop by 7375 S Fulton St in Centennial for in-store fitment, or browse the catalog at ${url} filtered to your bike's category. Want me to connect you to the team for a specific recommendation?`;
+    const msg = {
+      id: `notice-${Date.now()}`,
+      role: "ai" as const,
+      content,
+      sentAt: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, msg]);
+    setSessionState((p) => resolveSessionState(p, "ai"));
+    setTireContext(payload);
+  }, []);
+
+  const handleActionChip = useCallback(
+    async (id: string) => {
+      if (id !== "connect_team") return;
+      if (!dbSessionIdRef.current || !tireContext) return;
+      try {
+        const res = await fetch(`/api/sessions/${dbSessionIdRef.current}/tire-escalate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tire: tireContext }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          appendLocalError(
+            typeof data.error === "string"
+              ? data.error
+              : "Couldn't connect you to the team right now."
+          );
+          return;
+        }
+        setHumanBannerVisible(true);
+        setTireContext(null);
+      } catch {
+        appendLocalError("Network error. Please try again.");
+      }
+    },
+    [appendLocalError, tireContext]
   );
 
   // ── Status banner for the customer ─────────────────────────────────────────
@@ -893,6 +1072,18 @@ export default function ChatWidget() {
             onClose={() => setChipForm("none")}
           />
         )}
+        {chipForm === "tech_air" && dbSessionId && (
+          <TechAirRequestForm
+            sessionId={dbSessionId}
+            onClose={() => setChipForm("none")}
+          />
+        )}
+        {chipForm === "tire_fitment" && (
+          <TireFitmentForm
+            onClose={() => setChipForm("none")}
+            onSubmit={submitTireFitment}
+          />
+        )}
         {messages.map((msg) => (
           <MessageBubble
             key={msg.id}
@@ -904,6 +1095,19 @@ export default function ChatWidget() {
             personaAvatarUrl={persona.avatarUrl}
           />
         ))}
+        {tireContext && (
+          <ActionChips
+            testId="tire-fitment-actions"
+            chips={[
+              {
+                id: "connect_team",
+                label: "Connect me to the team",
+                icon: Headphones,
+              },
+            ]}
+            onSelect={handleActionChip}
+          />
+        )}
         {renderStatusBanner()}
         {waitingForReply && sessionState !== "waiting" && (
           <div className="flex items-center gap-1.5 py-2 px-1">
@@ -949,13 +1153,14 @@ export default function ChatWidget() {
               onClick={() => void sendMessage()}
               disabled={!input.trim() || sending}
               aria-busy={sending}
+              aria-label="Send message"
               data-testid="chat-send"
-              className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors text-white shrink-0 ${
+              className={`w-10 h-10 rounded-full flex items-center justify-center transition-[filter] text-white shrink-0 ${
                 !input.trim()
-                  ? "bg-accent/35 cursor-not-allowed opacity-60"
+                  ? "bg-accent-solid/35 cursor-not-allowed opacity-60"
                   : sending
-                    ? "bg-accent/80 cursor-wait"
-                    : "bg-accent hover:bg-accent/90"
+                    ? "bg-accent-solid/80 cursor-wait"
+                    : "bg-accent-solid hover:brightness-[0.95]"
               }`}
             >
               {sending ? (

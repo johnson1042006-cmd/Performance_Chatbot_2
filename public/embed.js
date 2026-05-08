@@ -155,6 +155,11 @@
   }
   bubble.addEventListener("click", function () {
     setOpen(!open);
+    // If the user opens the widget, clear the dot immediately.
+    try {
+      var dot = document.getElementById("pc-chat-dot");
+      if (dot) dot.style.display = "none";
+    } catch (e) {}
   });
 
   window.addEventListener("message", function (event) {
@@ -202,4 +207,65 @@
       });
   }
   maybeAutoOpen();
+
+  // -------------------------------------------------------------------------
+  // Phase 6: gentle one-time pulse on product pages (no auto-open).
+  // -------------------------------------------------------------------------
+  function isProductLikePathname(p) {
+    if (!p) return false;
+    if (p.indexOf("/products/") === 0) return true;
+    if (p.indexOf("/helmets/") === 0) return true;
+    if (p.indexOf("/boots/") === 0) return true;
+    if (p.indexOf("/tires/") === 0) return true;
+    if (p.indexOf("/jackets/") === 0) return true;
+    return false;
+  }
+
+  var hasSentMessage = false;
+  window.addEventListener("message", function (event) {
+    if (event.data && event.data.type === "pc-chat-send") {
+      hasSentMessage = true;
+    }
+  });
+
+  // Notification dot (hidden by default)
+  try {
+    var dot = document.createElement("div");
+    dot.id = "pc-chat-dot";
+    dot.style.position = "absolute";
+    dot.style.top = "10px";
+    dot.style.right = "10px";
+    dot.style.width = "10px";
+    dot.style.height = "10px";
+    dot.style.borderRadius = "999px";
+    dot.style.background = "#fff";
+    dot.style.boxShadow = "0 0 0 2px rgba(230,57,70,0.9)";
+    dot.style.display = "none";
+    bubble.style.position = "fixed"; // ensure dot anchors correctly
+    bubble.appendChild(dot);
+  } catch (e) {}
+
+  function maybePulse() {
+    try {
+      if (!isProductLikePathname(window.location.pathname.toLowerCase())) return;
+      if (open) return;
+      if (hasSentMessage) return;
+      var fired = sessionStorage.getItem("pc-pulse-fired") === "1";
+      if (fired) return;
+      sessionStorage.setItem("pc-pulse-fired", "1");
+
+      bubble.classList.add("pc-pulse");
+      try {
+        var d = document.getElementById("pc-chat-dot");
+        if (d) d.style.display = "block";
+      } catch (e2) {}
+      setTimeout(function () {
+        bubble.classList.remove("pc-pulse");
+      }, 1100);
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  setTimeout(maybePulse, 60000);
 })();

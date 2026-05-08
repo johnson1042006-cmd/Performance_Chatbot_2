@@ -123,7 +123,7 @@ export default function EmailCaptureForm({ sessionId, onCaptured, onClose }: Pro
         onClick={submit}
         disabled={submitting}
         data-testid="email-capture-submit"
-        className="w-full px-3 py-2 text-sm font-medium rounded-button bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-60 inline-flex items-center justify-center gap-1.5"
+        className="w-full px-3 py-2 text-sm font-medium rounded-button bg-accent-solid text-white hover:brightness-[0.95] transition-[filter] disabled:opacity-60 inline-flex items-center justify-center gap-1.5"
       >
         {submitting ? (
           <>

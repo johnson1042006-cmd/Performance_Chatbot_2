@@ -15,9 +15,18 @@ export default async function DashboardLayout({
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
+      <a
+        href="#dashboard-main"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[10000] focus:bg-white focus:text-text-primary focus:px-3 focus:py-2 focus:rounded-button focus:shadow"
+      >
+        Skip to main content
+      </a>
       <PresenceHeartbeat />
       <Sidebar />
-      <main className="flex-1 flex flex-col overflow-hidden">
+      <main
+        id="dashboard-main"
+        className="flex-1 flex flex-col overflow-hidden"
+      >
         <AlertsBanner />
         {children}
       </main>

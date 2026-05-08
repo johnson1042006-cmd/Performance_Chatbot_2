@@ -17,7 +17,12 @@ export default defineConfig({
   globalSetup: "./e2e/global-setup.ts",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  // Local: 2 retries to absorb transient chromium-process death on busy Macs
+  // ("browserContext.newPage: ... browser has been closed"). CI: 2 retries.
+  // Resource pressure from a tight `ulimit -u` can kill chromium between
+  // tests — a second retry keeps the suite green when that happens once or
+  // twice in a 45-test run.
+  retries: 2,
   workers: 1,
   reporter: "html",
   timeout: 30000,
@@ -25,6 +30,15 @@ export default defineConfig({
     baseURL,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
+    launchOptions: {
+      args: [
+        "--disable-gpu",
+        "--disable-dev-shm-usage",
+        "--no-sandbox",
+        "--disable-software-rasterizer",
+        "--disable-extensions",
+      ],
+    },
   },
   projects: [
     {
@@ -32,30 +46,20 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
   ],
-      webServer:
+  webServer:
     process.env.CI || useExternalServer
       ? undefined
       : {
-          command: `npm run dev -- --port ${e2ePort}`,
+          // Run `npm run build` before `playwright test` (see package.json
+          // `test:e2e`). Only `next start` here to avoid nested `next build`
+          // workers that can exhaust process limits (spawn EAGAIN) on laptops.
+          command: `npm run start -- --port ${e2ePort}`,
           url: baseURL,
-          reuseExistingServer: false,
-          timeout: 120000,
-          // NEXTAUTH_URL must match the e2e port so that after a successful
-          // credential login NextAuth redirects back to port 3050, not the
-          // default localhost:3000 value stored in .env.local.
-          //
-          // TAGGER_TEST_MODE=1 makes lib/ai/tagger short-circuit the
-          // Anthropic call and persist a deterministic result keyed off
-          // the transcript. Keeps the tagger e2e suite hermetic.
-          //
-          // Phase 5.5:
-          //   TICKET_AUTO_CREATE_TEST_MODE=1 makes lib/tickets/autoCreate
-          //   skip the recent-messages signal load and use a deterministic
-          //   keyword-based decision so the auto-create e2e specs stay
-          //   hermetic.
-          //   E2E_EMAIL_MOCK=1 routes lib/email/sender through the in-
-          //   process mock instead of Resend, so ticket-resolved emails
-          //   can be asserted without network.
+          // Default false: always spawn a server for this run so tests never
+          // hit a stale process on E2E_PORT. Set E2E_REUSE_SERVER=1 to skip
+          // startup when you already have a matching server listening.
+          reuseExistingServer: process.env.E2E_REUSE_SERVER === "1",
+          timeout: 180000,
           env: {
             NEXTAUTH_URL: baseURL,
             TAGGER_TEST_MODE: "1",

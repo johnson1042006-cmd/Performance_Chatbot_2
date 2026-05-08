@@ -24,7 +24,7 @@ export interface EmailResult {
 }
 
 export interface SendEmailArgs {
-  to: string;
+  to: string | string[];
   subject: string;
   html: string;
   text?: string;
@@ -42,10 +42,21 @@ function getResend(): Resend | null {
 
 interface EmailMockGlobal {
   __emailMock?: (args: SendEmailArgs) => Promise<EmailResult> | EmailResult;
+  __sentEmails?: Array<SendEmailArgs & { at: string }>;
 }
 
 export async function sendEmail(args: SendEmailArgs): Promise<EmailResult> {
   if (process.env.E2E_EMAIL_MOCK === "1") {
+    // Record all outgoing emails for Playwright assertions. This runs inside
+    // the Next.js server process (not the browser), so e2e can query it via a
+    // test-only endpoint.
+    try {
+      const g = globalThis as EmailMockGlobal;
+      if (!g.__sentEmails) g.__sentEmails = [];
+      g.__sentEmails.push({ ...args, at: new Date().toISOString() });
+    } catch {
+      // ignore
+    }
     const mock = (globalThis as EmailMockGlobal).__emailMock;
     if (mock) {
       try {

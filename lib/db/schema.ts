@@ -12,8 +12,16 @@ import {
   serial,
   pgEnum,
   primaryKey,
+  customType,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+
+// Phase 5: generated tsvector column used for full-text search.
+const tsvector = customType<{ data: unknown }>({
+  dataType() {
+    return "tsvector";
+  },
+});
 
 export const userRoleEnum = pgEnum("user_role", [
   "store_manager",
@@ -128,6 +136,9 @@ export const messages = pgTable("messages", {
     .references(() => sessions.id),
   role: messageRoleEnum("role").notNull(),
   content: text("content").notNull(),
+  // Generated column in the DB (see drizzle/0004_phase5.sql). Included in the
+  // schema so drizzle-kit doesn't attempt destructive drops.
+  contentTsv: tsvector("content_tsv"),
   sentAt: timestamp("sent_at").defaultNow().notNull(),
   pageContext: jsonb("page_context"),
   // Categories of PII redacted from `content` (e.g. ["card", "email"]). Empty

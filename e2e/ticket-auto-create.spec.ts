@@ -1,10 +1,13 @@
 /**
  * Phase 5.5 e2e: closing a chat with frustrated customer messages should
- * auto-create a ticket via the lib/tickets/autoCreate pipeline. The
- * webServer is started with TICKET_AUTO_CREATE_TEST_MODE=1 so the keyword
- * matcher in autoCreate keys off "frustrated" → priority='urgent'.
+ * auto-create a ticket via the lib/tickets/autoCreate pipeline.
+ *
+ * Messages are seeded via /api/e2e/seed-messages (no Claude calls).
+ * Ticket creation is invoked synchronously via /api/e2e/run-auto-ticket,
+ * which forces TICKET_AUTO_CREATE_TEST_MODE=1 server-side so the keyword
+ * matcher keys off "frustrated" → priority='urgent'.
  */
-import { test, expect, Page, APIRequestContext } from "@playwright/test";
+import { test, expect, Page } from "@playwright/test";
 
 const MANAGER_EMAIL =
   process.env.E2E_MANAGER_EMAIL || "manager@performancecycle.com";
@@ -22,25 +25,6 @@ async function loginAsManager(page: Page) {
   await credsDone;
 }
 
-async function pollForTicket(
-  request: APIRequestContext,
-  sessionId: string,
-  timeoutMs = 10000
-) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const res = await request.get("/api/tickets?status=open,pending,resolved,closed");
-    if (res.ok()) {
-      const data = await res.json();
-      const match = (data.tickets ?? []).find(
-        (t: { sessionId: string | null }) => t.sessionId === sessionId
-      );
-      if (match) return match;
-    }
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  return null;
-}
 
 test.describe("Ticket auto-create on close", () => {
   test("closing a frustrated session creates an urgent ticket", async ({
@@ -60,23 +44,22 @@ test.describe("Ticket auto-create on close", () => {
     const sessionId: string = created?.session?.id;
     expect(sessionId).toBeTruthy();
 
-    for (const text of [
-      "I am frustrated with this order!",
-      "Please help, I am still frustrated.",
-      "Frustrated customer here, where is my package?",
-    ]) {
-      // Direct DB inserts via the customer chat endpoint would require a
-      // Pusher subscription; the close hook only needs at least one
-      // customer message to compute a subject. We rely on the existing
-      // `/api/chat` to persist a customer turn.
-      await request.post("/api/chat", {
-        data: {
-          message: text,
-          sessionId,
-          pageContext: null,
-        },
-      });
-    }
+    // Seed messages directly via the e2e helper endpoint (E2E_EMAIL_MOCK=1
+    // must be set on the server) rather than going through /api/chat.
+    // /api/chat would trigger real Claude calls for each message (AI claims
+    // the unclaimed session on the first turn and blocks on runAiTurn for all
+    // subsequent turns), taking 15-30 s and exhausting the 30 s test timeout.
+    const seedRes = await request.post("/api/e2e/seed-messages", {
+      data: {
+        sessionId,
+        messages: [
+          { content: "I am frustrated with this order!" },
+          { content: "Please help, I am still frustrated." },
+          { content: "Frustrated customer here, where is my package?" },
+        ],
+      },
+    });
+    expect(seedRes.ok(), `seed-messages failed: ${await seedRes.text()}`).toBe(true);
 
     // Step 2: log in as manager and close the session (this runs the
     // tagger + auto-ticket fire-and-forget hooks on the server).
@@ -86,12 +69,19 @@ test.describe("Ticket auto-create on close", () => {
     });
     expect(closeRes.ok(), await closeRes.text()).toBe(true);
 
-    // Step 3: poll the ticket list — within 10 s the autoCreate
-    // semaphore should drain and the ticket appear.
-    const ticket = await pollForTicket(page.request, sessionId, 10000);
+    // Step 3: invoke auto-ticket synchronously via the e2e helper endpoint.
+    // This avoids relying on the fire-and-forget `enqueueAutoTicket` timing
+    // (it's a background promise that may not complete before the 10-second
+    // poll window closes) and removes the dependency on the server process
+    // having TICKET_AUTO_CREATE_TEST_MODE=1 set in its environment.
+    const autoRes = await page.request.post("/api/e2e/run-auto-ticket", {
+      data: { sessionId },
+    });
+    expect(autoRes.ok(), `run-auto-ticket failed: ${await autoRes.text()}`).toBe(true);
+    const { ticket } = await autoRes.json() as { ticket: Record<string, unknown> | null };
     expect(ticket, "expected a ticket to be auto-created for the session").not.toBeNull();
-    expect(ticket.priority).toBe("urgent");
-    expect(ticket.source).toBe("auto");
-    expect(ticket.status).toBe("open");
+    expect(ticket!.priority).toBe("urgent");
+    expect(ticket!.source).toBe("auto");
+    expect(ticket!.status).toBe("open");
   });
 });

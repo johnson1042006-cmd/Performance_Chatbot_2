@@ -73,6 +73,11 @@ test.describe("Ticket resolve flow", () => {
     const closed = await closeRes.json();
     expect(closed.ticket.status).toBe("closed");
     expect(closed.ticket.closedAt).toBeTruthy();
-    expect(closed.ticket.resolvedAt).toBe(firstResolved);
+    // Compare as timestamps — Postgres and JSON serialisation can produce
+    // different string formats ("2026-05-08 20:06:32.963+00" vs ISO
+    // "2026-05-08T20:06:32.963Z") for the same instant.
+    expect(new Date(closed.ticket.resolvedAt).getTime()).toBe(
+      new Date(firstResolved).getTime()
+    );
   });
 });

@@ -9,7 +9,9 @@
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
+    "test:e2e": "npm run build && playwright test --grep-invert @slow",
+    "test:e2e:slow": "npm run build && playwright test --grep @slow",
+    "test:e2e:all": "npm run build && playwright test",
     "db:push": "npx drizzle-kit push",
     "db:seed": "npx tsx scripts/seed-users.ts",
     "db:seed:knowledge": "npx tsx scripts/seed-knowledge.ts",
@@ -18,6 +20,7 @@
     "db:seed:colorways": "npx tsx scripts/seed-colorways.ts",
     "db:seed:pairings": "npx tsx scripts/seed-pairings.ts",
     "preflight": "npx tsx scripts/preflight.ts",
+    "verify": "npm run lint && npm run test && npm run test:e2e",
     "sync:lightspeed": "npx tsx scripts/sync-lightspeed-pairings.ts",
     "sync-knowledge": "npx tsx scripts/sync-knowledge.ts"
   },
@@ -38,9 +41,11 @@
     "react-dom": "^18",
     "recharts": "^3.8.0",
     "resend": "^6.12.3",
+    "zod": "^4.1.2",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
     "@playwright/test": "^1.59.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20",

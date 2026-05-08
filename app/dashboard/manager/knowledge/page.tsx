@@ -166,7 +166,7 @@ export default function KnowledgeBasePage() {
                         onClick={() => setActiveTopic(entry.topic)}
                         className={`w-full text-left px-2 py-1.5 rounded-button text-sm transition-colors ${
                           activeTopic === entry.topic
-                            ? "bg-accent text-white"
+                            ? "bg-accent-solid text-white"
                             : "hover:bg-background"
                         }`}
                       >

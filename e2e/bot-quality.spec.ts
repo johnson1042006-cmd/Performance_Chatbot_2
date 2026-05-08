@@ -473,10 +473,13 @@ interface Failure {
 // a single browser context so we don't spin up the dev server 50 times.
 // ---------------------------------------------------------------------------
 
-test.describe("Bot quality — 50 questions across the catalog", () => {
+// Tagged @slow so it can be excluded from the default `npm run verify` and
+// run on demand with `npm run test:e2e:slow` (see package.json). It makes 50
+// sequential Claude calls and routinely takes 25–30 minutes locally.
+test.describe("Bot quality — 50 questions across the catalog @slow", () => {
   test.setTimeout(50 * 35_000);
 
-  test("answers across helmets, apparel, parts, accessories, and policy", async ({
+  test("answers across helmets, apparel, parts, accessories, and policy @slow", async ({
     page,
   }, testInfo) => {
     const failures: Failure[] = [];

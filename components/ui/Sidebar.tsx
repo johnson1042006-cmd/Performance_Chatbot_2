@@ -154,7 +154,7 @@ export default function Sidebar() {
     <aside className="w-60 h-screen bg-primary flex flex-col shrink-0">
       <div className="px-5 py-6 border-b border-white/10">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 bg-accent rounded-button flex items-center justify-center">
+          <div className="w-8 h-8 bg-accent-solid rounded-button flex items-center justify-center">
             <span className="text-white text-sm font-bold">PC</span>
           </div>
           <span className="text-white font-semibold text-sm">

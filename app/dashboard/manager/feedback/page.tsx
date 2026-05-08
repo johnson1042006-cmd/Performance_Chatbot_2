@@ -55,7 +55,7 @@ export default function ManagerFeedbackPage() {
               onClick={() => setDays(d)}
               className={`px-3 py-1 text-xs rounded-full border transition-colors ${
                 days === d
-                  ? "bg-accent text-white border-accent"
+                  ? "bg-accent-solid text-white border-accent-solid"
                   : "bg-white text-text-secondary border-border hover:border-accent/40"
               }`}
             >

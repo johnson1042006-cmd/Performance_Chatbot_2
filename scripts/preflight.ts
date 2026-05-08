@@ -63,13 +63,24 @@ function checkEnvVars(): Result[] {
   }
 
   const url = process.env.NEXTAUTH_URL || "";
+  const allowLocalNextAuth =
+    process.env.PREFLIGHT_ALLOW_LOCALHOST_NEXTAUTH === "1";
   if (url.includes("localhost") || url.includes("127.0.0.1")) {
-    results.push(
-      fail(
-        "NEXTAUTH_URL is localhost",
-        `value="${url}" — must be the production URL when deploying`
-      )
-    );
+    if (allowLocalNextAuth && url) {
+      results.push(
+        pass(
+          "NEXTAUTH_URL is localhost",
+          `allowed via PREFLIGHT_ALLOW_LOCALHOST_NEXTAUTH=1 (${url})`,
+        ),
+      );
+    } else {
+      results.push(
+        fail(
+          "NEXTAUTH_URL is localhost",
+          `value="${url}" — must be the production URL when deploying (local dev only: set PREFLIGHT_ALLOW_LOCALHOST_NEXTAUTH=1)`,
+        ),
+      );
+    }
   } else if (url) {
     results.push(pass("NEXTAUTH_URL is non-localhost", url));
   }
