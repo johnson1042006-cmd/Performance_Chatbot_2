@@ -10,6 +10,7 @@ interface Settings {
   fallbackTimerSeconds: number;
   historyRetentionMonths: number;
   autoOpenOnFirstVisit: boolean;
+  hotkeysEnabled: boolean;
 }
 
 const RETENTION_OPTIONS: { value: number; label: string }[] = [
@@ -30,6 +31,7 @@ export default function BotSettings() {
     fallbackTimerSeconds: 60,
     historyRetentionMonths: 0,
     autoOpenOnFirstVisit: true,
+    hotkeysEnabled: true,
   });
   // Separate string state so users can type freely without mid-type clamping
   const [fallbackInput, setFallbackInput] = useState("60");
@@ -155,6 +157,36 @@ export default function BotSettings() {
               <span
                 className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform shadow-sm ${
                   settings.autoOpenOnFirstVisit ? "translate-x-5" : ""
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between py-3 border-b border-border">
+            <div>
+              <p className="text-sm font-medium text-text-primary">
+                Agent Hotkeys
+              </p>
+              <p className="text-xs text-text-secondary">
+                Enable J/K nav, C claim, R release, X close, / focus reply,
+                and Cmd/Ctrl+Enter send for agents on the live chats page
+              </p>
+            </div>
+            <button
+              onClick={() =>
+                setSettings((s) => ({
+                  ...s,
+                  hotkeysEnabled: !s.hotkeysEnabled,
+                }))
+              }
+              data-testid="hotkeys-toggle"
+              className={`relative w-11 h-6 rounded-full transition-colors ${
+                settings.hotkeysEnabled ? "bg-success" : "bg-gray-300"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform shadow-sm ${
+                  settings.hotkeysEnabled ? "translate-x-5" : ""
                 }`}
               />
             </button>

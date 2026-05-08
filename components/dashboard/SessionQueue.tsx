@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useSession } from "next-auth/react";
 import SessionCard from "./SessionCard";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { MessageSquare } from "lucide-react";
@@ -15,26 +16,106 @@ interface Session {
   claimedByKind?: string | null;
   claimedBy?: { id: string; name: string } | null;
   waitSeconds?: number;
+  lastCustomerActivityAt?: string | null;
+  customerCity?: string | null;
+  customerRegion?: string | null;
+  customerCountry?: string | null;
 }
+
+const FILTERS = [
+  { id: "all", label: "All" },
+  { id: "mine", label: "Mine" },
+  { id: "unclaimed", label: "Unclaimed" },
+  { id: "ai", label: "AI handling" },
+  { id: "awaiting", label: "Awaiting (>30s)" },
+] as const;
+
+type FilterId = (typeof FILTERS)[number]["id"];
 
 interface SessionQueueProps {
   activeSessionId: string | null;
+  selectedQueueId?: string | null;
   onSelectSession: (sessionId: string) => void;
   onClaimSession: (sessionId: string) => void;
   onUnclaimedCountChange?: (count: number) => void;
+  /** Reports the visible (filtered) ordered IDs back to the parent so the
+   *  agent-hotkeys hook can navigate them. */
+  onVisibleIdsChange?: (ids: string[]) => void;
   refetchKey?: number;
+}
+
+function loadFilter(userId: string | undefined): FilterId {
+  if (!userId || typeof window === "undefined") return "all";
+  try {
+    const v = localStorage.getItem(`pc-queue-filter:${userId}`);
+    if (v && FILTERS.some((f) => f.id === v)) return v as FilterId;
+  } catch {
+    // ignore
+  }
+  return "all";
+}
+
+function saveFilter(userId: string | undefined, filter: FilterId): void {
+  if (!userId || typeof window === "undefined") return;
+  try {
+    localStorage.setItem(`pc-queue-filter:${userId}`, filter);
+  } catch {
+    // ignore
+  }
+}
+
+function applyFilter(
+  sessions: Session[],
+  filter: FilterId,
+  userId: string | undefined
+): Session[] {
+  if (filter === "all") return sessions;
+  const now = Date.now();
+  return sessions.filter((s) => {
+    switch (filter) {
+      case "mine":
+        return (
+          s.claimedByKind === "human" &&
+          !!userId &&
+          s.claimedBy?.id === userId
+        );
+      case "unclaimed":
+        return s.status === "waiting" || !s.claimedByKind;
+      case "ai":
+        return s.claimedByKind === "ai" || s.status === "active_ai";
+      case "awaiting": {
+        if (s.status === "closed") return false;
+        if (!s.lastCustomerActivityAt) return false;
+        const elapsed =
+          (now - new Date(s.lastCustomerActivityAt).getTime()) / 1000;
+        return elapsed > 30;
+      }
+      default:
+        return true;
+    }
+  });
 }
 
 export default function SessionQueue({
   activeSessionId,
+  selectedQueueId,
   onSelectSession,
   onClaimSession,
   onUnclaimedCountChange,
+  onVisibleIdsChange,
   refetchKey,
 }: SessionQueueProps) {
+  const { data: authSession } = useSession();
+  const userId = authSession?.user?.id;
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<FilterId>("all");
   const pollRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Hydrate filter from localStorage once we know the user.
+  useEffect(() => {
+    if (userId) setFilter(loadFilter(userId));
+  }, [userId]);
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -59,18 +140,15 @@ export default function SessionQueue({
     fetchSessions();
   }, [refetchKey, fetchSessions]);
 
-  // Pusher real-time updates
   useEffect(() => {
     let cleanup = () => {};
     import("@/lib/pusher/client").then(({ getPusherClient }) => {
       const pusher = getPusherClient();
       const channel = pusher.subscribe("dashboard");
-
       channel.bind("session-update", () => fetchSessions());
       channel.bind("session-claimed", () => fetchSessions());
       channel.bind("session-released", () => fetchSessions());
       channel.bind("session-closed", () => fetchSessions());
-
       cleanup = () => {
         channel.unbind_all();
         pusher.unsubscribe("dashboard");
@@ -79,13 +157,27 @@ export default function SessionQueue({
     return () => cleanup();
   }, [fetchSessions]);
 
-  // Polling fallback — refresh every 5 seconds
   useEffect(() => {
     pollRef.current = setInterval(fetchSessions, 5000);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, [fetchSessions]);
+
+  const filtered = useMemo(
+    () => applyFilter(sessions, filter, userId),
+    [sessions, filter, userId]
+  );
+
+  // Notify parent of visible ordered IDs for hotkey navigation.
+  useEffect(() => {
+    onVisibleIdsChange?.(filtered.map((s) => s.id));
+  }, [filtered, onVisibleIdsChange]);
+
+  const handleFilterChange = (id: FilterId) => {
+    setFilter(id);
+    saveFilter(userId, id);
+  };
 
   if (loading) {
     return (
@@ -101,62 +193,91 @@ export default function SessionQueue({
     );
   }
 
-  const unclaimed = sessions.filter((s) => s.status === "waiting");
-  const claimed = sessions.filter((s) => s.status !== "waiting");
-
-  if (sessions.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
-        <div className="w-12 h-12 bg-background rounded-full flex items-center justify-center mb-3">
-          <MessageSquare size={20} className="text-text-secondary" />
-        </div>
-        <p className="text-sm font-medium text-text-primary mb-1">
-          No active chats
-        </p>
-        <p className="text-xs text-text-secondary">
-          New chats will appear here in real time
-        </p>
-      </div>
-    );
-  }
+  const unclaimed = filtered.filter((s) => s.status === "waiting");
+  const claimed = filtered.filter((s) => s.status !== "waiting");
 
   return (
-    <div className="overflow-y-auto flex-1">
-      {unclaimed.length > 0 && (
-        <>
-          <div className="px-3 py-1.5 bg-amber-50 border-b border-amber-100">
-            <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
-              In Queue ({unclaimed.length})
-            </span>
+    <div className="flex flex-col flex-1 overflow-hidden">
+      <div
+        className="shrink-0 px-3 py-2 border-b border-border flex flex-wrap gap-1"
+        role="tablist"
+        aria-label="Queue filters"
+        data-testid="queue-filters"
+      >
+        {FILTERS.map((f) => (
+          <button
+            key={f.id}
+            type="button"
+            role="tab"
+            aria-selected={filter === f.id}
+            data-testid={`queue-filter-${f.id}`}
+            onClick={() => handleFilterChange(f.id)}
+            className={`px-2 py-1 text-[11px] font-medium rounded-full border transition-colors ${
+              filter === f.id
+                ? "bg-accent text-white border-accent"
+                : "bg-surface text-text-secondary border-border hover:bg-background"
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+          <div className="w-12 h-12 bg-background rounded-full flex items-center justify-center mb-3">
+            <MessageSquare size={20} className="text-text-secondary" />
           </div>
-          {unclaimed.map((session) => (
-            <SessionCard
-              key={session.id}
-              session={session}
-              isActive={session.id === activeSessionId}
-              onSelect={onSelectSession}
-              onClaim={onClaimSession}
-            />
-          ))}
-        </>
-      )}
-      {claimed.length > 0 && (
-        <>
-          <div className="px-3 py-1.5 bg-background border-b border-border">
-            <span className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
-              Active ({claimed.length})
-            </span>
-          </div>
-          {claimed.map((session) => (
-            <SessionCard
-              key={session.id}
-              session={session}
-              isActive={session.id === activeSessionId}
-              onSelect={onSelectSession}
-              onClaim={onClaimSession}
-            />
-          ))}
-        </>
+          <p className="text-sm font-medium text-text-primary mb-1">
+            {sessions.length === 0 ? "No active chats" : "No chats match filter"}
+          </p>
+          <p className="text-xs text-text-secondary">
+            {sessions.length === 0
+              ? "New chats will appear here in real time"
+              : "Try a different view above"}
+          </p>
+        </div>
+      ) : (
+        <div className="overflow-y-auto flex-1">
+          {unclaimed.length > 0 && (
+            <>
+              <div className="px-3 py-1.5 bg-amber-50 border-b border-amber-100">
+                <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
+                  In Queue ({unclaimed.length})
+                </span>
+              </div>
+              {unclaimed.map((session) => (
+                <SessionCard
+                  key={session.id}
+                  session={session}
+                  isActive={session.id === activeSessionId}
+                  isKeyboardSelected={session.id === selectedQueueId}
+                  onSelect={onSelectSession}
+                  onClaim={onClaimSession}
+                />
+              ))}
+            </>
+          )}
+          {claimed.length > 0 && (
+            <>
+              <div className="px-3 py-1.5 bg-background border-b border-border">
+                <span className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
+                  Active ({claimed.length})
+                </span>
+              </div>
+              {claimed.map((session) => (
+                <SessionCard
+                  key={session.id}
+                  session={session}
+                  isActive={session.id === activeSessionId}
+                  isKeyboardSelected={session.id === selectedQueueId}
+                  onSelect={onSelectSession}
+                  onClaim={onClaimSession}
+                />
+              ))}
+            </>
+          )}
+        </div>
       )}
     </div>
   );

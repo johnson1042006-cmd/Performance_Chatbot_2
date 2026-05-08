@@ -51,6 +51,7 @@ export const chatEventTypeEnum = pgEnum("chat_event_type", [
   "stale_closed",
   "tool_call",
   "auto_escalated",
+  "internal_note",
 ]);
 
 export const users = pgTable("users", {
@@ -93,6 +94,13 @@ export const sessions = pgTable("sessions", {
   // in customer_contacts (one session may have multiple contact captures over time).
   customerEmail: varchar("customer_email", { length: 255 }),
   customerName: varchar("customer_name", { length: 255 }),
+  // Phase 4: Vercel-derived IP geolocation captured at session creation. All
+  // three are nullable — populated only when the platform exposes the
+  // x-vercel-ip-* headers (production / preview), null in local dev. Agent-
+  // only context: never passed to buildPrompt or any AI tool.
+  customerCity: varchar("customer_city", { length: 80 }),
+  customerRegion: varchar("customer_region", { length: 80 }),
+  customerCountry: varchar("customer_country", { length: 80 }),
 }, (table) => ({
   aiClaimDueIdx: index("sessions_ai_claim_due_idx").on(table.aiClaimDueAt),
   customerIdentifierIdx: index("sessions_customer_identifier_idx").on(table.customerIdentifier),
@@ -277,3 +285,30 @@ export type CustomerContact = typeof customerContacts.$inferSelect;
 export type NewCustomerContact = typeof customerContacts.$inferInsert;
 export type Feedback = typeof feedback.$inferSelect;
 export type NewFeedback = typeof feedback.$inferInsert;
+
+// Phase 4: manager-authored canned replies surfaced to agents via a slash-
+// command popover in the dashboard ChatPanel. Bodies support markdown and
+// the placeholders {customer_name}, {agent_name}, {store_phone} which are
+// substituted server-side at fetch time.
+export const cannedResponses = pgTable(
+  "canned_responses",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    title: varchar("title", { length: 120 }).notNull(),
+    body: text("body").notNull(),
+    category: varchar("category", { length: 60 }).notNull(),
+    createdBy: uuid("created_by").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    categoryIdx: index("canned_responses_category_idx").on(table.category),
+  })
+);
+
+export type CannedResponse = typeof cannedResponses.$inferSelect;
+export type NewCannedResponse = typeof cannedResponses.$inferInsert;

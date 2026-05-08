@@ -5,9 +5,20 @@ import { useSession } from "next-auth/react";
 import MessageThread from "./MessageThread";
 import PageContextBadge from "./PageContextBadge";
 import AITrace from "./AITrace";
+import NotesPanel from "./NotesPanel";
+import HistoryPanel from "./HistoryPanel";
+import LocationBadge from "./LocationBadge";
+import CannedReplyPopover from "./CannedReplyPopover";
 import Button from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
-import { Send, UserCheck, X, Users, RotateCcw } from "lucide-react";
+import {
+  Send,
+  UserCheck,
+  X,
+  Users,
+  RotateCcw,
+  Sparkles,
+} from "lucide-react";
 
 interface Message {
   id: string;
@@ -30,10 +41,33 @@ interface ChatPanelProps {
   sessionClaimedByKind?: string | null;
   sessionClaimedBy?: { id: string; name: string } | null;
   pageContext: Record<string, unknown> | null;
+  customerIdentifier?: string;
+  customerCity?: string | null;
+  customerRegion?: string | null;
+  customerCountry?: string | null;
   onRelease: (sessionId: string) => void;
   onClaim: (sessionId: string) => void;
   onClose: (sessionId: string) => void;
   onSessionUpdate?: () => void;
+  /** Optional: imperative ref so the parent (chats page) can trigger send
+   *  via Cmd/Ctrl+Enter hotkey from outside the textarea. */
+  sendRef?: React.MutableRefObject<(() => void) | null>;
+  /** Optional: imperative ref so the parent can focus the textarea via "/"
+   *  hotkey. */
+  focusReplyRef?: React.MutableRefObject<(() => void) | null>;
+}
+
+type TabId = "trace" | "notes" | "history";
+
+function getDisplayName(identifier?: string): string {
+  if (!identifier) return "Customer";
+  if (identifier.startsWith("Customer #")) return identifier;
+  const hash = identifier.slice(-4).toUpperCase();
+  return `Customer ${hash}`;
+}
+
+function draftKey(sessionId: string): string {
+  return `pc-draft-${sessionId}`;
 }
 
 export default function ChatPanel({
@@ -42,10 +76,16 @@ export default function ChatPanel({
   sessionClaimedByKind,
   sessionClaimedBy,
   pageContext,
+  customerIdentifier,
+  customerCity,
+  customerRegion,
+  customerCountry,
   onRelease,
   onClaim,
   onClose,
   onSessionUpdate,
+  sendRef,
+  focusReplyRef,
 }: ChatPanelProps) {
   const { data: authSession } = useSession();
   const { addToast } = useToast();
@@ -57,13 +97,15 @@ export default function ChatPanel({
   const [showReassign, setShowReassign] = useState(false);
   const [onlineAgents, setOnlineAgents] = useState<OnlineAgent[]>([]);
   const [reassigning, setReassigning] = useState(false);
-  // Tracks a `session-closed` Pusher event locally so the UI flips to the
-  // closed state instantly, without waiting for the parent's session list
-  // refresh to round-trip.
   const [closedLocal, setClosedLocal] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabId>("trace");
+  const [showSlashPopover, setShowSlashPopover] = useState(false);
+  const [aiEnabled, setAiEnabled] = useState(true);
+  const [suggesting, setSuggesting] = useState(false);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const sendInFlightRef = useRef(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const isManager = authSession?.user?.role === "store_manager";
   const isClosed = closedLocal || sessionStatus === "closed";
@@ -98,7 +140,29 @@ export default function ChatPanel({
     fetchMessages();
   }, [fetchMessages]);
 
-  // Pusher real-time subscription
+  // Hydrate input from sessionStorage draft when session changes.
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem(draftKey(sessionId));
+      setInput(saved ?? "");
+    } catch {
+      setInput("");
+    }
+    setShowSlashPopover(false);
+  }, [sessionId]);
+
+  // Pull aiEnabled once so the AI Suggest button can be disabled.
+  useEffect(() => {
+    fetch("/api/chat/settings")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data && typeof data.aiEnabled === "boolean") {
+          setAiEnabled(data.aiEnabled);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -110,8 +174,6 @@ export default function ChatPanel({
       if (cancelled) return;
       pusherInstance = getPusherClient();
       channel = pusherInstance.subscribe(`session-${sessionId}`);
-      // Unbind before binding to prevent handler accumulation when Pusher
-      // returns a channel that hasn't been fully unsubscribed server-side yet.
       channel.unbind("new-message");
       channel.unbind("session-claimed");
       channel.unbind("session-released");
@@ -160,7 +222,6 @@ export default function ChatPanel({
     };
   }, [sessionId, myId, onSessionUpdate]);
 
-  // Polling fallback — refresh messages every 3 seconds
   useEffect(() => {
     pollRef.current = setInterval(fetchMessages, 3000);
     return () => {
@@ -173,7 +234,6 @@ export default function ChatPanel({
       const res = await fetch("/api/admin/team-presence");
       if (!res.ok) return;
       const data = await res.json();
-      // Show all active agents except current user
       setOnlineAgents(
         (data.agents ?? []).filter(
           (a: OnlineAgent) => a.id !== myId && a.isOnline
@@ -188,7 +248,6 @@ export default function ChatPanel({
     if (showReassign) fetchOnlineAgents();
   }, [showReassign, fetchOnlineAgents]);
 
-  // Reset optimistic flag when navigating to a different session
   useEffect(() => {
     setJustClaimed(false);
     setClosedLocal(false);
@@ -245,12 +304,18 @@ export default function ChatPanel({
     }
   };
 
-  const sendAgentMessage = async () => {
+  const sendAgentMessage = useCallback(async () => {
     if (!input.trim() || sending || sendInFlightRef.current) return;
     sendInFlightRef.current = true;
     const content = input.trim();
     setInput("");
+    try {
+      sessionStorage.removeItem(draftKey(sessionId));
+    } catch {
+      // ignore
+    }
     setSending(true);
+    setShowSlashPopover(false);
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = null;
@@ -274,11 +339,165 @@ export default function ChatPanel({
       sendInFlightRef.current = false;
       setSending(false);
     }
+  }, [input, sending, sessionId, authSession, fetchMessages]);
+
+  // Expose send + focusReply to the parent (chats page) for hotkeys.
+  useEffect(() => {
+    if (sendRef) sendRef.current = sendAgentMessage;
+    return () => {
+      if (sendRef) sendRef.current = null;
+    };
+  }, [sendRef, sendAgentMessage]);
+
+  useEffect(() => {
+    if (focusReplyRef) {
+      focusReplyRef.current = () => {
+        textareaRef.current?.focus();
+      };
+    }
+    return () => {
+      if (focusReplyRef) focusReplyRef.current = null;
+    };
+  }, [focusReplyRef]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    setInput(value);
+    try {
+      if (value) sessionStorage.setItem(draftKey(sessionId), value);
+      else sessionStorage.removeItem(draftKey(sessionId));
+    } catch {
+      // storage quota or disabled — non-fatal
+    }
+    if (isMyChat) emitTyping();
+    setShowSlashPopover(value.startsWith("/"));
   };
+
+  const handleSelectCanned = (body: string) => {
+    setInput(body);
+    try {
+      sessionStorage.setItem(draftKey(sessionId), body);
+    } catch {
+      // ignore
+    }
+    setShowSlashPopover(false);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (el) {
+        el.focus();
+        const end = body.length;
+        el.setSelectionRange(end, end);
+      }
+    });
+  };
+
+  const handleAiSuggest = async () => {
+    if (!aiEnabled || suggesting) return;
+    if (input.trim().length > 0) {
+      const ok = window.confirm(
+        "Replace your current draft with the AI suggestion?"
+      );
+      if (!ok) return;
+    }
+    setSuggesting(true);
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/ai-suggest`, {
+        method: "POST",
+      });
+      if (res.status === 429) {
+        addToast(
+          "AI suggest limit reached (30/hour). Try again later.",
+          "warning"
+        );
+        return;
+      }
+      if (res.status === 503) {
+        addToast("AI is disabled in bot settings.", "warning");
+        return;
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const suggestion: string = data.suggestion ?? "";
+      setInput(suggestion);
+      try {
+        if (suggestion)
+          sessionStorage.setItem(draftKey(sessionId), suggestion);
+      } catch {
+        // ignore
+      }
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (el) {
+          el.focus();
+          const end = suggestion.length;
+          el.setSelectionRange(end, end);
+        }
+      });
+    } catch (err) {
+      console.error("AI suggest failed:", err);
+      addToast("Failed to generate suggestion. Please try again.", "error");
+    } finally {
+      setSuggesting(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (showSlashPopover) {
+      // Let the popover handle ArrowUp/Down/Enter/Escape via document listener.
+      if (
+        e.key === "ArrowDown" ||
+        e.key === "ArrowUp" ||
+        e.key === "Enter" ||
+        e.key === "Escape"
+      ) {
+        return;
+      }
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      sendAgentMessage();
+      return;
+    }
+    if (e.key === "Enter" && !e.shiftKey && !showSlashPopover) {
+      e.preventDefault();
+      sendAgentMessage();
+    }
+  };
+
+  const TabButton = ({
+    id,
+    label,
+    count,
+  }: {
+    id: TabId;
+    label: string;
+    count?: number;
+  }) => (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={activeTab === id}
+      onClick={() => setActiveTab(id)}
+      data-testid={`chat-tab-${id}`}
+      className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
+        activeTab === id
+          ? "border-accent text-text-primary"
+          : "border-transparent text-text-secondary hover:text-text-primary"
+      }`}
+    >
+      {label}
+      {typeof count === "number" && count > 0 && (
+        <span className="ml-1 px-1.5 py-px text-[10px] rounded-full bg-accent/10 text-accent">
+          {count}
+        </span>
+      )}
+    </button>
+  );
+
+  const showAgentTabs = !!authSession?.user; // any authed user can see notes/history
 
   return (
     <div className="flex flex-col h-full">
-      {/* Claimed-by-other-agent banner */}
       {claimedByBanner && (
         <div className="shrink-0 bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center justify-between">
           <span className="text-xs font-medium text-amber-700">{claimedByBanner}</span>
@@ -292,6 +511,26 @@ export default function ChatPanel({
       )}
 
       <div className="shrink-0 border-b border-border p-3 space-y-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span
+              className="text-sm font-semibold text-text-primary"
+              data-testid="chat-customer-name"
+            >
+              {getDisplayName(customerIdentifier)}
+            </span>
+            <LocationBadge
+              city={customerCity}
+              region={customerRegion}
+              country={customerCountry}
+              compact
+            />
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => onClose(sessionId)}>
+            <X size={14} className="mr-1" />
+            Close
+          </Button>
+        </div>
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-2 flex-wrap">
             {isUnclaimed && (
@@ -351,10 +590,6 @@ export default function ChatPanel({
               </div>
             )}
           </div>
-          <Button variant="ghost" size="sm" onClick={() => onClose(sessionId)}>
-            <X size={14} className="mr-1" />
-            Close
-          </Button>
         </div>
         {sessionClaimedBy && isHuman && (
           <p className="text-xs text-text-secondary">
@@ -368,7 +603,30 @@ export default function ChatPanel({
 
       <MessageThread messages={messages} />
 
-      <AITrace sessionId={sessionId} />
+      {showAgentTabs && (
+        <div
+          className="shrink-0 border-t border-border bg-background/40"
+          data-testid="chat-tabs"
+        >
+          <div className="flex items-center gap-1 px-2 border-b border-border" role="tablist">
+            <TabButton id="trace" label="AI Trace" />
+            <TabButton id="notes" label="Notes" />
+            <TabButton id="history" label="History" />
+          </div>
+          {activeTab === "trace" && (
+            <AITrace sessionId={sessionId} />
+          )}
+          {activeTab === "notes" && (
+            <NotesPanel sessionId={sessionId} />
+          )}
+          {activeTab === "history" && customerIdentifier && (
+            <HistoryPanel
+              sessionId={sessionId}
+              customerIdentifier={customerIdentifier}
+            />
+          )}
+        </div>
+      )}
 
       {isClosed && (
         <div className="shrink-0 border-t border-border bg-slate-100 px-4 py-3 text-center">
@@ -380,24 +638,49 @@ export default function ChatPanel({
       )}
 
       {!isClosed && isMyChat && (
-        <div className="shrink-0 border-t border-border bg-surface px-4 py-3">
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
+        <div className="shrink-0 border-t border-border bg-surface px-4 py-3 relative">
+          <CannedReplyPopover
+            sessionId={sessionId}
+            query={input}
+            open={showSlashPopover}
+            onSelect={handleSelectCanned}
+            onClose={() => setShowSlashPopover(false)}
+          />
+          <div className="flex items-end gap-2">
+            <textarea
+              ref={textareaRef}
               value={input}
-              onChange={(e) => { setInput(e.target.value); if (isMyChat) emitTyping(); }}
-              onKeyDown={(e) =>
-                e.key === "Enter" && !e.shiftKey && sendAgentMessage()
-              }
-              placeholder="Type a response..."
-              className="flex-1 px-3.5 py-2.5 text-sm border border-border rounded-button focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              rows={2}
+              placeholder="Type a response… ( / for canned replies )"
+              data-testid="chat-reply-textarea"
+              className="flex-1 px-3.5 py-2.5 text-sm border border-border rounded-button focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent resize-y"
             />
-            <Button
-              onClick={sendAgentMessage}
-              disabled={!input.trim() || sending}
-            >
-              <Send size={14} />
-            </Button>
+            <div className="flex flex-col gap-1.5 shrink-0">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleAiSuggest}
+                disabled={!aiEnabled || suggesting}
+                title={
+                  aiEnabled
+                    ? "Generate a suggested reply"
+                    : "AI is disabled in bot settings"
+                }
+                data-testid="ai-suggest-btn"
+              >
+                <Sparkles size={14} className="mr-1" />
+                {suggesting ? "…" : "AI suggest"}
+              </Button>
+              <Button
+                onClick={sendAgentMessage}
+                disabled={!input.trim() || sending}
+                data-testid="chat-send-btn"
+              >
+                <Send size={14} />
+              </Button>
+            </div>
           </div>
         </div>
       )}

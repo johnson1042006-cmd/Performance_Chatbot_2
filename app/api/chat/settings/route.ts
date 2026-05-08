@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 const DEFAULTS = {
   aiEnabled: true,
   fallbackTimerSeconds: 60,
+  hotkeysEnabled: true,
 };
 
 export async function GET() {
@@ -27,6 +28,7 @@ export async function GET() {
       aiEnabled: parsed.aiEnabled ?? DEFAULTS.aiEnabled,
       fallbackTimerSeconds:
         parsed.fallbackTimerSeconds ?? DEFAULTS.fallbackTimerSeconds,
+      hotkeysEnabled: parsed.hotkeysEnabled ?? DEFAULTS.hotkeysEnabled,
     };
     return NextResponse.json(out);
   } catch {

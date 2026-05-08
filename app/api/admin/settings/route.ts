@@ -13,6 +13,9 @@ const DEFAULT_SETTINGS = {
   // When true, the embed widget opens automatically on a visitor's first
   // page-view in the session (gated on a per-session sessionStorage key).
   autoOpenOnFirstVisit: true,
+  // Phase 4: agent hotkeys (J/K navigate, C claim, R release, X close,
+  // / focus reply, Cmd/Ctrl+Enter send). Manager-controlled.
+  hotkeysEnabled: true,
 };
 
 export async function GET() {

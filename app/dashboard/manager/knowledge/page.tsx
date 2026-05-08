@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import TopBar from "@/components/ui/TopBar";
 import KnowledgeEditor from "@/components/dashboard/manager/KnowledgeEditor";
 import PairingsTable from "@/components/dashboard/manager/PairingsTable";
+import CannedRepliesEditor from "@/components/dashboard/manager/CannedRepliesEditor";
 
 interface KnowledgeEntry {
   id: string;
@@ -19,6 +20,7 @@ const TABS = [
   { id: "ebike_info", label: "E-Bikes" },
   { id: "store_hours", label: "Store Hours" },
   { id: "pairings", label: "Product Pairings" },
+  { id: "canned", label: "Canned Replies" },
 ];
 
 export default function KnowledgeBasePage() {
@@ -73,6 +75,8 @@ export default function KnowledgeBasePage() {
 
         {activeTab === "pairings" ? (
           <PairingsTable />
+        ) : activeTab === "canned" ? (
+          <CannedRepliesEditor />
         ) : (
           <KnowledgeEditor
             key={activeTab}

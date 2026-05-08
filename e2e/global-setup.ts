@@ -28,6 +28,9 @@ const MANAGER_EMAIL =
 const AGENT_EMAIL =
   process.env.E2E_AGENT_EMAIL || "agent@performancecycle.com";
 
+const e2ePort = process.env.E2E_PORT || "3050";
+const serverBase = process.env.E2E_BASE_URL || `http://localhost:${e2ePort}`;
+
 export default async function globalSetup() {
   if (!process.env.DATABASE_URL) {
     console.warn(
@@ -48,4 +51,32 @@ export default async function globalSetup() {
   console.log(
     `[e2e/global-setup] cleared mustResetPassword on ${result.length} test user(s): ${result.map((r) => r.email).join(", ")}`,
   );
+
+  // Warm up the webServer's database connection pool. The Next.js process
+  // uses a TCP pgbouncer connection that starts cold; the first credentials
+  // check against a sleeping Neon compute can take 20-45 s. By firing one
+  // full login here (before any test runs), we ensure the pool is established
+  // and the Neon compute is awake for the actual tests.
+  try {
+    const csrfRes = await fetch(`${serverBase}/api/auth/csrf`);
+    const { csrfToken } = (await csrfRes.json()) as { csrfToken: string };
+
+    const body = new URLSearchParams({
+      email: AGENT_EMAIL,
+      password: process.env.E2E_AGENT_PASS ?? "agent123",
+      csrfToken,
+      json: "true",
+    });
+    await fetch(`${serverBase}/api/auth/callback/credentials`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+      // Don't follow the redirect — we only care that the request was processed.
+      redirect: "manual",
+    });
+    console.log("[e2e/global-setup] warmed up NextAuth credentials handler");
+  } catch (err) {
+    // Non-fatal: test will be slower on cold start but not broken.
+    console.warn("[e2e/global-setup] warm-up request skipped:", String(err));
+  }
 }

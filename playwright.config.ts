@@ -32,7 +32,7 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
   ],
-  webServer:
+      webServer:
     process.env.CI || useExternalServer
       ? undefined
       : {
@@ -40,5 +40,11 @@ export default defineConfig({
           url: baseURL,
           reuseExistingServer: false,
           timeout: 120000,
+          // NEXTAUTH_URL must match the e2e port so that after a successful
+          // credential login NextAuth redirects back to port 3050, not the
+          // default localhost:3000 value stored in .env.local.
+          env: {
+            NEXTAUTH_URL: baseURL,
+          },
         },
 });

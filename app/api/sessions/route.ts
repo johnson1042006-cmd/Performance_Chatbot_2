@@ -4,6 +4,7 @@ import { sessions, users, messages } from "@/lib/db/schema";
 import { asc, desc, eq, ne, sql, inArray } from "drizzle-orm";
 import { processDueAiClaims, sweepStaleSessions } from "@/lib/sessions/state";
 import { enforce, getClientIp } from "@/lib/rateLimit";
+import { extractGeoFromHeaders } from "@/lib/utils/geo";
 import { log, serializeError } from "@/lib/log";
 
 export async function GET() {
@@ -133,12 +134,34 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ session: existing[0] });
     }
 
+    // Phase 4: capture Vercel-derived IP geolocation for agent-only context.
+    // Wrapped in try/catch so a missing edge runtime / local dev / unexpected
+    // header parse failure never blocks session creation.
+    let geoColumns: {
+      customerCity?: string | null;
+      customerRegion?: string | null;
+      customerCountry?: string | null;
+    } = {};
+    try {
+      const geo = extractGeoFromHeaders(req);
+      if (geo.city || geo.region || geo.country) {
+        geoColumns = {
+          customerCity: geo.city,
+          customerRegion: geo.region,
+          customerCountry: geo.country,
+        };
+      }
+    } catch {
+      // Swallow — geolocation is best-effort.
+    }
+
     const [session] = await db
       .insert(sessions)
       .values({
         customerIdentifier: effectiveId,
         pageContext,
         status: "waiting",
+        ...geoColumns,
       })
       .returning();
 

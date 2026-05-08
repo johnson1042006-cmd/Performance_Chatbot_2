@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import PageContextBadge from "./PageContextBadge";
-import { Clock, UserCheck } from "lucide-react";
+import LocationBadge from "./LocationBadge";
+import SlaPill from "./SlaPill";
+import { UserCheck } from "lucide-react";
 
 interface SessionCardProps {
   session: {
@@ -17,13 +18,17 @@ interface SessionCardProps {
     claimedByKind?: string | null;
     claimedBy?: { id: string; name: string } | null;
     waitSeconds?: number;
-    // Phase 3: derived quality indicator computed in /api/sessions GET.
+    lastCustomerActivityAt?: string | null;
+    customerCity?: string | null;
+    customerRegion?: string | null;
+    customerCountry?: string | null;
     qualityFlag?: {
       lowConfidenceLatest: boolean;
       negativeSentimentEver: boolean;
     };
   };
   isActive?: boolean;
+  isKeyboardSelected?: boolean;
   onClaim?: (sessionId: string) => void;
   onSelect?: (sessionId: string) => void;
 }
@@ -34,38 +39,13 @@ function getDisplayName(identifier: string): string {
   return `Customer ${hash}`;
 }
 
-function useWaitTimer(startedAt: string) {
-  const [seconds, setSeconds] = useState(() =>
-    Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000)
-  );
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      setSeconds(Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000));
-    }, 1000);
-    return () => clearInterval(id);
-  }, [startedAt]);
-
-  return seconds;
-}
-
-function formatWait(seconds: number): { text: string; variant: "success" | "warning" | "danger" } {
-  if (seconds < 60) return { text: `${seconds}s`, variant: "success" };
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  if (m < 5) return { text: `${m}m ${s}s`, variant: seconds < 90 ? "success" : "warning" };
-  return { text: `${m}m`, variant: "danger" };
-}
-
 export default function SessionCard({
   session,
   isActive,
+  isKeyboardSelected,
   onClaim,
   onSelect,
 }: SessionCardProps) {
-  const waitSeconds = useWaitTimer(session.startedAt);
-  const wait = formatWait(waitSeconds);
-
   const isUnclaimed = session.status === "waiting" || !session.claimedByKind;
   const isAi = session.claimedByKind === "ai" || session.status === "active_ai";
   const isHuman = session.claimedByKind === "human" || session.status === "active_human";
@@ -89,8 +69,13 @@ export default function SessionCard({
   return (
     <div
       onClick={() => onSelect?.(session.id)}
+      data-testid="session-card"
       className={`p-3 border-b border-border cursor-pointer transition-colors hover:bg-background ${
         isActive ? `bg-accent/5 border-l-2 ${borderColor || "border-l-accent"}` : ""
+      } ${
+        isKeyboardSelected && !isActive
+          ? "ring-2 ring-accent/40 ring-inset"
+          : ""
       }`}
     >
       <div className="flex items-start justify-between mb-2">
@@ -114,17 +99,17 @@ export default function SessionCard({
             <Badge variant={statusBadge.variant} dot>
               {statusBadge.label}
             </Badge>
+            {!isUnclaimed && (
+              <SlaPill
+                lastCustomerActivityAt={session.lastCustomerActivityAt}
+                compact
+              />
+            )}
             {isUnclaimed && (
-              <span className={`flex items-center gap-1 text-xs font-medium ${
-                wait.variant === "danger"
-                  ? "text-red-600"
-                  : wait.variant === "warning"
-                  ? "text-amber-600"
-                  : "text-text-secondary"
-              }`}>
-                <Clock size={10} />
-                waiting {wait.text}
-              </span>
+              <SlaPill
+                lastCustomerActivityAt={session.startedAt}
+                compact
+              />
             )}
             {(isAi || isHuman) && session.claimedBy && (
               <span className="flex items-center gap-1 text-xs text-text-secondary">
@@ -136,10 +121,18 @@ export default function SessionCard({
         </div>
       </div>
 
-      <PageContextBadge
-        pageContext={session.pageContext as Parameters<typeof PageContextBadge>[0]["pageContext"]}
-        compact
-      />
+      <div className="flex items-center gap-2 flex-wrap">
+        <PageContextBadge
+          pageContext={session.pageContext as Parameters<typeof PageContextBadge>[0]["pageContext"]}
+          compact
+        />
+        <LocationBadge
+          city={session.customerCity}
+          region={session.customerRegion}
+          country={session.customerCountry}
+          compact
+        />
+      </div>
 
       {isUnclaimed && onClaim && (
         <Button
