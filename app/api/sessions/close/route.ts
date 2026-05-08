@@ -6,6 +6,7 @@ import { sessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { getPusher } from "@/lib/pusher/server";
 import { log, serializeError } from "@/lib/log";
+import { enqueueTag } from "@/lib/ai/tagger";
 
 export async function POST(req: NextRequest) {
   const requestId = crypto.randomUUID();
@@ -45,6 +46,10 @@ export async function POST(req: NextRequest) {
         error: serializeError(pusherError),
       });
     }
+
+    // Phase 5: fire-and-forget AI tagging. Drops if the in-memory
+    // semaphore is full; never blocks the close response.
+    enqueueTag(sessionId);
 
     return NextResponse.json({ session: updated });
   } catch (error) {

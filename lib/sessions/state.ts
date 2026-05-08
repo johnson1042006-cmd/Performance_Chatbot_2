@@ -10,6 +10,7 @@ import { getPusher } from "@/lib/pusher/server";
 import { runAiTurn } from "@/lib/ai/runAi";
 import { sql } from "drizzle-orm";
 import { log, serializeError } from "@/lib/log";
+import { enqueueTag } from "@/lib/ai/tagger";
 
 type ClaimKind = "ai" | "human";
 type SessionStatus = "waiting" | "active_human" | "active_ai" | "closed";
@@ -309,6 +310,11 @@ export async function sweepStaleSessions(): Promise<number> {
   if (stale.length > 0) {
     for (const { id } of stale) {
       await logChatEvent({ sessionId: id, type: "stale_closed" });
+      // Phase 5: kick off the AI tagger fire-and-forget. The semaphore in
+      // lib/ai/tagger.ts caps concurrent in-flight calls per Lambda and
+      // any drops are picked up by the next sweep because intent stays
+      // null until persisted.
+      enqueueTag(id);
     }
     try {
       const pusher = getPusher();

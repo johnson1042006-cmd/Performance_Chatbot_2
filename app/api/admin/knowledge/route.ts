@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { topic, content } = body;
+    const { topic, content, isFaq } = body;
 
     if (!topic || !content) {
       return NextResponse.json(
@@ -43,12 +43,27 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Phase 5: `isFaq` defaults to false on insert so existing seeded
+    // policy topics keep their classification. On update we keep the
+    // existing value unless the caller explicitly passes a new one.
+    const updateSet: Record<string, unknown> = {
+      content,
+      updatedAt: new Date(),
+    };
+    if (typeof isFaq === "boolean") {
+      updateSet.isFaq = isFaq;
+    }
+
     const [entry] = await db
       .insert(knowledgeBase)
-      .values({ topic, content })
+      .values({
+        topic,
+        content,
+        isFaq: typeof isFaq === "boolean" ? isFaq : false,
+      })
       .onConflictDoUpdate({
         target: knowledgeBase.topic,
-        set: { content, updatedAt: new Date() },
+        set: updateSet,
       })
       .returning();
 

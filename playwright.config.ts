@@ -43,8 +43,13 @@ export default defineConfig({
           // NEXTAUTH_URL must match the e2e port so that after a successful
           // credential login NextAuth redirects back to port 3050, not the
           // default localhost:3000 value stored in .env.local.
+          //
+          // TAGGER_TEST_MODE=1 makes lib/ai/tagger short-circuit the
+          // Anthropic call and persist a deterministic result keyed off
+          // the transcript. Keeps the tagger e2e suite hermetic.
           env: {
             NEXTAUTH_URL: baseURL,
+            TAGGER_TEST_MODE: "1",
           },
         },
 });

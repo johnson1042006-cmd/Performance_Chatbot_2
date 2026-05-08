@@ -85,6 +85,52 @@ export async function GET() {
         ? Math.round((aiMsgCount / totalResponses) * 100)
         : 0;
 
+    // Phase 5: AI Handled Cleanly % — sessions started today that were
+    // claimed by AI and exhibited none of the documented "trouble"
+    // signals: auto-escalation event, low confidence, frustrated customer,
+    // or thumbs-down feedback.
+    const aiCleanlyRows = await db.execute(sql`
+      WITH today_ai AS (
+        SELECT s.id
+        FROM sessions s
+        WHERE s.started_at >= ${today}
+          AND s.claimed_by_kind = 'ai'
+      ),
+      flags AS (
+        SELECT
+          ta.id,
+          EXISTS (
+            SELECT 1 FROM chat_events ce
+            WHERE ce.session_id = ta.id AND ce.type = 'auto_escalated'
+          ) AS escalated,
+          EXISTS (
+            SELECT 1 FROM messages m
+            WHERE m.session_id = ta.id
+              AND m.role = 'ai'
+              AND (m.confidence = 'low' OR m.sentiment = -1)
+          ) AS bad_signal,
+          EXISTS (
+            SELECT 1 FROM feedback f
+            WHERE f.session_id = ta.id AND f.rating = 'down'
+          ) AS thumbs_down
+        FROM today_ai ta
+      )
+      SELECT
+        COUNT(*)::int                              AS total,
+        COUNT(*) FILTER (
+          WHERE NOT escalated AND NOT bad_signal AND NOT thumbs_down
+        )::int                                     AS cleanly
+      FROM flags
+    `);
+    const aiCleanlyArr = (aiCleanlyRows as unknown as { rows?: { total: number; cleanly: number }[] }).rows
+      ?? (Array.isArray(aiCleanlyRows) ? aiCleanlyRows as { total: number; cleanly: number }[] : []);
+    const aiCleanlyTotal = aiCleanlyArr[0]?.total ?? 0;
+    const aiCleanly = aiCleanlyArr[0]?.cleanly ?? 0;
+    const aiHandledCleanlyPct =
+      aiCleanlyTotal > 0
+        ? Math.round((aiCleanly / aiCleanlyTotal) * 100)
+        : 0;
+
     const recentSessions = await db
       .select()
       .from(sessions)
@@ -112,6 +158,9 @@ export async function GET() {
     return NextResponse.json({
       chatsToday: totalChats,
       aiPercent,
+      aiHandledCleanlyPct,
+      aiHandledCleanlyTotal: aiCleanlyTotal,
+      aiHandledCleanly: aiCleanly,
       openChats: openChats?.count || 0,
       queueSize: queueCount?.count || 0,
       unclaimedCount: unclaimedCount?.count || 0,

@@ -101,12 +101,22 @@ export const sessions = pgTable("sessions", {
   customerCity: varchar("customer_city", { length: 80 }),
   customerRegion: varchar("customer_region", { length: 80 }),
   customerCountry: varchar("customer_country", { length: 80 }),
+  // Phase 5: AI tagger output. `intent` is one of the documented enum
+  // strings ("order_status", "returns_exchanges", ..., "other") but stored
+  // as a free-form varchar so taxonomy edits don't require migrations.
+  intent: varchar("intent", { length: 40 }),
+  topicTags: text("topic_tags")
+    .array()
+    .notNull()
+    .default(sql`'{}'::text[]`),
+  resolved: boolean("resolved"),
 }, (table) => ({
   aiClaimDueIdx: index("sessions_ai_claim_due_idx").on(table.aiClaimDueAt),
   customerIdentifierIdx: index("sessions_customer_identifier_idx").on(table.customerIdentifier),
   statusIdx: index("sessions_status_idx").on(table.status),
   heartbeatIdx: index("sessions_heartbeat_idx").on(table.lastHeartbeatAt),
   activityIdx: index("sessions_activity_idx").on(table.lastCustomerActivityAt),
+  intentIdx: index("sessions_intent_idx").on(table.intent),
 }));
 
 export const messages = pgTable("messages", {
@@ -161,7 +171,14 @@ export const knowledgeBase = pgTable("knowledge_base", {
   topic: varchar("topic", { length: 255 }).notNull().unique(),
   content: text("content").notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+  // Phase 5: distinguishes manager-curated policy topics (false, default)
+  // from ad-hoc FAQ entries created via the "Add to KB" inline action on
+  // the Insights / Review pages. Both rows are read by buildPrompt — single
+  // retrieval path, two UI tabs.
+  isFaq: boolean("is_faq").notNull().default(false),
+}, (table) => ({
+  isFaqIdx: index("knowledge_base_is_faq_idx").on(table.isFaq),
+}));
 
 export const localCatalog = pgTable("local_catalog", {
   id: serial("id").primaryKey(),
@@ -312,3 +329,55 @@ export const cannedResponses = pgTable(
 
 export type CannedResponse = typeof cannedResponses.$inferSelect;
 export type NewCannedResponse = typeof cannedResponses.$inferInsert;
+
+// Phase 5: manager-editable thresholds evaluated by the cron tick. When a
+// threshold is breached and `now() - last_fired_at >= cooldown_min`, we
+// insert an `alert_events` row, fan out a Pusher event on the "alerts"
+// channel, and POST a Slack Block Kit message to SLACK_WEBHOOK_URL.
+export const alertThresholds = pgTable(
+  "alert_thresholds",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    // "queue_depth" | "ai_failure_rate_pct" | "no_agents_online_during_hours"
+    kind: varchar("kind", { length: 40 }).notNull(),
+    threshold: decimal("threshold", { precision: 12, scale: 2 }).notNull(),
+    // ">", ">=", "<", "<=", "=="
+    comparator: varchar("comparator", { length: 2 }).notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    cooldownMin: integer("cooldown_min").notNull().default(30),
+    lastFiredAt: timestamp("last_fired_at", { withTimezone: true }),
+    metadata: jsonb("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    kindIdx: index("alert_thresholds_kind_idx").on(table.kind),
+  })
+);
+
+export const alertEvents = pgTable(
+  "alert_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    thresholdId: uuid("threshold_id").references(() => alertThresholds.id, {
+      onDelete: "set null",
+    }),
+    kind: varchar("kind", { length: 40 }).notNull(),
+    value: decimal("value", { precision: 12, scale: 2 }).notNull(),
+    message: text("message").notNull(),
+    firedAt: timestamp("fired_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    ackedAt: timestamp("acked_at", { withTimezone: true }),
+    ackedBy: uuid("acked_by").references(() => users.id),
+  },
+  (table) => ({
+    firedAtIdx: index("alert_events_fired_at_idx").on(table.firedAt),
+  })
+);
+
+export type AlertThreshold = typeof alertThresholds.$inferSelect;
+export type NewAlertThreshold = typeof alertThresholds.$inferInsert;
+export type AlertEvent = typeof alertEvents.$inferSelect;
+export type NewAlertEvent = typeof alertEvents.$inferInsert;

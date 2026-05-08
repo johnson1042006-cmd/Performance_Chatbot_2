@@ -123,20 +123,10 @@ export default function HistoryTable({ onSelectSession }: HistoryTableProps) {
   };
 
   const exportCSV = () => {
-    const headers = "ID,Customer,Status,Started,Messages,AI Messages\n";
-    const rows = sessions
-      .map(
-        (s) =>
-          `${s.id},${s.customerIdentifier},${s.status},${s.startedAt},${s.messageCount},${s.aiMessageCount}`
-      )
-      .join("\n");
-    const blob = new Blob([headers + rows], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `chat-history-page-${page}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    // Phase 5: full transcripts export with tagger fields/CSAT/agent. The
+    // server enforces manager-only access. This replaces the per-page
+    // client-side CSV that only had a 6-column shape.
+    window.location.href = "/api/admin/export?format=csv";
   };
 
   const statusVariant = (status: string) => {

@@ -13,8 +13,12 @@ import {
   Users,
   ThumbsUp,
   LogOut,
+  Search,
+  TrendingUp,
+  ListChecks,
 } from "lucide-react";
 import Badge from "./Badge";
+import AlertsBell from "@/components/dashboard/AlertsBell";
 
 interface NavItem {
   label: string;
@@ -38,6 +42,24 @@ const navItems: NavItem[] = [
     label: "History",
     href: "/dashboard/history",
     icon: <History size={20} />,
+  },
+  {
+    label: "Search",
+    href: "/dashboard/manager/search",
+    icon: <Search size={20} />,
+    managerOnly: true,
+  },
+  {
+    label: "Insights",
+    href: "/dashboard/manager/insights",
+    icon: <TrendingUp size={20} />,
+    managerOnly: true,
+  },
+  {
+    label: "Review",
+    href: "/dashboard/manager/review",
+    icon: <ListChecks size={20} />,
+    managerOnly: true,
   },
   {
     label: "Knowledge Base",
@@ -173,19 +195,22 @@ export default function Sidebar() {
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-success" />
           <span className="text-white/60 text-xs">Online</span>
-          <button
-            onClick={() => {
-              // Clear agent presence before signing out so anyAgentsOnline()
-              // returns false immediately rather than waiting up to 60 s for
-              // the heartbeat window to expire. Best-effort — sign-out
-              // proceeds regardless of whether the beacon lands.
-              navigator.sendBeacon("/api/presence/offline");
-              signOut({ callbackUrl: "/login" });
-            }}
-            className="ml-auto text-white/40 hover:text-white transition-colors"
-          >
-            <LogOut size={16} />
-          </button>
+          <div className="ml-auto flex items-center gap-3">
+            <AlertsBell />
+            <button
+              onClick={() => {
+                // Clear agent presence before signing out so anyAgentsOnline()
+                // returns false immediately rather than waiting up to 60 s for
+                // the heartbeat window to expire. Best-effort — sign-out
+                // proceeds regardless of whether the beacon lands.
+                navigator.sendBeacon("/api/presence/offline");
+                signOut({ callbackUrl: "/login" });
+              }}
+              className="text-white/40 hover:text-white transition-colors"
+            >
+              <LogOut size={16} />
+            </button>
+          </div>
         </div>
       </div>
     </aside>
