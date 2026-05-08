@@ -18,6 +18,7 @@ declare module "next-auth" {
       role: "store_manager" | "support_agent";
       name: string;
       email: string;
+      mustResetPassword?: boolean;
     };
   }
 }
@@ -26,7 +27,40 @@ declare module "next-auth/jwt" {
   interface JWT {
     id: string;
     role: "store_manager" | "support_agent";
+    mustResetPassword?: boolean;
   }
+}
+
+// In-memory cache so the JWT callback isn't a DB hit on every request. 60s
+// is short enough that an admin clearing a user's reset flag is reflected
+// quickly, but long enough that hot pages don't hammer the users table.
+// Bust explicitly via `bustUserFlagCache(userId)` after a successful reset.
+type CacheEntry = { mustReset: boolean; expiresAt: number };
+const userFlagCache = new Map<string, CacheEntry>();
+
+async function loadMustReset(userId: string): Promise<boolean> {
+  const hit = userFlagCache.get(userId);
+  if (hit && hit.expiresAt > Date.now()) return hit.mustReset;
+
+  try {
+    const [row] = await db
+      .select({ m: users.mustResetPassword })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    const mustReset = !!row?.m;
+    userFlagCache.set(userId, {
+      mustReset,
+      expiresAt: Date.now() + 60_000,
+    });
+    return mustReset;
+  } catch {
+    return false;
+  }
+}
+
+export function bustUserFlagCache(userId: string): void {
+  userFlagCache.delete(userId);
 }
 
 export const authOptions: NextAuthOptions = {
@@ -69,11 +103,15 @@ export const authOptions: NextAuthOptions = {
         token.id = user.id;
         token.role = user.role;
       }
+      if (token.id) {
+        token.mustResetPassword = await loadMustReset(token.id);
+      }
       return token;
     },
     async session({ session, token }) {
       session.user.id = token.id;
       session.user.role = token.role;
+      session.user.mustResetPassword = !!token.mustResetPassword;
       return session;
     },
   },

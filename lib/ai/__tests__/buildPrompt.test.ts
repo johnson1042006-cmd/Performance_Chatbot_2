@@ -5,31 +5,64 @@ import { AI_BEHAVIOR_RULES } from "../rules";
 // ---------------------------------------------------------------------------
 // AI_BEHAVIOR_RULES integrity
 // ---------------------------------------------------------------------------
+// Single source of truth for which rule IDs the prompt is expected to ship
+// with. New rules should be added here AND in `lib/ai/rules.ts` together —
+// the bidirectional guard test below makes either-side drift a hard failure.
+const EXPECTED_RULE_IDS = [
+  "color_availability_redirect",
+  "multiple_recommendations",
+  "no_discontinued",
+  "no_call_store",
+  "color_fuzzy_matching",
+  "full_text_search",
+  "parse_descriptions",
+  "return_policy",
+  "ebikes",
+  "service_policy",
+  "service_handoff",
+  "product_pairings",
+  "conversation_memory",
+  "qualifying_questions",
+  "no_hallucinate_contact",
+  "no_hallucinate_features",
+  "no_hallucinate_products",
+  "color_strict_recommendations",
+  "inventory_preference",
+  "product_type_accuracy",
+  "airbag_categorization",
+  "brand_preference",
+  "size_in_variant_data_only",
+  "variant_level_stock_accuracy",
+  "brand_diversity",
+  "respect_budget",
+  "no_invented_products",
+  "we_sell_gear_not_vehicles",
+  "no_invented_brands",
+  "verbatim_product_data",
+  "street_default",
+  "helmet_discipline_guardrails",
+  "brand_discipline_routing",
+  "accessory_pairings",
+  "kit_building_flow",
+  "follow_up_product_block",
+  "product_discipline_accuracy",
+];
+
 describe("AI_BEHAVIOR_RULES", () => {
   it("contains all expected rule IDs", () => {
-    const expectedIds = [
-      "multiple_recommendations",
-      "no_discontinued",
-      "no_call_store",
-      "color_fuzzy_matching",
-      "full_text_search",
-      "parse_descriptions",
-      "return_policy",
-      "ebikes",
-      "service_policy",
-      "product_pairings",
-      "conversation_memory",
-      "qualifying_questions",
-      "no_hallucinate_contact",
-      "no_hallucinate_features",
-      "street_default",
-      "accessory_pairings",
-      "follow_up_product_block",
-    ];
     const ruleIds = AI_BEHAVIOR_RULES.map((r) => r.id);
-    for (const id of expectedIds) {
+    for (const id of EXPECTED_RULE_IDS) {
       expect(ruleIds).toContain(id);
     }
+  });
+
+  it("AI_BEHAVIOR_RULES matches expected list exactly (no missing, no extras)", () => {
+    // Bidirectional guard: missing IDs AND extra IDs both fail. If you add a
+    // new rule to lib/ai/rules.ts, you MUST add its id to EXPECTED_RULE_IDS
+    // above. Likewise, removing a rule requires removing it from the list.
+    const ruleIds = [...AI_BEHAVIOR_RULES.map((r) => r.id)].sort();
+    const expected = [...EXPECTED_RULE_IDS].sort();
+    expect(ruleIds).toEqual(expected);
   });
 
   it("every rule has a non-empty label and rule text", () => {

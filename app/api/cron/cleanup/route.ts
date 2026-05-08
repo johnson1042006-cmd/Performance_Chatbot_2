@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runChatHistoryCleanup, sweepStaleSessions } from "@/lib/cleanup";
 import { processDueAiClaims } from "@/lib/sessions/state";
+import { log, serializeError } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
+  const requestId = crypto.randomUUID();
   const secret = process.env.CRON_SECRET;
   if (!secret) {
     return NextResponse.json(
@@ -36,7 +38,7 @@ export async function GET(req: NextRequest) {
       ...(typeof result === "object" && result ? result : {}),
     });
   } catch (error) {
-    console.error("Cron cleanup error:", error);
+    log.error("cron.cleanup_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "Cleanup failed" },
       { status: 500 }

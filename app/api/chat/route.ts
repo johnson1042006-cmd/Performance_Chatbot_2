@@ -14,6 +14,9 @@ import {
 } from "@/lib/sessions/state";
 import { buildPrompt } from "@/lib/ai/buildPrompt";
 import { callClaude } from "@/lib/ai/callClaude";
+import { redactPII } from "@/lib/utils/redactPII";
+import { enforce, getClientIp } from "@/lib/rateLimit";
+import { log, serializeError } from "@/lib/log";
 
 const DEFAULT_FALLBACK_SECONDS = 60;
 
@@ -39,6 +42,7 @@ async function getBotSettings(): Promise<{
 }
 
 export async function POST(req: NextRequest) {
+  const requestId = crypto.randomUUID();
   try {
     const body = await req.json();
     const { message, sessionId, pageContext, role = "customer", agentName } = body;
@@ -54,6 +58,43 @@ export async function POST(req: NextRequest) {
       const authSession = await getServerSession(authOptions);
       if (!authSession?.user) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      }
+    } else {
+      // IP rate limit on customer-originating chat traffic. 20 messages /
+      // 60s per IP. Agents skip this — their per-message cost is bounded by
+      // session staffing, not abuse.
+      const ip = getClientIp(req);
+      const rl = await enforce(`chat:${ip}`, 20, 60);
+      if (!rl.ok) {
+        return NextResponse.json(
+          { error: "rate_limited" },
+          {
+            status: 429,
+            headers: { "Retry-After": String(rl.retryAfter ?? 60) },
+          }
+        );
+      }
+    }
+
+    // Redact PII from CUSTOMER messages only. The persisted DB row, the
+    // pusher broadcast, and any subsequent-turn read pulls the redacted
+    // version; we keep the raw text in `latestMessageRaw` and pass it to
+    // buildPrompt + downstream tools just for THIS turn so the model can
+    // answer about a card the customer just typed without ever storing it.
+    let storedContent: string = message;
+    let redactionHits: string[] = [];
+    let latestMessageRaw: string = message;
+    if (role === "customer") {
+      const r = redactPII(message);
+      storedContent = r.redacted;
+      redactionHits = r.hits;
+      latestMessageRaw = message;
+      if (redactionHits.length > 0) {
+        log.info("chat.pii_redacted", {
+          requestId,
+          sessionId,
+          hits: redactionHits,
+        });
       }
     }
 
@@ -147,10 +188,11 @@ export async function POST(req: NextRequest) {
       await recordCustomerActivity(sessionId);
     }
 
-    // Check if message text contains a SKU pattern
+    // Check if message text contains a SKU pattern. Use the RAW text so a
+    // SKU embedded next to a card number still resolves correctly this turn.
     let productMention = null;
     if (role === "customer") {
-      const detectedSKU = extractSKUFromText(message);
+      const detectedSKU = extractSKUFromText(latestMessageRaw);
       if (detectedSKU) {
         const skuProduct = await getProductBySKU(detectedSKU);
         if (skuProduct) {
@@ -169,8 +211,9 @@ export async function POST(req: NextRequest) {
       .values({
         sessionId,
         role,
-        content: message,
+        content: storedContent,
         pageContext: role === "customer" ? enrichedContext : undefined,
+        redactionHits: role === "customer" ? redactionHits : [],
       })
       .returning();
 
@@ -194,7 +237,11 @@ export async function POST(req: NextRequest) {
         productMention,
       });
     } catch (pusherError) {
-      console.error("Pusher error (non-fatal):", pusherError);
+      log.warn("chat.pusher_failed", {
+        requestId,
+        sessionId,
+        error: serializeError(pusherError),
+      });
     }
 
     // ── Queue / claim decision for customer messages ──────────────────────
@@ -220,8 +267,9 @@ export async function POST(req: NextRequest) {
       try {
         const { system, conversationMessages } = await buildPrompt(
           sessionId,
-          message,
-          enrichedContext
+          storedContent,
+          enrichedContext,
+          latestMessageRaw
         );
         const aiResponse = await callClaude(system, conversationMessages);
         const [aiMsg] = await db
@@ -247,7 +295,11 @@ export async function POST(req: NextRequest) {
           productMention,
         });
       } catch (err) {
-        console.error("Inline AI follow-up failed:", err);
+        log.error("chat.inline_ai_followup_failed", {
+          requestId,
+          sessionId,
+          error: serializeError(err),
+        });
       }
       return NextResponse.json({
         message: savedMessage,
@@ -280,8 +332,9 @@ export async function POST(req: NextRequest) {
         try {
           const { system, conversationMessages } = await buildPrompt(
             sessionId,
-            message,
-            enrichedContext
+            storedContent,
+            enrichedContext,
+            latestMessageRaw
           );
           const aiResponse = await callClaude(system, conversationMessages);
           const [aiMsg] = await db
@@ -316,7 +369,11 @@ export async function POST(req: NextRequest) {
             productMention,
           });
         } catch (err) {
-          console.error("Inline AI response failed:", err);
+          log.error("chat.inline_ai_response_failed", {
+            requestId,
+            sessionId,
+            error: serializeError(err),
+          });
         }
       }
       return NextResponse.json({
@@ -341,7 +398,7 @@ export async function POST(req: NextRequest) {
       productMention,
     });
   } catch (error) {
-    console.error("Chat API error:", error);
+    log.error("chat.unhandled_error", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "Failed to process message" },
       { status: 500 }

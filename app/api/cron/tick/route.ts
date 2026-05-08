@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { processDueAiClaims, sweepStaleSessions } from "@/lib/sessions/state";
+import { log, serializeError } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -9,6 +10,7 @@ export const maxDuration = 60;
  * Also used as a lazy backstop for hobby plans when dashboard polling triggers it.
  */
 export async function GET(req: NextRequest) {
+  const requestId = crypto.randomUUID();
   const secret = process.env.CRON_SECRET;
   if (!secret) {
     return NextResponse.json(
@@ -34,7 +36,7 @@ export async function GET(req: NextRequest) {
       aiClaimed: aiClaimed.status === "fulfilled" ? true : false,
     });
   } catch (error) {
-    console.error("Tick cron error:", error);
+    log.error("cron.tick_failed", { requestId, error: serializeError(error) });
     return NextResponse.json({ error: "Tick failed" }, { status: 500 });
   }
 }

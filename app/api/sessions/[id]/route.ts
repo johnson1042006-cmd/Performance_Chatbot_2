@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { sessions, messages, users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { processDueAiClaims, sweepStaleSessions } from "@/lib/sessions/state";
+import { log, serializeError } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const requestId = crypto.randomUUID();
   try {
     // Lazy tick for this specific session
     await Promise.allSettled([sweepStaleSessions(), processDueAiClaims()]);
@@ -36,7 +38,11 @@ export async function GET(
 
     return NextResponse.json({ session });
   } catch (error) {
-    console.error("Failed to fetch session:", error);
+    log.error("sessions.get_failed", {
+      requestId,
+      sessionId: params.id,
+      error: serializeError(error),
+    });
     return NextResponse.json(
       { error: "Failed to fetch session" },
       { status: 500 }
@@ -48,6 +54,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const requestId = crypto.randomUUID();
   try {
     const authSession = await getServerSession(authOptions);
     if (!authSession?.user || authSession.user.role !== "store_manager") {
@@ -69,7 +76,11 @@ export async function DELETE(
 
     return NextResponse.json({ success: true, id: params.id });
   } catch (error) {
-    console.error("Failed to delete session:", error);
+    log.error("sessions.delete_failed", {
+      requestId,
+      sessionId: params.id,
+      error: serializeError(error),
+    });
     return NextResponse.json(
       { error: "Failed to delete session" },
       { status: 500 }

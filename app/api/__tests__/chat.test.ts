@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ---------------------------------------------------------------------------
@@ -7,18 +8,53 @@ const mockDbSelect = vi.fn();
 const mockDbInsert = vi.fn();
 const mockDbUpdate = vi.fn();
 
+// Proxy-based chain that's BOTH chainable (.from, .set, .where, etc. return
+// the proxy) AND thenable (awaiting the chain at any point invokes the
+// terminal mock). Terminal methods (.limit, .returning, .offset) also
+// invoke the mock directly. This handles every drizzle pattern used by the
+// chat routes including bare `await db.update(...).set(...).where(...)`.
+const chain = (terminal: (...a: any[]) => any) => {
+  const p: any = new Proxy(
+    {},
+    {
+      get(_t, prop) {
+        if (typeof prop === "symbol") return undefined;
+        if (prop === "then") {
+          return (
+            resolve: (v: unknown) => void,
+            reject: (e: unknown) => void,
+          ) => {
+            try {
+              Promise.resolve(terminal()).then(resolve, reject);
+            } catch (err) {
+              reject(err);
+            }
+          };
+        }
+        return (...args: any[]) => {
+          if (["limit", "returning", "offset"].includes(prop)) return terminal(...args);
+          return p;
+        };
+      },
+    },
+  );
+  return () => p;
+};
+
 vi.mock("@/lib/db", () => ({
   db: {
-    select: () => ({ from: () => ({ where: () => ({ limit: () => mockDbSelect() }) }) }),
-    insert: () => ({ values: () => ({ returning: () => mockDbInsert() }) }),
-    update: () => ({ set: () => ({ where: () => mockDbUpdate() }) }),
+    select: chain(mockDbSelect),
+    insert: chain(mockDbInsert),
+    update: chain(mockDbUpdate),
   },
 }));
 
 vi.mock("@/lib/db/schema", () => ({
   sessions: { id: "id", status: "status" },
-  messages: { sessionId: "session_id" },
+  messages: { sessionId: "session_id", role: "role", sentAt: "sent_at" },
   knowledgeBase: { topic: "topic" },
+  users: { id: "id", isActive: "is_active", lastHeartbeatAt: "last_heartbeat_at" },
+  // chatEvents and rateLimitBuckets intentionally omitted — see security.test.ts
 }));
 
 vi.mock("@/lib/pusher/server", () => ({
@@ -55,12 +91,53 @@ vi.mock("@/lib/auth", () => ({
   authOptions: {},
 }));
 
+// Mock @/lib/presence so anyAgentsOnline returns a controllable value
+// without dragging in a `users` schema-mock proxy chain.
+vi.mock("@/lib/presence", () => ({
+  anyAgentsOnline: vi.fn().mockResolvedValue(true),
+  recordAgentHeartbeat: vi.fn().mockResolvedValue(undefined),
+  markAgentOffline: vi.fn().mockResolvedValue(undefined),
+  getOnlineAgents: vi.fn().mockResolvedValue([]),
+  getAllAgentsWithPresence: vi.fn().mockResolvedValue([]),
+  ONLINE_THRESHOLD_SECONDS: 60,
+}));
+
+// Bypass the Postgres-backed rate limiter — it would otherwise consume
+// mockDbInsert queue slots that real tests need.
+vi.mock("@/lib/rateLimit", () => ({
+  enforce: vi.fn().mockResolvedValue({ ok: true }),
+  getClientIp: vi.fn().mockReturnValue("127.0.0.1"),
+}));
+
+// Silence structured-log noise from try/catch'd error paths inside
+// claimByAi/releaseToQueue (they log when chatEvents access fails — which
+// is expected because the schema mock intentionally omits chatEvents to
+// avoid consuming mockDbInsert queues).
+vi.mock("@/lib/log", () => ({
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  serializeError: (err: unknown) =>
+    err instanceof Error
+      ? { name: err.name, message: err.message }
+      : { message: String(err) },
+}));
+
+// Reset between tests so `mockResolvedValueOnce` queues from a previous
+// test (especially failures that didn't consume their mocks) don't poison
+// subsequent tests. clearAllMocks() does NOT clear the once-queue — reset
+// does.
+function resetDbMocks() {
+  mockDbSelect.mockReset().mockResolvedValue([]);
+  mockDbInsert.mockReset().mockResolvedValue([]);
+  mockDbUpdate.mockReset().mockResolvedValue([]);
+}
+
 // ---------------------------------------------------------------------------
 // /api/chat POST tests
 // ---------------------------------------------------------------------------
 describe("POST /api/chat", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetDbMocks();
   });
 
   it("returns 400 when message is missing", async () => {
@@ -138,6 +215,7 @@ describe("POST /api/chat", () => {
 describe("POST /api/chat/ai-fallback", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetDbMocks();
   });
 
   it("returns 400 when sessionId is missing", async () => {
@@ -169,7 +247,11 @@ describe("POST /api/chat/ai-fallback", () => {
   });
 
   it("skips AI when session is active_human", async () => {
-    mockDbSelect.mockResolvedValueOnce([{ id: "sess-1", status: "active_human" }]);
+    // The route checks `claimedByKind === "human"` (the source of truth);
+    // status is derived state. The test session must reflect that.
+    mockDbSelect.mockResolvedValueOnce([
+      { id: "sess-1", status: "active_human", claimedByKind: "human" },
+    ]);
 
     const { NextRequest } = await import("next/server");
     const { POST } = await import("@/app/api/chat/ai-fallback/route");
@@ -187,7 +269,11 @@ describe("POST /api/chat/ai-fallback", () => {
 
   it("sets status to active_ai for waiting sessions", async () => {
     mockDbSelect.mockResolvedValueOnce([{ id: "sess-1", status: "waiting" }]);
-    mockDbUpdate.mockResolvedValueOnce(undefined);
+    // claimByAi does `update(...).returning()` and destructures the first
+    // row — must be an array containing the won session.
+    mockDbUpdate.mockResolvedValueOnce([
+      { id: "sess-1", status: "active_ai", claimedByKind: "ai" },
+    ]);
     mockDbInsert.mockResolvedValueOnce([{
       id: "ai-msg-1", sessionId: "sess-1", role: "ai",
       content: "AI response text", sentAt: new Date(),

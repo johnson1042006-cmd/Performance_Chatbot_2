@@ -11,6 +11,7 @@ import { buildPrompt } from "@/lib/ai/buildPrompt";
 import { callClaude } from "@/lib/ai/callClaude";
 import { messages } from "@/lib/db/schema";
 import { sql } from "drizzle-orm";
+import { log, serializeError } from "@/lib/log";
 
 type ClaimKind = "ai" | "human";
 type SessionStatus = "waiting" | "active_human" | "active_ai" | "closed";
@@ -271,7 +272,10 @@ export async function processDueAiClaims(): Promise<void> {
         kind: "ai",
       });
     } catch (err) {
-      console.error(`AI fallback failed for session ${session.id}:`, err);
+      log.error("sessions.ai_fallback_failed", {
+        sessionId: session.id,
+        error: serializeError(err),
+      });
     }
   }
 }
@@ -332,8 +336,11 @@ export async function sweepStaleSessions(): Promise<number> {
           { reason: "stale" }
         );
       }
-    } catch {
-      // non-fatal
+    } catch (err) {
+      log.warn("sessions.stale_pusher_failed", {
+        staleCount: stale.length,
+        error: serializeError(err),
+      });
     }
   }
 
@@ -358,6 +365,10 @@ async function logChatEvent(opts: {
       metadata: opts.metadata ?? null,
     });
   } catch (err) {
-    console.error("logChatEvent failed (non-fatal):", err);
+    log.error("sessions.log_chat_event_failed", {
+      sessionId: opts.sessionId,
+      type: opts.type,
+      error: serializeError(err),
+    });
   }
 }

@@ -4,8 +4,10 @@ import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { knowledgeBase } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { log, serializeError } from "@/lib/log";
 
 export async function GET() {
+  const requestId = crypto.randomUUID();
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user || session.user.role !== "store_manager") {
@@ -15,7 +17,7 @@ export async function GET() {
     const entries = await db.select().from(knowledgeBase);
     return NextResponse.json({ entries });
   } catch (error) {
-    console.error("Knowledge GET error:", error);
+    log.error("admin.knowledge_get_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "Failed to fetch knowledge base" },
       { status: 500 }
@@ -24,6 +26,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const requestId = crypto.randomUUID();
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user || session.user.role !== "store_manager") {
@@ -51,7 +54,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ entry });
   } catch (error) {
-    console.error("Knowledge POST error:", error);
+    log.error("admin.knowledge_post_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "Failed to save knowledge entry" },
       { status: 500 }
@@ -60,6 +63,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const requestId = crypto.randomUUID();
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user || session.user.role !== "store_manager") {
@@ -76,7 +80,7 @@ export async function DELETE(req: NextRequest) {
     await db.delete(knowledgeBase).where(eq(knowledgeBase.id, id));
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Knowledge DELETE error:", error);
+    log.error("admin.knowledge_delete_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "Failed to delete" },
       { status: 500 }

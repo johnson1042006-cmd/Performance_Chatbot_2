@@ -6,10 +6,12 @@ import { buildPrompt } from "@/lib/ai/buildPrompt";
 import { callClaude, CALL_CLAUDE_ERROR_MESSAGE } from "@/lib/ai/callClaude";
 import { getPusher } from "@/lib/pusher/server";
 import { claimByAi } from "@/lib/sessions/state";
+import { log, serializeError } from "@/lib/log";
 
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
+  const requestId = crypto.randomUUID();
   try {
     const body = await req.json();
     const { sessionId, latestMessage, pageContext } = body;
@@ -64,7 +66,11 @@ export async function POST(req: NextRequest) {
       system = result.system;
       conversationMessages = result.conversationMessages;
     } catch (buildErr) {
-      console.error("buildPrompt failed:", buildErr);
+      log.error("chat.ai_fallback.build_prompt_failed", {
+        requestId,
+        sessionId,
+        error: serializeError(buildErr),
+      });
       return NextResponse.json(
         {
           error:
@@ -114,12 +120,16 @@ export async function POST(req: NextRequest) {
         role: "ai",
       });
     } catch (pusherError) {
-      console.error("Pusher error (non-fatal):", pusherError);
+      log.warn("chat.ai_fallback.pusher_failed", {
+        requestId,
+        sessionId,
+        error: serializeError(pusherError),
+      });
     }
 
     return NextResponse.json({ message: savedMessage });
   } catch (error) {
-    console.error("AI fallback error:", error);
+    log.error("chat.ai_fallback_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "AI fallback failed" },
       { status: 500 }

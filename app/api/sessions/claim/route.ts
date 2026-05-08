@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { sessions } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 import { claimByHuman } from "@/lib/sessions/state";
 import { getPusher } from "@/lib/pusher/server";
+import { log, serializeError } from "@/lib/log";
 
 export async function POST(req: NextRequest) {
+  const requestId = crypto.randomUUID();
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user) {
@@ -18,6 +23,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: "sessionId is required" },
         { status: 400 }
+      );
+    }
+
+    // Existence pre-check: distinguishes "not found" from "claimed by other"
+    // so the dashboard can show the right toast. Mirrors the release route.
+    const [existing] = await db
+      .select()
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .limit(1);
+
+    if (!existing) {
+      return NextResponse.json(
+        { error: "Session not found" },
+        { status: 404 }
       );
     }
 
@@ -50,12 +70,16 @@ export async function POST(req: NextRequest) {
         kind: "human",
       });
     } catch (pusherError) {
-      console.error("Pusher error (non-fatal):", pusherError);
+      log.warn("sessions.claim.pusher_failed", {
+        requestId,
+        sessionId,
+        error: serializeError(pusherError),
+      });
     }
 
     return NextResponse.json({ session: result.session });
   } catch (error) {
-    console.error("Claim error:", error);
+    log.error("sessions.claim_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "Failed to claim session" },
       { status: 500 }

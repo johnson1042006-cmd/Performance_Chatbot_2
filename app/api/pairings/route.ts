@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { findPairings } from "@/lib/search/pairingSearch";
+import { log, serializeError } from "@/lib/log";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -33,6 +34,7 @@ function formatResult(r: Awaited<ReturnType<typeof findPairings>>[number]) {
 }
 
 export async function GET(req: NextRequest) {
+  const requestId = crypto.randomUUID();
   try {
     const singleSku = req.nextUrl.searchParams.get("sku");
     const multiSkus = req.nextUrl.searchParams.get("skus");
@@ -77,7 +79,7 @@ export async function GET(req: NextRequest) {
       }
     );
   } catch (error) {
-    console.error("Public pairings GET error:", error);
+    log.error("pairings.public_get_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "Failed to fetch pairings" },
       { status: 500, headers: CORS_HEADERS }

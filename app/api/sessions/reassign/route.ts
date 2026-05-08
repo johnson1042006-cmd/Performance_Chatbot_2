@@ -6,8 +6,10 @@ import { getPusher } from "@/lib/pusher/server";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { log, serializeError } from "@/lib/log";
 
 export async function POST(req: NextRequest) {
+  const requestId = crypto.randomUUID();
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user || session.user.role !== "store_manager") {
@@ -67,12 +69,16 @@ export async function POST(req: NextRequest) {
         reassigned: true,
       });
     } catch (pusherError) {
-      console.error("Pusher error (non-fatal):", pusherError);
+      log.warn("sessions.reassign.pusher_failed", {
+        requestId,
+        sessionId,
+        error: serializeError(pusherError),
+      });
     }
 
     return NextResponse.json({ session: updated });
   } catch (error) {
-    console.error("Reassign error:", error);
+    log.error("sessions.reassign_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "Failed to reassign session" },
       { status: 500 }

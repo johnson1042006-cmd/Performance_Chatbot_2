@@ -11,7 +11,9 @@ import {
   index,
   serial,
   pgEnum,
+  primaryKey,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const userRoleEnum = pgEnum("user_role", [
   "store_manager",
@@ -59,6 +61,10 @@ export const users = pgTable("users", {
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   lastHeartbeatAt: timestamp("last_heartbeat_at"),
+  // Forces a forced password change on next sign-in. Seeded users are flipped
+  // to true so the default credentials can never persist into production.
+  mustResetPassword: boolean("must_reset_password").notNull().default(false),
+  passwordUpdatedAt: timestamp("password_updated_at"),
 }, (table) => ({
   heartbeatIdx: index("users_heartbeat_idx").on(table.lastHeartbeatAt),
 }));
@@ -97,6 +103,12 @@ export const messages = pgTable("messages", {
   content: text("content").notNull(),
   sentAt: timestamp("sent_at").defaultNow().notNull(),
   pageContext: jsonb("page_context"),
+  // Categories of PII redacted from `content` (e.g. ["card", "email"]). Empty
+  // for agent/AI messages and for clean customer messages.
+  redactionHits: text("redaction_hits")
+    .array()
+    .notNull()
+    .default(sql`'{}'::text[]`),
 }, (table) => ({
   sessionIdSentAtIdx: index("messages_session_id_sent_at_idx").on(table.sessionId, table.sentAt),
 }));
@@ -171,6 +183,19 @@ export const chatEvents = pgTable("chat_events", {
   createdAtIdx: index("chat_events_created_at_idx").on(table.createdAt),
 }));
 
+export const rateLimitBuckets = pgTable(
+  "rate_limit_buckets",
+  {
+    key: text("key").notNull(),
+    windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
+    count: integer("count").notNull().default(0),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.key, table.windowStart] }),
+    windowIdx: index("rate_limit_buckets_window_idx").on(table.windowStart),
+  })
+);
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
@@ -184,3 +209,5 @@ export type LocalCatalogEntry = typeof localCatalog.$inferSelect;
 export type ProductColorway = typeof productColorways.$inferSelect;
 export type ChatEvent = typeof chatEvents.$inferSelect;
 export type NewChatEvent = typeof chatEvents.$inferInsert;
+export type RateLimitBucket = typeof rateLimitBuckets.$inferSelect;
+export type NewRateLimitBucket = typeof rateLimitBuckets.$inferInsert;

@@ -5,10 +5,12 @@ import { db } from "@/lib/db";
 import { sessions, messages } from "@/lib/db/schema";
 import { eq, gte, sql, and, ne, isNull } from "drizzle-orm";
 import { sweepStaleSessions, processDueAiClaims } from "@/lib/sessions/state";
+import { log, serializeError } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const requestId = crypto.randomUUID();
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user) {
@@ -120,7 +122,7 @@ export async function GET() {
       dailyStats,
     });
   } catch (error) {
-    console.error("Analytics error:", error);
+    log.error("analytics.get_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "Failed to fetch analytics" },
       { status: 500 }

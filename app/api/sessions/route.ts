@@ -3,8 +3,11 @@ import { db } from "@/lib/db";
 import { sessions, users } from "@/lib/db/schema";
 import { asc, desc, eq, ne } from "drizzle-orm";
 import { processDueAiClaims, sweepStaleSessions } from "@/lib/sessions/state";
+import { enforce, getClientIp } from "@/lib/rateLimit";
+import { log, serializeError } from "@/lib/log";
 
 export async function GET() {
+  const requestId = crypto.randomUUID();
   try {
     // Lazy tick: expire stale sessions and process AI claims
     await Promise.allSettled([sweepStaleSessions(), processDueAiClaims()]);
@@ -49,7 +52,7 @@ export async function GET() {
 
     return NextResponse.json({ sessions: enriched, unclaimedCount });
   } catch (error) {
-    console.error("Failed to fetch sessions:", error);
+    log.error("sessions.list_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "Failed to fetch sessions" },
       { status: 500 }
@@ -58,7 +61,22 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const requestId = crypto.randomUUID();
   try {
+    // IP rate limit: 5 new sessions per minute per IP. Caps abuse from a
+    // single client trying to spawn endless conversations.
+    const ip = getClientIp(req);
+    const rl = await enforce(`sessions:${ip}`, 5, 60);
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: "rate_limited" },
+        {
+          status: 429,
+          headers: { "Retry-After": String(rl.retryAfter ?? 60) },
+        }
+      );
+    }
+
     const body = await req.json();
     const { customerIdentifier, pageContext } = body;
 
@@ -89,7 +107,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ session }, { status: 201 });
   } catch (error) {
-    console.error("Failed to create session:", error);
+    log.error("sessions.create_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "Failed to create session" },
       { status: 500 }

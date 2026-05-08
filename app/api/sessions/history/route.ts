@@ -4,10 +4,12 @@ import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { sessions, messages } from "@/lib/db/schema";
 import { desc, eq, sql, and } from "drizzle-orm";
+import { log, serializeError } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
+  const requestId = crypto.randomUUID();
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user) {
@@ -57,7 +59,7 @@ export async function GET(req: NextRequest) {
       totalPages: Math.ceil((total?.count || 0) / limit),
     });
   } catch (error) {
-    console.error("History error:", error);
+    log.error("sessions.history_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "Failed to fetch history" },
       { status: 500 }

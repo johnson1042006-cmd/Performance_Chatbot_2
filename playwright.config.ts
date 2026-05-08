@@ -10,6 +10,11 @@ const useExternalServer = !!process.env.E2E_BASE_URL;
 
 export default defineConfig({
   testDir: "./e2e",
+  testIgnore: ["**/global-setup.ts"],
+  // Clear the mustResetPassword flag on seeded test users before any test
+  // runs, so the smoke suite can log straight into /dashboard. See
+  // e2e/global-setup.ts for the reasoning.
+  globalSetup: "./e2e/global-setup.ts",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

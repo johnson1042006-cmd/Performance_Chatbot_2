@@ -11,15 +11,32 @@ const mockDbInsert = vi.fn();
 const mockDbUpdate = vi.fn();
 const mockDbDelete = vi.fn();
 
+// Proxy is BOTH chainable AND thenable. Method calls (e.g. .from, .where,
+// .set, .leftJoin, .onConflictDoUpdate) return the proxy. Calls to terminal
+// methods (.limit, .returning, .offset) invoke the mock fn directly.
+// Awaiting the chain at any point also invokes the mock — that handles
+// places like `await db.update(...).set(...).where(...)` that don't end
+// in .returning().
 const chain = (terminal: (...a: any[]) => any) => {
   const p: any = new Proxy(
     {},
     {
       get(_t, prop) {
         if (typeof prop === "symbol") return undefined;
+        if (prop === "then") {
+          return (
+            resolve: (v: unknown) => void,
+            reject: (e: unknown) => void,
+          ) => {
+            try {
+              Promise.resolve(terminal()).then(resolve, reject);
+            } catch (err) {
+              reject(err);
+            }
+          };
+        }
         return (...args: any[]) => {
-          if (["limit", "returning"].includes(prop)) return terminal(...args);
-          if (prop === "offset") return terminal(...args);
+          if (["limit", "returning", "offset"].includes(prop)) return terminal(...args);
           return p;
         };
       },
@@ -44,6 +61,12 @@ vi.mock("@/lib/db/schema", () => ({
   users: { id: "id", email: "email", name: "name", role: "role", isActive: "is_active", createdAt: "created_at" },
   products: { sku: "sku" },
   productPairings: { id: "id" },
+  // chatEvents and rateLimitBuckets are intentionally NOT exported here.
+  // logChatEvent wraps its insert in try/catch and rateLimit.enforce fails
+  // open — both gracefully tolerate the missing schema. Mocking
+  // @/lib/rateLimit below short-circuits that path entirely so the rate
+  // limiter never touches the (also-mocked) `db.insert` chain and can't
+  // consume mockDbInsert queues that tests need for actual message inserts.
 }));
 
 vi.mock("@/lib/pusher/server", () => ({
@@ -77,6 +100,35 @@ vi.mock("bcryptjs", () => ({
   default: { hash: vi.fn().mockResolvedValue("hashed"), compare: vi.fn() },
 }));
 
+// Bypass the Postgres-backed rate limiter so unit tests don't pull on the
+// mocked `db.insert` queue or require `rateLimitBuckets` in the schema mock.
+// The 21st-call/429 behavior is covered by the e2e suite.
+vi.mock("@/lib/rateLimit", () => ({
+  enforce: vi.fn().mockResolvedValue({ ok: true }),
+  getClientIp: vi.fn().mockReturnValue("127.0.0.1"),
+}));
+
+// Silence structured-log noise from try/catch'd error paths (e.g. when
+// chatEvents access fails inside logChatEvent — expected, because the
+// schema mock intentionally omits chatEvents).
+vi.mock("@/lib/log", () => ({
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  serializeError: (err: unknown) =>
+    err instanceof Error
+      ? { name: err.name, message: err.message }
+      : { message: String(err) },
+}));
+
+// Reset between tests so a queued `mockResolvedValueOnce` from a failing
+// earlier test cannot poison the next one. clearAllMocks() does NOT clear
+// the once-queue — mockReset() does.
+function resetDbMocks() {
+  mockDbSelect.mockReset().mockResolvedValue([]);
+  mockDbInsert.mockReset().mockResolvedValue([]);
+  mockDbUpdate.mockReset().mockResolvedValue([]);
+  mockDbDelete.mockReset().mockResolvedValue([]);
+}
+
 // Helpers ---------------------------------------------------------------
 function makeReq(url: string, method = "POST", body?: object) {
   const { NextRequest } = require("next/server");
@@ -101,7 +153,10 @@ async function mockSession(role: "store_manager" | "support_agent" | null) {
 // 1. Protected routes — must return 401 for unauthenticated requests
 // =======================================================================
 describe("Unauthenticated access to protected routes", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetDbMocks();
+  });
 
   const protectedGets: [string, string][] = [
     ["GET /api/analytics", "@/app/api/analytics/route"],
@@ -168,7 +223,10 @@ describe("Unauthenticated access to protected routes", () => {
 // 2. Agent (support_agent) accessing manager-only routes — must get 401
 // =======================================================================
 describe("Agent access to manager-only routes", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetDbMocks();
+  });
 
   const managerGets: [string, string][] = [
     ["GET /api/admin/settings", "@/app/api/admin/settings/route"],
@@ -228,13 +286,28 @@ describe("Agent access to manager-only routes", () => {
 // 3. Business logic security
 // =======================================================================
 describe("Business logic security", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetDbMocks();
+  });
 
   it("POST /api/sessions/claim returns 409 when claimed by another agent", async () => {
     await mockSession("support_agent");
-    mockDbSelect.mockResolvedValueOnce([
-      { id: "s1", status: "active_human", claimedByUserId: "other-agent" },
-    ]);
+    // 1st select: the route's existence pre-check
+    // 2nd select: claimByHuman's "lost the race" select with leftJoin
+    mockDbSelect
+      .mockResolvedValueOnce([
+        { id: "s1", status: "active_human", claimedByUserId: "other-agent" },
+      ])
+      .mockResolvedValueOnce([
+        {
+          session: { id: "s1", status: "active_human", claimedByUserId: "other-agent" },
+          holderName: "Other Agent",
+          holderId: "other-agent",
+        },
+      ]);
+    // claimByHuman's atomic update finds 0 rows (already claimed by other)
+    mockDbUpdate.mockResolvedValueOnce([]);
 
     const { POST } = await import("@/app/api/sessions/claim/route");
     const res = await POST(makeReq("http://localhost/api/sessions/claim", "POST", { sessionId: "s1" }));
@@ -340,7 +413,10 @@ describe("Business logic security", () => {
 // 4. Public route input validation
 // =======================================================================
 describe("Public route input validation", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetDbMocks();
+  });
 
   it("POST /api/chat returns 400 when message is missing", async () => {
     const { POST } = await import("@/app/api/chat/route");

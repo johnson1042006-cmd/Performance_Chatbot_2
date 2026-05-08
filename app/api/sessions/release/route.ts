@@ -8,6 +8,7 @@ import { releaseToQueue } from "@/lib/sessions/state";
 import { anyAgentsOnline } from "@/lib/presence";
 import { knowledgeBase } from "@/lib/db/schema";
 import { getPusher } from "@/lib/pusher/server";
+import { log, serializeError } from "@/lib/log";
 
 const DEFAULT_FALLBACK_SECONDS = 60;
 
@@ -28,6 +29,7 @@ async function getFallbackSeconds(): Promise<number | null> {
 }
 
 export async function POST(req: NextRequest) {
+  const requestId = crypto.randomUUID();
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user) {
@@ -92,12 +94,16 @@ export async function POST(req: NextRequest) {
       });
       await pusher.trigger("dashboard", "session-released", { sessionId });
     } catch (pusherError) {
-      console.error("Pusher error (non-fatal):", pusherError);
+      log.warn("sessions.release.pusher_failed", {
+        requestId,
+        sessionId,
+        error: serializeError(pusherError),
+      });
     }
 
     return NextResponse.json({ session: updated });
   } catch (error) {
-    console.error("Release error:", error);
+    log.error("sessions.release_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "Failed to release session" },
       { status: 500 }

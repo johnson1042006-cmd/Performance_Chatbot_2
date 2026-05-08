@@ -5,8 +5,10 @@ import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import bcrypt from "bcryptjs";
+import { log, serializeError } from "@/lib/log";
 
 export async function GET() {
+  const requestId = crypto.randomUUID();
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user || session.user.role !== "store_manager") {
@@ -26,7 +28,7 @@ export async function GET() {
 
     return NextResponse.json({ users: allUsers });
   } catch (error) {
-    console.error("Users GET error:", error);
+    log.error("admin.users_get_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "Failed to fetch users" },
       { status: 500 }
@@ -35,6 +37,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const requestId = crypto.randomUUID();
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user || session.user.role !== "store_manager") {
@@ -67,7 +70,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ user }, { status: 201 });
   } catch (error) {
-    console.error("Users POST error:", error);
+    log.error("admin.users_post_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "Failed to create user" },
       { status: 500 }
@@ -76,6 +79,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
+  const requestId = crypto.randomUUID();
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user || session.user.role !== "store_manager") {
@@ -115,7 +119,7 @@ export async function PATCH(req: NextRequest) {
 
     return NextResponse.json({ user: updated });
   } catch (error) {
-    console.error("Users PATCH error:", error);
+    log.error("admin.users_patch_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "Failed to update user" },
       { status: 500 }

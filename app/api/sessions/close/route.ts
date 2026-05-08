@@ -5,8 +5,10 @@ import { db } from "@/lib/db";
 import { sessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { getPusher } from "@/lib/pusher/server";
+import { log, serializeError } from "@/lib/log";
 
 export async function POST(req: NextRequest) {
+  const requestId = crypto.randomUUID();
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user) {
@@ -37,12 +39,16 @@ export async function POST(req: NextRequest) {
       await pusher.trigger("dashboard", "session-closed", { sessionId });
       await pusher.trigger(`session-${sessionId}`, "session-closed", {});
     } catch (pusherError) {
-      console.error("Pusher error:", pusherError);
+      log.warn("sessions.close.pusher_failed", {
+        requestId,
+        sessionId,
+        error: serializeError(pusherError),
+      });
     }
 
     return NextResponse.json({ session: updated });
   } catch (error) {
-    console.error("Close error:", error);
+    log.error("sessions.close_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "Failed to close session" },
       { status: 500 }

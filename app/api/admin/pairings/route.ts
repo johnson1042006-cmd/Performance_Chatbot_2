@@ -4,8 +4,10 @@ import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { productPairings, products } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { log, serializeError } from "@/lib/log";
 
 export async function GET() {
+  const requestId = crypto.randomUUID();
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user || session.user.role !== "store_manager") {
@@ -36,7 +38,7 @@ export async function GET() {
 
     return NextResponse.json({ pairings: enriched });
   } catch (error) {
-    console.error("Pairings GET error:", error);
+    log.error("admin.pairings_get_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "Failed to fetch pairings" },
       { status: 500 }
@@ -45,6 +47,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const requestId = crypto.randomUUID();
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user || session.user.role !== "store_manager") {
@@ -68,7 +71,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ pairing });
   } catch (error) {
-    console.error("Pairings POST error:", error);
+    log.error("admin.pairings_post_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "Failed to create pairing" },
       { status: 500 }
@@ -77,6 +80,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const requestId = crypto.randomUUID();
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user || session.user.role !== "store_manager") {
@@ -93,7 +97,7 @@ export async function DELETE(req: NextRequest) {
     await db.delete(productPairings).where(eq(productPairings.id, id));
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Pairings DELETE error:", error);
+    log.error("admin.pairings_delete_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "Failed to delete pairing" },
       { status: 500 }

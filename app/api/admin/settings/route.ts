@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { knowledgeBase } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { log, serializeError } from "@/lib/log";
 
 const DEFAULT_SETTINGS = {
   aiEnabled: true,
@@ -12,6 +13,7 @@ const DEFAULT_SETTINGS = {
 };
 
 export async function GET() {
+  const requestId = crypto.randomUUID();
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user || session.user.role !== "store_manager") {
@@ -35,7 +37,7 @@ export async function GET() {
       return NextResponse.json({ settings: DEFAULT_SETTINGS });
     }
   } catch (error) {
-    console.error("Settings GET error:", error);
+    log.error("admin.settings_get_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "Failed to fetch settings" },
       { status: 500 }
@@ -44,6 +46,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const requestId = crypto.randomUUID();
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user || session.user.role !== "store_manager") {
@@ -73,7 +76,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ settings: body });
   } catch (error) {
-    console.error("Settings POST error:", error);
+    log.error("admin.settings_post_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "Failed to save settings" },
       { status: 500 }

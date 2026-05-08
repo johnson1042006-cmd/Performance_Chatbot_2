@@ -219,8 +219,14 @@ async function fetchContextProduct(
 export async function buildPrompt(
   sessionId: string,
   latestMessage: string,
-  pageContext?: PageContext | null
+  pageContext?: PageContext | null,
+  latestMessageRaw?: string
 ): Promise<PromptResult> {
+  // Caller passes the un-redacted current-turn message as `latestMessageRaw`
+  // so the model can answer about PII in this turn (e.g. "your card 4111…")
+  // even though the persisted history is redacted. Falls back to the redacted
+  // version when no raw text is provided (e.g. AI auto-claim sweeps).
+  const effectiveRaw = latestMessageRaw ?? latestMessage;
   const [recentRows, knowledge, contextProduct] =
     await Promise.all([
       db
@@ -239,7 +245,7 @@ export async function buildPrompt(
     .filter((m: Message) => m.role === "customer")
     .map((m: Message) => m.content);
 
-  const effectiveLatest = latestMessage?.trim()
+  const effectiveLatest = effectiveRaw?.trim()
     || customerMessages[customerMessages.length - 1]
     || "";
 
@@ -527,10 +533,12 @@ ${AI_BEHAVIOR_RULES.map((r, i) => `${i + 1}. ${r.rule}`).join("\n\n")}
     }));
 
   // Guard against empty latestMessage so we never send empty user content
-  // to the Anthropic API (it 400s).
-  const trimmedLatest = (latestMessage || "").trim();
+  // to the Anthropic API (it 400s). Push the RAW current-turn text so the
+  // model sees PII (e.g. card numbers) in this single response cycle even
+  // though the persisted DB content is redacted.
+  const trimmedLatest = (effectiveRaw || "").trim();
   if (trimmedLatest.length > 0) {
-    conversationMessages.push({ role: "user", content: latestMessage });
+    conversationMessages.push({ role: "user", content: effectiveRaw });
   } else if (
     conversationMessages.length === 0 ||
     conversationMessages[conversationMessages.length - 1].role !== "user"
@@ -538,7 +546,7 @@ ${AI_BEHAVIOR_RULES.map((r, i) => `${i + 1}. ${r.rule}`).join("\n\n")}
     conversationMessages.push({ role: "user", content: "(no message)" });
   }
 
-  const inlineSKU = extractSKUFromText(latestMessage);
+  const inlineSKU = extractSKUFromText(effectiveRaw);
   if (inlineSKU && (!contextProduct || contextProduct.sku !== inlineSKU)) {
     const inlineProduct = await safeFetch(() => getProductBySKU(inlineSKU), null);
     if (inlineProduct) {
