@@ -86,6 +86,11 @@ export const sessions = pgTable("sessions", {
   lastCustomerActivityAt: timestamp("last_customer_activity_at").defaultNow().notNull(),
   // Heartbeat from the embed widget while the tab is open
   lastHeartbeatAt: timestamp("last_heartbeat_at"),
+  // Captured via the contact-capture flow (chip "Talk to a human" / transcript email).
+  // Mirrored on the session for fast manager-side lookups; canonical record lives
+  // in customer_contacts (one session may have multiple contact captures over time).
+  customerEmail: varchar("customer_email", { length: 255 }),
+  customerName: varchar("customer_name", { length: 255 }),
 }, (table) => ({
   aiClaimDueIdx: index("sessions_ai_claim_due_idx").on(table.aiClaimDueAt),
   customerIdentifierIdx: index("sessions_customer_identifier_idx").on(table.customerIdentifier),
@@ -196,6 +201,56 @@ export const rateLimitBuckets = pgTable(
   })
 );
 
+// Captures a customer's email (and optionally phone/name) for follow-up.
+// Created via the embed contact-capture form ("Talk to a human" with no
+// agents online, or the transcript-email button on the end-of-session card).
+// `consent` is required true at the API layer; storing the bool gives us
+// audit traceability if a customer later disputes communications.
+export const customerContacts = pgTable(
+  "customer_contacts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => sessions.id),
+    email: varchar("email", { length: 255 }).notNull(),
+    phone: varchar("phone", { length: 32 }),
+    name: varchar("name", { length: 255 }),
+    consent: boolean("consent").notNull().default(false),
+    capturedAt: timestamp("captured_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    sessionIdIdx: index("customer_contacts_session_id_idx").on(table.sessionId),
+    // Functional index on lower(email) so case-insensitive lookups match.
+    emailLowerIdx: index("customer_contacts_email_lower_idx").on(
+      sql`lower(${table.email})`
+    ),
+  })
+);
+
+// Customer-submitted CSAT for a session. Rating is a string ("up" | "down")
+// rather than an enum so future ratings ("neutral", numeric, etc.) don't
+// require a schema migration.
+export const feedback = pgTable(
+  "feedback",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => sessions.id),
+    rating: varchar("rating", { length: 8 }).notNull(),
+    comment: text("comment"),
+    submittedAt: timestamp("submitted_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    sessionIdIdx: index("feedback_session_id_idx").on(table.sessionId),
+  })
+);
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
@@ -211,3 +266,7 @@ export type ChatEvent = typeof chatEvents.$inferSelect;
 export type NewChatEvent = typeof chatEvents.$inferInsert;
 export type RateLimitBucket = typeof rateLimitBuckets.$inferSelect;
 export type NewRateLimitBucket = typeof rateLimitBuckets.$inferInsert;
+export type CustomerContact = typeof customerContacts.$inferSelect;
+export type NewCustomerContact = typeof customerContacts.$inferInsert;
+export type Feedback = typeof feedback.$inferSelect;
+export type NewFeedback = typeof feedback.$inferInsert;

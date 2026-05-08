@@ -5,6 +5,11 @@ interface MessageBubbleProps {
   content: string;
   agentName?: string;
   sentAt?: string;
+  // Persona props are pulled from /api/embed/config at the widget level and
+  // forwarded here. Defaults match the seeded `bot_persona` knowledge_base
+  // entry so the UI degrades gracefully if the config fetch fails.
+  personaName?: string;
+  personaAvatarUrl?: string;
 }
 
 export default function MessageBubble({
@@ -12,9 +17,28 @@ export default function MessageBubble({
   content,
   agentName,
   sentAt,
+  personaName,
+  personaAvatarUrl,
 }: MessageBubbleProps) {
   const isCustomer = role === "customer";
   const isAI = role === "ai";
+
+  // For AI messages we display the persona (Jake) like a regular agent so the
+  // customer doesn't feel like they're talking to a bot. The purple left
+  // border and "AI" chip are intentionally gone — manager dashboard still
+  // labels the message AI via the message-ai data-testid. Falls back to
+  // "Assistant" if no persona was supplied.
+  const displayName = isAI
+    ? personaName || "Assistant"
+    : agentName || "Agent";
+  const displayAvatar = isAI ? personaAvatarUrl : undefined;
+  const initials = displayName
+    .split(" ")
+    .map((w) => w[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
 
   return (
     <div
@@ -24,22 +48,25 @@ export default function MessageBubble({
       <div className="max-w-[80%]">
         {!isCustomer && (
           <div className="flex items-center gap-1.5 mb-1">
-            {isAI && (
-              <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded bg-purple-100 text-purple-700">
-                AI
+            {displayAvatar ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={displayAvatar}
+                alt={displayName}
+                className="w-5 h-5 rounded-full bg-gray-200 object-cover"
+              />
+            ) : (
+              <span className="w-5 h-5 rounded-full bg-gray-300 text-white text-[9px] font-semibold flex items-center justify-center">
+                {initials || "?"}
               </span>
             )}
-            <span className="text-xs text-text-secondary">
-              {isAI ? "AI Assistant" : agentName || "Agent"}
-            </span>
+            <span className="text-xs text-text-secondary">{displayName}</span>
           </div>
         )}
         <div
           className={`px-3.5 py-2.5 text-sm leading-relaxed ${
             isCustomer
               ? "bg-accent text-white rounded-2xl rounded-br-md"
-              : isAI
-              ? "bg-white border border-purple-200 rounded-2xl rounded-bl-md border-l-2 border-l-ai-badge"
               : "bg-white border border-border rounded-2xl rounded-bl-md"
           }`}
         >

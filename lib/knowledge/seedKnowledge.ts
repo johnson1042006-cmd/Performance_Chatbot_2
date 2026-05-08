@@ -2,9 +2,24 @@ import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { knowledgeBase } from "../db/schema";
 
-export const entries = [
+interface KnowledgeSeed {
+  topic: string;
+  content: string;
+  // When true, seed will overwrite the live row's content. Default false
+  // means seed runs are first-write-wins so manager edits in the dashboard
+  // stick. Use sparingly: only for entries where the seed text is the
+  // authoritative source of truth (e.g. the return_policy 60-day fix).
+  forceUpdate?: boolean;
+}
+
+export const entries: KnowledgeSeed[] = [
   {
     topic: "return_policy",
+    // Force-updated on every seed run because we've discovered an outdated
+    // 30-day reference still circulating on FAQ-style pages. Keep the
+    // /returns-exchanges/ source-of-truth language in sync here so the AI
+    // never quotes 30 days regardless of what hand-edits a manager makes.
+    forceUpdate: true,
     content: `PERFORMANCE CYCLE RETURN & EXCHANGE POLICY (verbatim from performancecycle.com/returns-exchanges):
 
 RETURN WINDOW:
@@ -72,7 +87,9 @@ LINKS:
 - Return Form (PDF): https://performancecycle.com/content/Online%20Return%20Form.pdf
 - Questions: 303-744-2011
 
-CRITICAL FOR THE AI: Quote this policy VERBATIM. Do not paraphrase, summarize, or "round" any number. Specifically: the return window is 60 DAYS (NOT 30). Helmets are EXCHANGE ONLY (worn or unworn helmets cannot be refunded — exchange is allowed only for unworn helmets). There is NO 45-day exchange window — that is a hallucinated number, never use it. If a customer asks something not directly answered above, link them to the Returns & Exchanges page rather than guessing.`,
+CRITICAL FOR THE AI: Quote this policy VERBATIM. Do not paraphrase, summarize, or "round" any number. Specifically: the return window is 60 DAYS (NOT 30). Helmets are EXCHANGE ONLY (worn or unworn helmets cannot be refunded — exchange is allowed only for unworn helmets). There is NO 45-day exchange window — that is a hallucinated number, never use it. If a customer asks something not directly answered above, link them to the Returns & Exchanges page rather than guessing.
+
+If you see a 30-day reference anywhere (including the FAQ page), that is OUTDATED. The authoritative return window from /returns-exchanges/ is 60 DAYS. Always answer 60 days.`,
   },
   {
     topic: "ebike_info",
@@ -367,6 +384,87 @@ LINKS:
 
 CRITICAL FOR THE AI: When asked about shipping, lead with the $99 free shipping threshold and the per-tire surcharge if relevant. NEVER invent international rates, expedited rates, or specific delivery times — those are not in this entry. If a customer asks about something not covered above (international, expedited, specific transit time), say "I don't have specifics on [topic] in my notes — give the team a call at 303-744-2011 or check https://performancecycle.com/shipping-info/" rather than guessing.`,
   },
+  {
+    topic: "shipping_geography",
+    content: `Performance Cycle ships to the lower 48 US states ONLY via UPS ground. We DO NOT ship to Alaska, Hawaii, Puerto Rico, APO/FPO addresses, or any international destination. If asked, say so directly — do not promise to check.`,
+  },
+  {
+    topic: "payment_methods",
+    content: `We accept all major credit cards (Visa, Mastercard, AmEx, Discover) and PayPal. We do NOT accept personal checks, business checks, money orders, or travelers' checks.`,
+  },
+  {
+    topic: "gift_cards",
+    content: `Physical gift cards purchased online can ONLY be redeemed in-store at 7375 S. Fulton St., Centennial CO 80112 — they cannot be redeemed at performancecycle.com checkout. This is a frequent customer surprise; be empathetic when explaining.`,
+  },
+  {
+    topic: "financing",
+    forceUpdate: true,
+    content: `FINANCING AT PERFORMANCE CYCLE:
+
+We offer buy-now-pay-later financing through AFFIRM ONLY at checkout for qualifying orders.
+
+IMPORTANT — DO NOT MENTION KLARNA, AFTERPAY, OR SEZZLE:
+We do NOT offer Klarna, Afterpay, or Sezzle. If a customer asks about any of those services, correct them directly: "We don't offer [Klarna/Afterpay/Sezzle] — our financing option at checkout is Affirm."
+
+HOW AFFIRM WORKS:
+Affirm financing is presented as a payment option at checkout. Approval and terms (rate, down payment, loan duration) depend on Affirm's own underwriting — do NOT quote specific APRs, monthly payments, or guarantee approval.
+
+WHAT TO SAY:
+"We offer Affirm financing at checkout — you'll see it as a payment option when you check out. Affirm makes the credit decision on their end, so I can't quote you a rate, but it only takes a moment to see if you qualify."
+
+Do NOT promise that every order qualifies. Do NOT invent specific installment amounts.`,
+  },
+  {
+    topic: "bopis",
+    forceUpdate: true,
+    content: `BUY ONLINE, PICK UP IN STORE (BOPIS) AT PERFORMANCE CYCLE:
+
+Customers can place an order on performancecycle.com and pick it up in person at our Centennial, CO store — no shipping charge for pickup orders.
+
+HOW IT WORKS:
+1. Shop online at performancecycle.com and add items to your cart.
+2. At checkout, select the "Pick Up In Store" shipping option.
+3. We'll prepare your order and send a ready-for-pickup notification.
+4. Pick up at: 7375 S. Fulton St., Centennial, CO 80112 during store hours.
+
+STORE HOURS (for pickup):
+- Mon–Fri: 9:00 AM – 6:00 PM MST
+- Saturday: 9:00 AM – 5:00 PM MST
+- Sunday: Contact us to confirm (303-744-2011)
+
+WHAT TO SAY when a customer asks about in-store pickup or picking up online orders:
+"Yes! You can pick up online orders at our Centennial store — just select 'Pick Up In Store' at checkout. We'll get it ready for you and send a notification when it's waiting. The store is at 7375 S. Fulton St., Centennial, CO 80112."
+
+CRITICAL: BOPIS is available ONLY at the Centennial location. We do not have multiple storefronts.`,
+  },
+  {
+    topic: "bicycles_disclaimer",
+    content: `Performance Cycle sells motorcycle parts, accessories, apparel, and ebikes ONLY. We do not sell or service traditional pedal bicycles. If asked, redirect politely.`,
+  },
+  {
+    topic: "helmet_sizing_guide",
+    content: `For any "what size helmet do I need" question, link the customer to https://performancecycle.com/helmet-sizing-guide/ — never invent sizing logic.`,
+  },
+  {
+    topic: "tire_wheel_services",
+    content: `Performance Cycle does in-store tire mounting and wheel services. For specific bike fitment, link customers to https://performancecycle.com/tire-and-wheel-services/ — in-store visit is the recommended path.`,
+  },
+  {
+    topic: "motobucks",
+    content: `Performance Cycle has a loyalty program called Motobucks. Look for the "Earn Motobucks" button on performancecycle.com. (Detailed rules pending — for now confirm it exists and point to the site.)`,
+  },
+  {
+    // Manager-editable JSON describing the bot's customer-facing identity.
+    // Read by /api/embed/config and surfaced in the chat widget on every
+    // AI message. Editing this in the KB dashboard hot-swaps the persona
+    // at the next config-cache refresh (60s) without a deploy.
+    topic: "bot_persona",
+    content: JSON.stringify({
+      name: "Jake",
+      title: "Product Specialist",
+      avatarUrl: "/jake-avatar.svg",
+    }),
+  },
 ];
 
 export async function seedKnowledge() {
@@ -374,11 +472,22 @@ export async function seedKnowledge() {
   const db = drizzle(sql);
 
   for (const entry of entries) {
-    await db
-      .insert(knowledgeBase)
-      .values(entry)
-      // Seed is first-run only. Edit KB via the dashboard.
-      .onConflictDoNothing();
+    const { forceUpdate, ...row } = entry;
+    if (forceUpdate) {
+      await db
+        .insert(knowledgeBase)
+        .values(row)
+        .onConflictDoUpdate({
+          target: knowledgeBase.topic,
+          set: { content: row.content, updatedAt: new Date() },
+        });
+    } else {
+      await db
+        .insert(knowledgeBase)
+        .values(row)
+        // Seed is first-run only by default. Edit KB via the dashboard.
+        .onConflictDoNothing();
+    }
   }
 
   console.log(`Seeded ${entries.length} knowledge base entries`);

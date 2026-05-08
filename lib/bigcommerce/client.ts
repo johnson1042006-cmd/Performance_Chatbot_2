@@ -2,20 +2,39 @@ function getBaseUrl() {
   return `https://api.bigcommerce.com/stores/${process.env.BIGCOMMERCE_STORE_HASH}/v3`;
 }
 
+function getV2BaseUrl() {
+  return `https://api.bigcommerce.com/stores/${process.env.BIGCOMMERCE_STORE_HASH}/v2`;
+}
+
 interface BCRequestOptions {
   path: string;
   params?: Record<string, string | number>;
 }
 
-async function bcFetch<T>(options: BCRequestOptions): Promise<T | null> {
-  const url = new URL(`${getBaseUrl()}${options.path}`);
-  if (options.params) {
-    for (const [key, value] of Object.entries(options.params)) {
-      url.searchParams.set(key, String(value));
-    }
-  }
-
+/**
+ * Wrap a fetch-returning thunk so any throw or non-OK response collapses to
+ * `null`. Used by both the v3 and v2 BigCommerce fetchers — every public
+ * fetcher in this module returns `T | null`, never throws, so callers can
+ * branch on the absence value without try/catch noise at every call site.
+ */
+async function safeFetch<T>(fn: () => Promise<T>): Promise<T | null> {
   try {
+    return await fn();
+  } catch (error) {
+    console.error("BigCommerce safeFetch error:", error);
+    return null;
+  }
+}
+
+async function bcFetch<T>(options: BCRequestOptions): Promise<T | null> {
+  return safeFetch<T>(async () => {
+    const url = new URL(`${getBaseUrl()}${options.path}`);
+    if (options.params) {
+      for (const [key, value] of Object.entries(options.params)) {
+        url.searchParams.set(key, String(value));
+      }
+    }
+
     const res = await fetch(url.toString(), {
       headers: {
         "X-Auth-Token": process.env.BIGCOMMERCE_ACCESS_TOKEN!,
@@ -26,16 +45,54 @@ async function bcFetch<T>(options: BCRequestOptions): Promise<T | null> {
     });
 
     if (!res.ok) {
-      console.error(`BigCommerce API error: ${res.status} ${res.statusText} for ${options.path}`);
-      return null;
+      console.error(`BigCommerce v3 API error: ${res.status} ${res.statusText} for ${options.path}`);
+      // safeFetch returns null when this throws.
+      throw new Error(`bc_v3_${res.status}`);
     }
 
     const json = await res.json();
     return json.data as T;
-  } catch (error) {
-    console.error("BigCommerce fetch error:", error);
-    return null;
-  }
+  });
+}
+
+/**
+ * BC v2 fetcher. Differences from v3:
+ *  - Different base path (.../v2 vs .../v3).
+ *  - Response body IS the array/object directly (no `{ data }` envelope).
+ *  - 204 No Content is a normal response when a collection is empty
+ *    (e.g. `/orders/{id}/shipments` for an order with no shipments yet) —
+ *    we surface that as `null` so callers can `?? []`.
+ *  - 30-second Next.js cache hint (vs v3's 60s) — order data changes faster
+ *    than catalog data, but caching at all keeps a customer who reloads
+ *    the same lookup from re-hitting BC.
+ */
+async function bcFetchV2<T>(options: BCRequestOptions): Promise<T | null> {
+  return safeFetch<T>(async () => {
+    const url = new URL(`${getV2BaseUrl()}${options.path}`);
+    if (options.params) {
+      for (const [key, value] of Object.entries(options.params)) {
+        url.searchParams.set(key, String(value));
+      }
+    }
+
+    const res = await fetch(url.toString(), {
+      headers: {
+        "X-Auth-Token": process.env.BIGCOMMERCE_ACCESS_TOKEN!,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      next: { revalidate: 30 },
+    });
+
+    if (res.status === 204) return null as unknown as T;
+
+    if (!res.ok) {
+      console.error(`BigCommerce v2 API error: ${res.status} ${res.statusText} for ${options.path}`);
+      throw new Error(`bc_v2_${res.status}`);
+    }
+
+    return (await res.json()) as T;
+  });
 }
 
 export interface BCProduct {
@@ -412,4 +469,128 @@ export function formatProductForPrompt(product: BCProduct): string {
     Description: ${desc}
     Variants:
 ${variantInfo}`;
+}
+
+// ─── Orders (BC v2) ────────────────────────────────────────────────────────
+//
+// BC's order API only lives on v2. The status_id field is an integer; the
+// human label is mapped client-side via BC_ORDER_STATUS so a customer-facing
+// summary doesn't depend on BC's `status` string (which is the same English
+// label, but more brittle to typo'd casing if BC ever localizes).
+
+export interface BCOrderAddress {
+  first_name: string;
+  last_name: string;
+  street_1?: string;
+  street_2?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  country?: string;
+  email?: string;
+  phone?: string;
+}
+
+export interface BCOrderProduct {
+  id: number;
+  product_id: number;
+  order_id: number;
+  name: string;
+  sku?: string;
+  quantity: number;
+  // Prices come back as strings (e.g. "59.95") on v2.
+  price_inc_tax: string;
+  price_ex_tax?: string;
+  total_inc_tax?: string;
+}
+
+export interface BCOrder {
+  id: number;
+  status: string;
+  status_id: number;
+  date_created: string;
+  total_inc_tax: string;
+  currency_code: string;
+  items_total: number;
+  items_shipped: number;
+  payment_method: string;
+  customer_id: number;
+  billing_address: BCOrderAddress;
+  // The /orders endpoint does NOT inline products — they're fetched
+  // separately from /orders/{id}/products. Field is optional so callers
+  // know to fetch them when needed.
+  products?: BCOrderProduct[];
+}
+
+export interface BCShipment {
+  id: number;
+  order_id: number;
+  tracking_number: string | null;
+  tracking_carrier: string | null;
+  tracking_link?: string | null;
+  date_created: string;
+  shipping_method: string;
+  shipping_provider?: string;
+  items?: Array<{
+    order_product_id: number;
+    product_id: number;
+    quantity: number;
+  }>;
+}
+
+/**
+ * BC order status_id → human label. Source: BigCommerce REST API v2
+ * `/orders` documentation. Keep this map exact; the AI summary message
+ * shows the value verbatim.
+ */
+export const BC_ORDER_STATUS: Record<number, string> = {
+  0: "Incomplete",
+  1: "Pending",
+  2: "Shipped",
+  3: "Partially Shipped",
+  4: "Refunded",
+  5: "Cancelled",
+  6: "Declined",
+  7: "Awaiting Payment",
+  8: "Awaiting Pickup",
+  9: "Awaiting Shipment",
+  10: "Completed",
+  11: "Awaiting Fulfillment",
+  12: "Manual Verification Required",
+  13: "Disputed",
+  14: "Partially Refunded",
+};
+
+/**
+ * Look up a single order by customer email AND order id. Uses BC's
+ * `/orders?email=&min_id=&max_id=` pattern so we only ever return a match
+ * if the email on file matches what the customer typed — preventing one
+ * customer from peeking at another's order by guessing an order number.
+ *
+ * Returns `null` for not-found, malformed BC response, or BC errors.
+ */
+export async function getOrderByEmailAndOrderId(
+  email: string,
+  orderId: number
+): Promise<BCOrder | null> {
+  const arr = await bcFetchV2<BCOrder[]>({
+    path: "/orders",
+    params: { email, min_id: orderId, max_id: orderId },
+  });
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  // BC returns the array filtered by the min/max range — taking [0] is safe
+  // because min_id === max_id ensures at most one match.
+  return arr[0];
+}
+
+/**
+ * Fetch shipments for an order. Returns `[]` (not null) when there are no
+ * shipments yet — that's the common case for orders still in
+ * "Awaiting Fulfillment" / "Awaiting Shipment".
+ */
+export async function getOrderShipments(orderId: number): Promise<BCShipment[]> {
+  const arr = await bcFetchV2<BCShipment[]>({
+    path: `/orders/${orderId}/shipments`,
+  });
+  return Array.isArray(arr) ? arr : [];
 }

@@ -11,6 +11,7 @@ import {
   BookOpen,
   Settings,
   Users,
+  ThumbsUp,
   LogOut,
 } from "lucide-react";
 import Badge from "./Badge";
@@ -54,6 +55,12 @@ const navItems: NavItem[] = [
     label: "Team",
     href: "/dashboard/manager/team",
     icon: <Users size={20} />,
+    managerOnly: true,
+  },
+  {
+    label: "Feedback",
+    href: "/dashboard/manager/feedback",
+    icon: <ThumbsUp size={20} />,
     managerOnly: true,
   },
 ];

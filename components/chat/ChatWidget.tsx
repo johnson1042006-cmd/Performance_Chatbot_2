@@ -4,6 +4,10 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import ChatHeader from "./ChatHeader";
 import MessageBubble from "./MessageBubble";
+import QuickReplyChips, { type QuickReplyChipId } from "./QuickReplyChips";
+import OrderLookupForm from "./OrderLookupForm";
+import EmailCaptureForm from "./EmailCaptureForm";
+import EndOfSessionCard from "./EndOfSessionCard";
 import { Send, Loader2, Clock } from "lucide-react";
 
 interface Message {
@@ -13,6 +17,25 @@ interface Message {
   sentAt: string;
   agentName?: string;
 }
+
+interface Persona {
+  name: string;
+  title: string;
+  avatarUrl: string;
+}
+
+const DEFAULT_PERSONA: Persona = {
+  name: "Jake",
+  title: "Product Specialist",
+  avatarUrl: "/jake-avatar.svg",
+};
+
+const CHIP_AUTOSEND: Partial<Record<QuickReplyChipId, string>> = {
+  return_exchange: "I'd like to start a return or exchange",
+  helmet_sizing: "I need help with helmet sizing",
+  tech_air: "I'd like to send my Tech-Air in for service",
+  find_tires: "I need tires for my motorcycle",
+};
 
 interface PageContext {
   url: string;
@@ -74,6 +97,11 @@ export default function ChatWidget() {
   const [sending, setSending] = useState(false);
   const [waitingForReply, setWaitingForReply] = useState(false);
   const [pageContext, setPageContext] = useState<PageContext | null>(null);
+  const [persona, setPersona] = useState<Persona>(DEFAULT_PERSONA);
+  const [chipForm, setChipForm] = useState<
+    "none" | "order_lookup" | "email_capture"
+  >("none");
+  const [humanBannerVisible, setHumanBannerVisible] = useState(false);
   /**
    * sessionState tracks what the server told us about claim status.
    *  - 'idle'         initial / session not yet started
@@ -102,6 +130,28 @@ export default function ChatWidget() {
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
+  }, []);
+
+  // ── Persona / boot config ──────────────────────────────────────────────────
+  // Best-effort fetch — failure falls back to DEFAULT_PERSONA so the chat
+  // never displays anonymously. Manager edits to the bot_persona KB row
+  // propagate within the 60s s-maxage window.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/embed/config")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((cfg) => {
+        if (cancelled || !cfg?.persona) return;
+        setPersona({
+          name: cfg.persona.name ?? DEFAULT_PERSONA.name,
+          title: cfg.persona.title ?? DEFAULT_PERSONA.title,
+          avatarUrl: cfg.persona.avatarUrl ?? DEFAULT_PERSONA.avatarUrl,
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // ── Session init ────────────────────────────────────────────────────────────
@@ -388,13 +438,14 @@ export default function ChatWidget() {
     setWaitingForReply(false);
   }, []);
 
-  const sendMessage = async () => {
-    const trimmed = input.trim();
+  const sendMessage = async (override?: string) => {
+    const candidate = override ?? input;
+    const trimmed = candidate.trim();
     if (!trimmed || sendInFlightRef.current) return;
     if (sessionState === "closed") return;
     sendInFlightRef.current = true;
     const content = trimmed;
-    setInput("");
+    if (!override) setInput("");
     setSending(true);
     setWaitingForReply(true);
 
@@ -513,8 +564,57 @@ export default function ChatWidget() {
     }
   };
 
+  // ── Quick-reply chip dispatcher ────────────────────────────────────────────
+  const handleChip = useCallback(
+    async (id: QuickReplyChipId) => {
+      setHumanBannerVisible(false);
+      if (id === "track_order") {
+        setChipForm("order_lookup");
+        return;
+      }
+      if (id === "talk_to_human") {
+        // Need a session id to ask the server about agents.
+        if (!dbSessionId) return;
+        try {
+          const res = await fetch(
+            `/api/sessions/${dbSessionId}/request-human`,
+            { method: "POST" }
+          );
+          const data = await res.json().catch(() => ({}));
+          if (data.status === "queued_for_human") {
+            setHumanBannerVisible(true);
+          } else if (data.status === "needs_email") {
+            setChipForm("email_capture");
+          }
+        } catch {
+          // Network failure — fall back to email capture so we don't strand
+          // the customer with a tap that did nothing.
+          setChipForm("email_capture");
+        }
+        return;
+      }
+      const canned = CHIP_AUTOSEND[id];
+      if (canned) void sendMessage(canned);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [dbSessionId]
+  );
+
   // ── Status banner for the customer ─────────────────────────────────────────
   const renderStatusBanner = () => {
+    if (humanBannerVisible) {
+      return (
+        <div
+          className="flex items-center gap-2 py-2 px-3 mx-1 my-1 bg-emerald-50 rounded-lg border border-emerald-100"
+          data-testid="connecting-human-banner"
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0 animate-pulse" />
+          <span className="text-xs text-emerald-700">
+            Connecting you to a human — hang tight.
+          </span>
+        </div>
+      );
+    }
     // Only show "Waiting for an agent" once the customer has actually said
     // something. A freshly-created session is `waiting` server-side by default,
     // so without this guard the amber banner would appear on the welcome screen
@@ -564,7 +664,7 @@ export default function ChatWidget() {
         className="flex-1 overflow-y-auto px-4 py-3 space-y-1"
       >
         {messages.length === 0 && (
-          <div className="text-center py-12">
+          <div className="text-center py-8">
             <div className="w-12 h-12 bg-accent/10 rounded-full flex items-center justify-center mx-auto mb-3">
               <span className="text-accent text-lg">👋</span>
             </div>
@@ -573,6 +673,23 @@ export default function ChatWidget() {
             </p>
           </div>
         )}
+        {messages.length === 0 &&
+          (sessionState === "idle" || sessionState === "waiting") &&
+          chipForm === "none" && (
+            <QuickReplyChips onSelect={handleChip} disabled={sending} />
+          )}
+        {chipForm === "order_lookup" && dbSessionId && (
+          <OrderLookupForm
+            sessionId={dbSessionId}
+            onClose={() => setChipForm("none")}
+          />
+        )}
+        {chipForm === "email_capture" && dbSessionId && (
+          <EmailCaptureForm
+            sessionId={dbSessionId}
+            onClose={() => setChipForm("none")}
+          />
+        )}
         {messages.map((msg) => (
           <MessageBubble
             key={msg.id}
@@ -580,6 +697,8 @@ export default function ChatWidget() {
             content={msg.content}
             sentAt={msg.sentAt}
             agentName={msg.agentName}
+            personaName={persona.name}
+            personaAvatarUrl={persona.avatarUrl}
           />
         ))}
         {renderStatusBanner()}
@@ -601,23 +720,11 @@ export default function ChatWidget() {
         )}
       </div>
       <div className="relative z-20 border-t border-border bg-surface px-3 py-3 shrink-0">
-        {sessionState === "closed" ? (
-          <div className="flex flex-col items-center gap-2 py-2">
-            <p
-              className="text-xs text-text-secondary text-center"
-              data-testid="chat-ended-message"
-            >
-              This conversation has ended.
-            </p>
-            <button
-              type="button"
-              onClick={startNewSession}
-              data-testid="chat-start-new"
-              className="px-4 py-2 text-sm font-medium rounded-full bg-accent text-white hover:bg-accent/90 transition-colors"
-            >
-              Start a new chat
-            </button>
-          </div>
+        {sessionState === "closed" && dbSessionId ? (
+          <EndOfSessionCard
+            sessionId={dbSessionId}
+            onStartNew={startNewSession}
+          />
         ) : (
           <div className="flex items-center gap-2">
             <input

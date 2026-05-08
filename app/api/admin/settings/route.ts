@@ -10,6 +10,9 @@ const DEFAULT_SETTINGS = {
   aiEnabled: true,
   fallbackTimerSeconds: 60,
   historyRetentionMonths: 0,
+  // When true, the embed widget opens automatically on a visitor's first
+  // page-view in the session (gated on a per-session sessionStorage key).
+  autoOpenOnFirstVisit: true,
 };
 
 export async function GET() {

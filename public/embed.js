@@ -1,10 +1,28 @@
 (function () {
   var PC_CHAT_URL = "https://performance-chatbot2-2.vercel.app";
 
+  // Pages where the chat bubble is suppressed entirely. Checkout-flow
+  // pages get no widget at all so the iframe never competes with the cart.
   var path = window.location.pathname.toLowerCase();
   var excludedPaths = ["/checkout", "/finishorder", "/order-confirmation", "/manage-account/payment"];
   for (var i = 0; i < excludedPaths.length; i++) {
     if (path.indexOf(excludedPaths[i]) === 0) return;
+  }
+
+  // Auto-open is suppressed on a wider set of paths than the bubble itself.
+  // The whole /manage-account section feels intrusive to auto-open, but the
+  // bubble is still useful (e.g. on /manage-account/orders).
+  var autoOpenExcludes = [
+    "/checkout",
+    "/finishorder",
+    "/order-confirmation",
+    "/manage-account/",
+  ];
+  function shouldSuppressAutoOpen() {
+    for (var j = 0; j < autoOpenExcludes.length; j++) {
+      if (path.indexOf(autoOpenExcludes[j]) === 0) return true;
+    }
+    return false;
   }
 
   var style = document.createElement("style");
@@ -110,9 +128,12 @@
   }, 1000);
 
   var open = false;
-  bubble.addEventListener("click", function () {
-    open = !open;
+  function setOpen(next) {
+    open = !!next;
     iframe.classList.toggle("open", open);
+  }
+  bubble.addEventListener("click", function () {
+    setOpen(!open);
   });
 
   window.addEventListener("message", function (event) {
@@ -124,8 +145,40 @@
       );
     }
     if (event.data && event.data.type === "pc-chat-close") {
-      open = false;
-      iframe.classList.remove("open");
+      setOpen(false);
     }
   });
+
+  // Best-effort auto-open on first visit. Failures (offline, CORS, 5xx) are
+  // silent — the bubble is still clickable. We track the once-per-session
+  // marker BEFORE the await so racing tabs don't both pop the iframe.
+  function maybeAutoOpen() {
+    if (shouldSuppressAutoOpen()) return;
+    var alreadyOpened;
+    try {
+      alreadyOpened = sessionStorage.getItem("pc-chat-opened-once") === "1";
+    } catch (e) {
+      alreadyOpened = false;
+    }
+    if (alreadyOpened) return;
+
+    fetch(PC_CHAT_URL + "/api/embed/config", { credentials: "omit" })
+      .then(function (res) {
+        if (!res.ok) return null;
+        return res.json();
+      })
+      .then(function (cfg) {
+        if (!cfg || cfg.autoOpenOnFirstVisit === false) return;
+        try {
+          sessionStorage.setItem("pc-chat-opened-once", "1");
+        } catch (e) {
+          // Storage disabled / private mode — open once per page load instead.
+        }
+        setOpen(true);
+      })
+      .catch(function () {
+        // network blip — leave the bubble closed; the user can still open it
+      });
+  }
+  maybeAutoOpen();
 })();
