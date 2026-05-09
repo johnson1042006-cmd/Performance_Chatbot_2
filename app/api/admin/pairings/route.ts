@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { productPairings, products } from "@/lib/db/schema";
+import { alias } from "drizzle-orm/pg-core";
 import { eq } from "drizzle-orm";
 import { log, serializeError } from "@/lib/log";
 
@@ -14,29 +15,29 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const pairings = await db.select().from(productPairings);
+    const primaryProducts = alias(products, "primary_products");
+    const pairedProducts = alias(products, "paired_products");
 
-    const enriched = await Promise.all(
-      pairings.map(async (p) => {
-        const [primary] = await db
-          .select()
-          .from(products)
-          .where(eq(products.sku, p.primarySku))
-          .limit(1);
-        const [paired] = await db
-          .select()
-          .from(products)
-          .where(eq(products.sku, p.pairedSku))
-          .limit(1);
-        return {
-          ...p,
-          primaryName: primary?.name || "Unknown",
-          pairedName: paired?.name || "Unknown",
-        };
+    const rows = await db
+      .select({
+        id: productPairings.id,
+        primarySku: productPairings.primarySku,
+        pairedSku: productPairings.pairedSku,
+        pairingType: productPairings.pairingType,
+        primaryName: primaryProducts.name,
+        pairedName: pairedProducts.name,
       })
-    );
+      .from(productPairings)
+      .leftJoin(primaryProducts, eq(productPairings.primarySku, primaryProducts.sku))
+      .leftJoin(pairedProducts, eq(productPairings.pairedSku, pairedProducts.sku));
 
-    return NextResponse.json({ pairings: enriched });
+    const pairings = rows.map((r) => ({
+      ...r,
+      primaryName: r.primaryName ?? "Unknown",
+      pairedName: r.pairedName ?? "Unknown",
+    }));
+
+    return NextResponse.json({ pairings });
   } catch (error) {
     log.error("admin.pairings_get_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
