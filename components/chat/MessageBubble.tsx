@@ -66,8 +66,8 @@ export default function MessageBubble({
         <div
           className={`px-3.5 py-2.5 text-sm leading-relaxed ${
             isCustomer
-              ? "bg-accent-solid text-white rounded-2xl rounded-br-md"
-              : "bg-white border border-border rounded-2xl rounded-bl-md"
+              ? "bg-accent text-white rounded rounded-br-sm"
+              : "bg-white border border-border rounded rounded-bl-sm"
           }`}
         >
           <span dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }} />

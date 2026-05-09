@@ -1,17 +1,19 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { Barlow, Barlow_Condensed } from "next/font/google";
 import AuthProvider from "@/components/providers/AuthProvider";
 import { ToastProvider } from "@/components/ui/Toast";
 import "./globals.css";
 
-const inter = Inter({
+const barlow = Barlow({
   subsets: ["latin"],
-  variable: "--font-inter",
+  weight: ["400", "500"],
+  variable: "--font-barlow",
 });
 
-const jetbrainsMono = JetBrains_Mono({
+const barlowCondensed = Barlow_Condensed({
   subsets: ["latin"],
-  variable: "--font-jetbrains",
+  weight: ["700"],
+  variable: "--font-barlow-condensed",
 });
 
 export const metadata: Metadata = {
@@ -27,7 +29,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}
+        className={`${barlow.variable} ${barlowCondensed.variable} font-sans antialiased`}
       >
         <a
           href="#main-content"

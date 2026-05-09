@@ -1111,7 +1111,7 @@ export default function ChatWidget() {
         {renderStatusBanner()}
         {waitingForReply && sessionState !== "waiting" && (
           <div className="flex items-center gap-1.5 py-2 px-1">
-            <div className="w-7 h-7 bg-surface-elevated rounded-full flex items-center justify-center">
+            <div className="w-7 h-7 bg-gray-100 rounded-full flex items-center justify-center">
               <span className="flex gap-0.5">
                 {[0, 1, 2].map((i) => (
                   <span
@@ -1146,7 +1146,7 @@ export default function ChatWidget() {
               placeholder="Type your message..."
               data-testid="chat-input"
               autoComplete="off"
-              className="flex-1 px-3.5 py-2.5 text-sm border border-border rounded-full focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent bg-background"
+              className="flex-1 px-3.5 py-2.5 text-sm border border-border rounded-none focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent bg-background"
             />
             <button
               type="button"
@@ -1155,12 +1155,12 @@ export default function ChatWidget() {
               aria-busy={sending}
               aria-label="Send message"
               data-testid="chat-send"
-              className={`w-10 h-10 rounded-full flex items-center justify-center transition-[filter] text-white shrink-0 ${
+              className={`w-10 h-10 rounded-button flex items-center justify-center transition-colors text-white shrink-0 ${
                 !input.trim()
-                  ? "bg-accent-solid/35 cursor-not-allowed opacity-60"
+                  ? "bg-accent/35 cursor-not-allowed opacity-60"
                   : sending
-                    ? "bg-accent-solid/80 cursor-wait"
-                    : "bg-accent-solid hover:brightness-[0.95]"
+                    ? "bg-accent/80 cursor-wait"
+                    : "bg-accent hover:bg-accent-hover"
               }`}
             >
               {sending ? (

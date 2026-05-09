@@ -48,10 +48,10 @@
 
   var style = document.createElement("style");
   style.textContent =
-    "#pc-chat-bubble{position:fixed;bottom:20px;right:20px;width:60px;height:60px;border-radius:50%;background:#e63946;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,0.15);z-index:9999;transition:transform 0.2s}" +
+    "#pc-chat-bubble{position:fixed;bottom:20px;right:20px;width:60px;height:60px;border-radius:50%;background:#C8102E;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,0.15);z-index:9999;transition:transform 0.2s}" +
     "#pc-chat-bubble:hover{transform:scale(1.05)}" +
     "#pc-chat-bubble svg{width:28px;height:28px;fill:white}" +
-    "#pc-chat-frame{position:fixed;bottom:90px;right:20px;width:380px;height:560px;border:none;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.15);z-index:9999;display:none;overflow:hidden}" +
+    "#pc-chat-frame{position:fixed;bottom:90px;right:20px;width:380px;height:560px;border:none;border-radius:0px;box-shadow:0 8px 32px rgba(0,0,0,0.15);z-index:9999;display:none;overflow:hidden}" +
     "#pc-chat-frame.open{display:block}" +
     "@media(max-width:480px){#pc-chat-frame{width:calc(100vw - 20px);right:10px;bottom:80px;height:min(500px,70vh)}}";
   document.head.appendChild(style);
@@ -239,7 +239,7 @@
     dot.style.height = "10px";
     dot.style.borderRadius = "999px";
     dot.style.background = "#fff";
-    dot.style.boxShadow = "0 0 0 2px rgba(230,57,70,0.9)";
+    dot.style.boxShadow = "0 0 0 2px rgba(200,16,46,0.9)";
     dot.style.display = "none";
     bubble.style.position = "fixed"; // ensure dot anchors correctly
     bubble.appendChild(dot);
