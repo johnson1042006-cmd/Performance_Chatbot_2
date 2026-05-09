@@ -10,6 +10,7 @@ interface KnowledgeSeed {
   // stick. Use sparingly: only for entries where the seed text is the
   // authoritative source of truth (e.g. the return_policy 60-day fix).
   forceUpdate?: boolean;
+  isFaq?: boolean;
 }
 
 export const entries: KnowledgeSeed[] = [
@@ -454,15 +455,24 @@ CRITICAL: BOPIS is available ONLY at the Centennial location. We do not have mul
     content: `Performance Cycle has a loyalty program called Motobucks. Look for the "Earn Motobucks" button on performancecycle.com. (Detailed rules pending — for now confirm it exists and point to the site.)`,
   },
   {
+    topic: "jacket_sizing",
+    isFaq: false,
+    content: `Jacket sizing varies by brand — there's no universal chart. Alpinestars often runs slim, Klim is true-to-size for adventure cuts, REV'IT varies by line. For specific fit guidance: (a) check the product page on performancecycle.com — most have a brand-provided size chart and fit notes, (b) call the team at 303-744-2011 — they wear the gear and know the quirks, (c) for in-store fit consultations, visit the Centennial superstore. Helmet sizing applies ONLY to helmets — never substitute the helmet sizing guide for jackets, boots, or gloves.`,
+  },
+  {
     // Manager-editable JSON describing the bot's customer-facing identity.
     // Read by /api/embed/config and surfaced in the chat widget on every
     // AI message. Editing this in the KB dashboard hot-swaps the persona
     // at the next config-cache refresh (60s) without a deploy.
+    // Extra fields beyond name/title/avatarUrl are ignored by embed/config
+    // but appear in the AI's KNOWLEDGE BASE section for behavioral guidance.
     topic: "bot_persona",
+    forceUpdate: true,
     content: JSON.stringify({
       name: "Jake",
       title: "Product Specialist",
       avatarUrl: "/jake-avatar.svg",
+      sizingGuard: "SIZING GUARD: When a customer asks about sizing for a category you lack specific data on (jackets, boots, gloves, pants), do NOT substitute another category's sizing guide. Helmet sizing applies ONLY to helmets. For all other apparel: direct customer to product page brand size chart, offer 303-744-2011 for fit guidance, and mention in-store fit consultation.",
     }),
   },
 ];
