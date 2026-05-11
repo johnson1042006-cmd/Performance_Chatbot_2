@@ -217,8 +217,12 @@ async function callClaudeWithTools(
           tools: options.tools,
           messages: history as unknown as Anthropic.MessageParam[],
         });
+        // Buffer deltas for this iteration; only flush to the client when the
+        // iteration ends without a tool call. Pre-tool-use deltas are internal
+        // narration ("I'll search for X") and must not reach the customer.
+        const pendingDeltas: string[] = [];
         s.on("text", (delta: string) => {
-          if (delta) stream.onToken(delta);
+          if (delta) pendingDeltas.push(delta);
         });
         s.on("contentBlock", (block: Anthropic.ContentBlock) => {
           if (block.type === "tool_use") {
@@ -228,6 +232,11 @@ async function callClaudeWithTools(
         const final = await s.finalMessage();
         assistantBlocks = final.content;
         stopReason = final.stop_reason;
+        // Pre-tool-use text is internal narration; only flush to the client when
+        // this iteration is the final turn (not a mid-loop tool call).
+        if (stopReason !== "tool_use" && pendingDeltas.length > 0) {
+          stream.onToken(pendingDeltas.join(""));
+        }
       } else {
         const response = await client.messages.create({
           model: MODEL,
@@ -252,7 +261,10 @@ async function callClaudeWithTools(
       .filter((b): b is Anthropic.TextBlock => b.type === "text")
       .map((b) => b.text)
       .join("");
-    if (textChunk) collectedText += textChunk;
+    // Pre-tool-use text is internal narration ("I'll search for X").
+    // The customer-facing reply is the FINAL iteration's text only.
+    // Concatenating pre-tool narration with the final answer caused the "I'll search.Got it" jam bug.
+    if (textChunk && stopReason !== "tool_use") collectedText += textChunk;
 
     history.push({ role: "assistant", content: assistantBlocks });
 

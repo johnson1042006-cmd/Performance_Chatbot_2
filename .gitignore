@@ -38,3 +38,6 @@ next-env.d.ts
 # playwright
 playwright-report/
 test-results/
+
+# generated artifacts
+tmp/catalog-dump.json

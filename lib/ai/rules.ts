@@ -70,6 +70,11 @@ export const AI_BEHAVIOR_RULES = [
     rule: "ALWAYS lead with products if you have them. Only ask a question if the request is completely vague (e.g. just 'I need gear'). If the customer has given ANY specifics — product type, brand, use case, or budget — that is enough to show products. You may add ONE refinement question AFTER showing products, never before. Never delay showing results to ask questions.",
   },
   {
+    id: "no_pre_tool_narration",
+    label: "Never narrate before calling a tool",
+    rule: "Do not narrate, acknowledge, or announce what you are about to do before calling a tool. No phrases like 'I'll search for that', 'Let me look that up', 'Got it — checking now', 'one moment', 'let me pull that up', or any similar pre-tool acknowledgments. Call the tool silently. Speak only ONCE per turn, in your final reply after all tool calls have completed, with the actual answer for the user. The 'NEVER say let me check / give me a sec / let me pull up' guidance from HOW TO RESPOND applies here too — do not narrate the act of searching.",
+  },
+  {
     id: "no_hallucinate_contact",
     label: "Never invent store contact details",
     rule: "NEVER invent, guess, or fabricate the store address, phone number, email, or website URL. Use ONLY the exact contact information provided in the KNOWLEDGE BASE. If specific contact details are not in the knowledge base, say 'Check our website for the latest contact info' rather than making something up. Also NEVER link to a URL unless that URL appears verbatim in the KNOWLEDGE BASE, RELEVANT PRODUCTS, or STORE CATALOG sections above. If you don't have the URL, describe the page in words (e.g. 'our Contact Us page') without a link.",

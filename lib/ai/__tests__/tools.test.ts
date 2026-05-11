@@ -421,4 +421,37 @@ describe("callClaude tool loop", () => {
     expect(out).toBe("Recovered.");
     expect(events).toEqual([{ name: "does_not_exist", isError: true }]);
   });
+
+  it("does not leak pre-tool narration into the final reply", async () => {
+    // Iteration 1: Claude narrates before calling a tool (the bug scenario).
+    // Iteration 2: Claude returns the actual answer with no tool call.
+    // The returned text must be exactly the final answer — no concatenation.
+    mockAnthropicCreate
+      .mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [
+          { type: "text", text: "I'll check that" },
+          { type: "tool_use", id: "use_1", name: "search_products", input: { query: "helmet" } },
+        ],
+      })
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: "Here are the options" }],
+      });
+
+    const { callClaude } = await import("@/lib/ai/callClaude");
+    const out = await callClaude(
+      "system",
+      [{ role: "user", content: "find me a helmet" }],
+      {
+        tools: [
+          { name: "search_products", description: "", input_schema: { type: "object", properties: {} } },
+        ] as any,
+        toolHandlers: { search_products: async () => ({ count: 0, products: [] }) } as any,
+        ctx: { sessionId: "s1" },
+      }
+    );
+
+    expect(out).toBe("Here are the options");
+  });
 });

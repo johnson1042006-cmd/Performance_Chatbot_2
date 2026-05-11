@@ -23,6 +23,7 @@ const EXPECTED_RULE_IDS = [
   "product_pairings",
   "conversation_memory",
   "qualifying_questions",
+  "no_pre_tool_narration",
   "no_hallucinate_contact",
   "no_hallucinate_features",
   "no_hallucinate_products",
