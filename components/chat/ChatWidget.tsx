@@ -546,21 +546,10 @@ export default function ChatWidget() {
           // malformed event — ignore
         }
       } else if (evt.event === "tool_use") {
-        // Best-effort hint inside the bubble. We don't surface tool inputs
-        // to the customer to avoid leaking raw JSON.
-        if (!bubbleAdded) {
-          bubbleAdded = true;
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: streamingId,
-              role: "ai",
-              content: assembled || "_(looking that up…)_",
-              sentAt: new Date().toISOString(),
-            },
-          ]);
-          setWaitingForReply(false);
-        }
+        // Tool call in progress — do not add a bubble yet. The bubble will be
+        // created naturally when the first real token arrives after all tool
+        // calls complete. This prevents placeholder narration ("looking that
+        // up…") from appearing and then being jammed against the final reply.
       } else if (evt.event === "message") {
         // The server sends a `message` event once the AI turn is fully
         // persisted. If it carries `autoEscalated` with agentsOnline=false
