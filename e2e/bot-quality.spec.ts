@@ -578,3 +578,30 @@ test.describe("Hallucination guard — gloves follow-up", () => {
     ).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Search refinement — brand context preserved across narrowing (May 11 regression)
+// ---------------------------------------------------------------------------
+
+test.describe("Search refinement — brand context preserved across narrowing", () => {
+  test.setTimeout(3 * 35_000);
+
+  test("preserves Alpinestars brand on motocross refinement", async ({ page }) => {
+    const sessionId = `refine-alpinestars-mx-${Date.now()}`;
+    await page.goto(`/embed?sessionId=${sessionId}`);
+    await page.waitForLoadState("networkidle");
+
+    await ask(page, "show me alpinestars helmets");
+    const reply2 = await ask(page, "show me ones motocross");
+
+    // The bot should either show an Alpinestars MX helmet (SM5/SM8/Supertech)
+    // or honestly acknowledge no in-stock Alpinestars MX BEFORE pivoting —
+    // it must not silently pivot to Fox/Bell as if Alpinestars never existed.
+    const namesAlpinestarsMX = /alpinestars\s+(sm-?[58]|supertech\s+s?-?m?\s*1?0|m10)/i.test(reply2);
+    const honestlyAcknowledges = /not\s+(finding|seeing)\s+alpinestars|don't\s+have\s+alpinestars|alpinestars\s+.{0,30}\s+out\s+of\s+stock/i.test(reply2);
+    expect(
+      namesAlpinestarsMX || honestlyAcknowledges,
+      `Expected an Alpinestars MX helmet or honest acknowledgment — got:\n${reply2}`
+    ).toBe(true);
+  });
+});

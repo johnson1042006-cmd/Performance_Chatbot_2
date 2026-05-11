@@ -171,7 +171,21 @@ export async function POST(req: NextRequest) {
       .limit(1);
 
     if (existing.length > 0 && existing[0].status !== "closed") {
-      return NextResponse.json({ session: existing[0] });
+      // Touch the activity timestamp so the stale sweep cannot close this
+      // session in the window between now and the widget's first heartbeat
+      // (which fires ~1 s after dbSessionId is set). Without this, a
+      // returning customer whose session has stale timestamps from a previous
+      // visit can have their session swept before they send their first
+      // message, causing the chat API to return 410 "This conversation has
+      // ended."
+      const now = new Date();
+      await db
+        .update(sessions)
+        .set({ lastCustomerActivityAt: now })
+        .where(eq(sessions.id, existing[0].id));
+      return NextResponse.json({
+        session: { ...existing[0], lastCustomerActivityAt: now },
+      });
     }
 
     // Phase 4: capture Vercel-derived IP geolocation for agent-only context.

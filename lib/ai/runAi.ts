@@ -188,22 +188,61 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
   }
 
   // Auto-escalation: at most once per session.
+  //
+  // Three triggers (any one is sufficient):
+  //  1. sentiment.score === -1  — 2+ frustrated messages in last 4
+  //  2. confidence === "low"    — AI hedged on the answer
+  //  3. aiEscalatedViaTool      — Claude called escalate_to_human tool
+  //  4. isExplicitHumanRequest  — customer explicitly asked for a person in
+  //                               this message (even as a first message)
+  //
+  // When the tool already fired escalateToHuman (trigger 3) we skip the
+  // duplicate call to avoid double-clearing aiClaimDueAt and double-emitting
+  // escalation-requested, but we still insert the auto_escalated chat event
+  // and fire the correct per-session Pusher event so the widget can render
+  // EmailCaptureForm or the connecting banner.
+  const EXPLICIT_HUMAN_REQUEST_PATTERNS: RegExp[] = [
+    /\breal human\b/i,
+    /\btalk to a human\b/i,
+    /\bspeak to a (human|person)\b/i,
+    /\blive agent\b/i,
+    /\bhuman agent\b/i,
+  ];
+  const aiEscalatedViaTool = toolCalls.some(
+    (tc) => tc.name === "escalate_to_human" && !tc.isError
+  );
+  const isExplicitHumanRequest = EXPLICIT_HUMAN_REQUEST_PATTERNS.some((re) =>
+    re.test(latestMessage)
+  );
+
   let autoEscalated: RunAiResult["autoEscalated"] = null;
   const shouldEscalate =
-    sentiment.score === -1 || confidence.confidence === "low";
+    sentiment.score === -1 ||
+    confidence.confidence === "low" ||
+    aiEscalatedViaTool ||
+    isExplicitHumanRequest;
   if (shouldEscalate) {
     const already = await hasAutoEscalated(sessionId);
     if (!already) {
-      const reason: "frustrated_customer" | "unsupported" =
-        sentiment.score === -1 ? "frustrated_customer" : "unsupported";
-      try {
-        await escalateToHuman(sessionId, reason, "normal");
-      } catch (err) {
-        log.warn("ai.run.auto_escalate_failed", {
-          requestId,
-          sessionId,
-          error: serializeError(err),
-        });
+      const reason: "frustrated_customer" | "unsupported" | "explicit_request" =
+        sentiment.score === -1
+          ? "frustrated_customer"
+          : isExplicitHumanRequest
+          ? "explicit_request"
+          : "unsupported";
+      // Skip escalateToHuman when the tool already called it this turn —
+      // aiClaimDueAt was already cleared and escalation-requested already
+      // fired on the dashboard channel.
+      if (!aiEscalatedViaTool) {
+        try {
+          await escalateToHuman(sessionId, reason, "normal");
+        } catch (err) {
+          log.warn("ai.run.auto_escalate_failed", {
+            requestId,
+            sessionId,
+            error: serializeError(err),
+          });
+        }
       }
       try {
         await db.insert(chatEvents).values({
@@ -215,6 +254,8 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
             sentiment: sentiment.score,
             confidenceReasons: confidence.reasons,
             sentimentReasons: sentiment.reasons,
+            aiEscalatedViaTool,
+            isExplicitHumanRequest,
           },
         });
       } catch (err) {

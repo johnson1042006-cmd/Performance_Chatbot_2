@@ -1085,6 +1085,21 @@ export function isLikelyProductFollowUp(latestMessage: string): boolean {
     /\bdo\s+you\s+have\b.{0,20}\b(in|size|xl|xxl|large|medium|small)\b/i,
     /\b(variant|variants|colorway|colour|color)\b/i,
     /\bfit(s|ting)?\b/i,
+    // "ones" / "one" used as a pronoun referring back to prior products
+    // (catches: "show me ones motocross", "the red ones", "any blue ones")
+    /\bones?\b(?!\s+(piece|day|time|way))/i,
+    // refinement starters with a descriptor
+    // (catches: "what about motocross", "what about in red")
+    /\bwhat\s+about\b/i,
+    // "any [descriptor]" / "any in [X]" / "got any [X]"
+    /\b(any|got|have)\s+(in|with|for|that)\b/i,
+    /^\s*(any|got|have)\s+\w+\??\s*$/i,
+    // message starts with a preposition narrowing the prior subject
+    // (catches: "in red", "with bluetooth", "for motocross", "in mx")
+    /^\s*(in|with|for)\s+\w+/i,
+    // "show me [descriptor]" / "show me the [descriptor]" — short refinements
+    // (catches: "show me motocross", "show me the red ones", "show me cheaper")
+    /^\s*show\s+me\s+(the\s+|a\s+|an\s+)?\w+(\s+ones?)?\s*\??\s*$/i,
   ];
   return patterns.some((p) => p.test(t));
 }

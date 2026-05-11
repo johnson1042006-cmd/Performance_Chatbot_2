@@ -362,6 +362,25 @@ describe("isLikelyProductFollowUp", () => {
       )
     ).toBe(false);
   });
+
+  it("treats refinement queries as follow-ups", () => {
+    expect(isLikelyProductFollowUp("show me ones motocross")).toBe(true);
+    expect(isLikelyProductFollowUp("the red ones")).toBe(true);
+    expect(isLikelyProductFollowUp("any in red")).toBe(true);
+    expect(isLikelyProductFollowUp("what about motocross")).toBe(true);
+    expect(isLikelyProductFollowUp("in mx")).toBe(true);
+    expect(isLikelyProductFollowUp("show me cheaper")).toBe(true);
+    expect(isLikelyProductFollowUp("got any in black")).toBe(true);
+  });
+
+  it("does not over-match on fresh searches that happen to contain 'one'", () => {
+    expect(isLikelyProductFollowUp("one piece suit for track days")).toBe(false);
+    expect(
+      isLikelyProductFollowUp(
+        "i'm looking for a motocross helmet under $500 with mips and a good ventilation system for hot weather"
+      )
+    ).toBe(false);
+  });
 });
 
 describe("extractDiscussedProductSubject", () => {

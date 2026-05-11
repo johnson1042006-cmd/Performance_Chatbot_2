@@ -12,6 +12,7 @@
     "test:e2e": "npm run build && playwright test --grep-invert @slow",
     "test:e2e:slow": "npm run build && playwright test --grep @slow",
     "test:e2e:all": "npm run build && playwright test",
+    "test:catalog": "playwright test e2e/catalog-coverage.spec.ts",
     "db:push": "npx drizzle-kit push",
     "db:seed": "npx tsx scripts/seed-users.ts",
     "db:seed:knowledge": "npx tsx scripts/seed-knowledge.ts",
