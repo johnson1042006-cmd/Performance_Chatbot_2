@@ -276,7 +276,7 @@ export async function processDueAiClaims(): Promise<void> {
 
 // ─── Sweep stale sessions ────────────────────────────────────────────────────
 
-const STALE_MINUTES = 2;
+export const STALE_MINUTES = 10;
 
 export async function sweepStaleSessions(): Promise<number> {
   const cutoff = new Date(Date.now() - STALE_MINUTES * 60 * 1000);

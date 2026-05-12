@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react";
 import SessionCard from "./SessionCard";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { MessageSquare } from "lucide-react";
+import { notifyEscalation } from "./notifyEscalation";
 
 interface Session {
   id: string;
@@ -149,6 +150,10 @@ export default function SessionQueue({
       channel.bind("session-claimed", () => fetchSessions());
       channel.bind("session-released", () => fetchSessions());
       channel.bind("session-closed", () => fetchSessions());
+      channel.bind("escalation-requested", (payload: { sessionId: string; reason: string; urgency: string }) => {
+        fetchSessions();
+        notifyEscalation(payload);
+      });
       cleanup = () => {
         channel.unbind_all();
         pusher.unsubscribe("dashboard");

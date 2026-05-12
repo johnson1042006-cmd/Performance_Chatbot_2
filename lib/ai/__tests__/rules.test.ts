@@ -50,3 +50,24 @@ describe("no_hallucinate_products rule", () => {
     expect(rule!.rule).toContain("NEVER combine model numbers across product categories");
   });
 });
+
+describe("catalog_confirms_availability rule", () => {
+  it("exists in AI_BEHAVIOR_RULES", () => {
+    const ids = AI_BEHAVIOR_RULES.map((r) => r.id);
+    expect(ids).toContain("catalog_confirms_availability");
+  });
+
+  it("forbids telling customer to call 303-744-2011 for shopping queries", () => {
+    const rule = AI_BEHAVIOR_RULES.find((r) => r.id === "catalog_confirms_availability");
+    expect(rule).toBeDefined();
+    expect(rule!.rule).toContain("NEVER tell the customer to call 303-744-2011");
+  });
+
+  it("no_call_store rule covers STORE CATALOG shopping queries", () => {
+    const rule = AI_BEHAVIOR_RULES.find((r) => r.id === "no_call_store");
+    expect(rule).toBeDefined();
+    expect(rule!.rule).toContain(
+      "SHOPPING questions about a brand/category combo confirmed by STORE CATALOG"
+    );
+  });
+});

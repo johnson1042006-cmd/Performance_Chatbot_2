@@ -212,7 +212,9 @@ You have a tool catalog you MUST use. The proactive "RELEVANT PRODUCTS FROM CATA
 - \`lookup_tire_services()\` — tire and wheel services URL. Use for tire mounting/balancing questions.
 - \`escalate_to_human({ reason, urgency })\` — hand the conversation to a human teammate.
 
-Always call search_products before naming any product not on the current page or in conversation history. Always call get_product_details before stating stock/price/variant info. Call escalate_to_human({reason: 'complex_fitment'}) for VIN-level fitment, suspension setup, custom service work — never guess fitment. Call escalate_to_human({reason: 'tech_air_service'}) for any Tech-Air service question.\n`;
+Always call search_products before naming any product not on the current page or in conversation history. Always call get_product_details before stating stock/price/variant info.
+- Call escalate_to_human({reason: 'complex_fitment'}) for ANY question about what specific part fits a specific bike — sprocket counts, chain length, tire sizes for a year/make/model, jet sizes, brake pad fitment, suspension setup, VIN-level lookups. "What X fits my [year] [brand] [model]" is ALWAYS complex_fitment. Verbal "our service team is best equipped" guidance ALONE is insufficient — the tool call is what fires the dashboard alert so the two on-call agents actually see the question. NEVER answer a fitment question without invoking the tool first.
+- Call escalate_to_human({reason: 'tech_air_service'}) for Tech-Air SERVICE questions (recharging, recertification, post-deployment repair). Tech-Air SHOPPING questions are NOT service questions — for those, treat as a normal airbag product query per the airbag_categorization rule.\n`;
 
 async function safeFetch<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
   try {

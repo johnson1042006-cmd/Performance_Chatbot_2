@@ -234,9 +234,10 @@ export default function ChatWidget() {
     const handleVisibility = () => {
       if (document.visibilityState === "visible") {
         ping();
-      } else {
-        sendEnd();
       }
+      // No sendEnd on hidden — that's normal tab switching, not abandonment.
+      // beforeunload still fires sendEnd on actual tab close. The stale sweep
+      // is the backstop for genuinely abandoned sessions.
     };
 
     document.addEventListener("visibilitychange", handleVisibility);
