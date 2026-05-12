@@ -18,9 +18,7 @@ import {
   Users,
   RotateCcw,
   Sparkles,
-  Ticket as TicketIcon,
 } from "lucide-react";
-import TicketDetailModal from "@/components/dashboard/tickets/TicketDetailModal";
 
 interface Message {
   id: string;
@@ -57,10 +55,6 @@ interface ChatPanelProps {
   /** Optional: imperative ref so the parent can focus the textarea via "/"
    *  hotkey. */
   focusReplyRef?: React.MutableRefObject<(() => void) | null>;
-  /** Phase 5.5: when set, the Convert-to-Ticket button is disabled and
-   *  reads the existing ticket id from the session listing. */
-  linkedTicketId?: string | null;
-  linkedTicketNumber?: number | null;
 }
 
 type TabId = "trace" | "notes" | "history";
@@ -92,8 +86,6 @@ export default function ChatPanel({
   onSessionUpdate,
   sendRef,
   focusReplyRef,
-  linkedTicketId,
-  linkedTicketNumber,
 }: ChatPanelProps) {
   const { data: authSession } = useSession();
   const { addToast } = useToast();
@@ -110,61 +102,6 @@ export default function ChatPanel({
   const [showSlashPopover, setShowSlashPopover] = useState(false);
   const [aiEnabled, setAiEnabled] = useState(true);
   const [suggesting, setSuggesting] = useState(false);
-  const [convertingTicket, setConvertingTicket] = useState(false);
-  const [localTicketId, setLocalTicketId] = useState<string | null>(
-    linkedTicketId ?? null
-  );
-  const [localTicketNumber, setLocalTicketNumber] = useState<number | null>(
-    linkedTicketNumber ?? null
-  );
-  const [showTicketModal, setShowTicketModal] = useState(false);
-
-  useEffect(() => {
-    setLocalTicketId(linkedTicketId ?? null);
-    setLocalTicketNumber(linkedTicketNumber ?? null);
-  }, [linkedTicketId, linkedTicketNumber]);
-
-  const handleConvertToTicket = async () => {
-    if (convertingTicket || localTicketId) return;
-    setConvertingTicket(true);
-    try {
-      const firstCustomer = messages.find((m) => m.role === "customer");
-      const subject = (firstCustomer?.content ?? "Follow-up from chat")
-        .trim()
-        .slice(0, 120);
-      const res = await fetch("/api/tickets", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          source: "chat",
-          sessionId,
-          subject,
-          priority: "normal",
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.status === 409 && data.ticketId) {
-        setLocalTicketId(data.ticketId);
-        setShowTicketModal(true);
-        addToast("Ticket already exists for this session", "warning");
-        return;
-      }
-      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
-      if (data.ticket?.id) {
-        setLocalTicketId(data.ticket.id);
-        setLocalTicketNumber(data.ticket.ticketNumber);
-        setShowTicketModal(true);
-        addToast(`Ticket #${data.ticket.ticketNumber} created`, "success");
-      }
-    } catch (e) {
-      addToast(
-        e instanceof Error ? e.message : "Failed to create ticket",
-        "error"
-      );
-    } finally {
-      setConvertingTicket(false);
-    }
-  };
   const pollRef = useRef<NodeJS.Timeout | null>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const sendInFlightRef = useRef(false);
@@ -614,37 +551,6 @@ export default function ChatPanel({
                 Return to Queue
               </Button>
             )}
-            {!isClosed && (isMyChat || isManager) && (
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={convertingTicket || !!localTicketId}
-                onClick={() => {
-                  if (localTicketId) {
-                    setShowTicketModal(true);
-                  } else {
-                    void handleConvertToTicket();
-                  }
-                }}
-                title={
-                  localTicketId
-                    ? localTicketNumber
-                      ? `Linked ticket #${localTicketNumber} — open`
-                      : "Ticket already exists"
-                    : "Open a tracked ticket for this chat"
-                }
-                data-testid="convert-to-ticket-button"
-              >
-                <TicketIcon size={14} className="mr-1.5" />
-                {localTicketId
-                  ? localTicketNumber
-                    ? `Ticket #${localTicketNumber}`
-                    : "Ticket linked"
-                  : convertingTicket
-                  ? "Converting…"
-                  : "Convert to Ticket"}
-              </Button>
-            )}
             {isManager && (isHuman || isAi) && (
               <div className="relative">
                 <Button
@@ -805,12 +711,6 @@ export default function ChatPanel({
         </div>
       )}
 
-      {showTicketModal && localTicketId && (
-        <TicketDetailModal
-          ticketId={localTicketId}
-          onClose={() => setShowTicketModal(false)}
-        />
-      )}
     </div>
   );
 }

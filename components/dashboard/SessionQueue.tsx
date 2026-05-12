@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSession } from "next-auth/react";
 import SessionCard from "./SessionCard";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -111,8 +111,6 @@ export default function SessionQueue({
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterId>("all");
-  const pollRef = useRef<NodeJS.Timeout | null>(null);
-
   // Hydrate filter from localStorage once we know the user.
   useEffect(() => {
     if (userId) setFilter(loadFilter(userId));
@@ -160,13 +158,6 @@ export default function SessionQueue({
       };
     }).catch(() => {});
     return () => cleanup();
-  }, [fetchSessions]);
-
-  useEffect(() => {
-    pollRef.current = setInterval(fetchSessions, 5000);
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
   }, [fetchSessions]);
 
   const filtered = useMemo(

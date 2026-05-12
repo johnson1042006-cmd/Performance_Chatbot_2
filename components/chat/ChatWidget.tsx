@@ -8,6 +8,7 @@ import OrderLookupForm from "./OrderLookupForm";
 import EmailCaptureForm from "./EmailCaptureForm";
 import EndOfSessionCard from "./EndOfSessionCard";
 import TechAirRequestForm from "./TechAirRequestForm";
+import { detectTechAirServiceIntent } from "./techAirIntent";
 import TireFitmentForm, { type TireFitmentPayload } from "./TireFitmentForm";
 import ActionChips from "./ActionChips";
 import { Send, Loader2, Clock } from "lucide-react";
@@ -626,10 +627,7 @@ export default function ChatWidget() {
     // Lightweight intent match for customer-typed messages that should open
     // a structured flow instead of sending free-text.
     const lower = trimmed.toLowerCase();
-    const wantsTechAir =
-      lower.includes("tech-air") ||
-      lower.includes("tech air") ||
-      lower.includes("airbag service");
+    const wantsTechAir = detectTechAirServiceIntent(trimmed);
     if (wantsTechAir) {
       if (!override) setInput("");
       const ensureSession = async (): Promise<string | null> => {

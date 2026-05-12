@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { sessions, users, messages, tickets } from "@/lib/db/schema";
+import { sessions, users, messages } from "@/lib/db/schema";
 import { asc, desc, eq, ne, sql, inArray } from "drizzle-orm";
 import { processDueAiClaims, sweepStaleSessions } from "@/lib/sessions/state";
 import { enforce, getClientIp } from "@/lib/rateLimit";
@@ -59,45 +59,6 @@ export async function GET() {
       }
     }
 
-    // Phase 5.5: surface the linked ticket (if any) per session. We pull
-    // the most recent ticket per sessionId so SessionCard can render a
-    // small badge and ChatPanel can disable the Convert-to-Ticket button.
-    const ticketsBySessionId = new Map<
-      string,
-      { id: string; ticketNumber: number; status: string }
-    >();
-    if (sessionIds.length > 0) {
-      const ticketRows = await db
-        .select({
-          id: tickets.id,
-          ticketNumber: tickets.ticketNumber,
-          status: tickets.status,
-          sessionId: tickets.sessionId,
-          createdAt: tickets.createdAt,
-        })
-        .from(tickets)
-        .where(inArray(tickets.sessionId, sessionIds));
-      // Latest-wins (the unique-ish-per-session rule means usually 1 row).
-      for (const t of ticketRows) {
-        if (!t.sessionId) continue;
-        const existing = ticketsBySessionId.get(t.sessionId);
-        if (
-          !existing ||
-          new Date(t.createdAt).getTime() >
-            new Date(
-              (ticketRows.find((r) => r.id === existing.id)?.createdAt ??
-                t.createdAt) as string | Date
-            ).getTime()
-        ) {
-          ticketsBySessionId.set(t.sessionId, {
-            id: t.id,
-            ticketNumber: t.ticketNumber,
-            status: t.status,
-          });
-        }
-      }
-    }
-
     const enriched = rows.map(({ session, claimerName, claimerId }) => ({
       ...session,
       claimedBy: claimerId ? { id: claimerId, name: claimerName } : null,
@@ -109,7 +70,6 @@ export async function GET() {
           lowConfidenceLatest: false,
           negativeSentimentEver: false,
         },
-      linkedTicket: ticketsBySessionId.get(session.id) ?? null,
     }));
 
     // Sort: unclaimed (waiting) oldest first, claimed newest first

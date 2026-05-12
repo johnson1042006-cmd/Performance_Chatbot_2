@@ -47,6 +47,7 @@ const EXPECTED_RULE_IDS = [
   "kit_building_flow",
   "follow_up_product_block",
   "product_discipline_accuracy",
+  "catalog_confirms_availability",
 ];
 
 describe("AI_BEHAVIOR_RULES", () => {
@@ -440,7 +441,9 @@ describe("buildPrompt", () => {
       const { buildPrompt } = await import("../buildPrompt");
       const result = await buildPrompt("session-1", "test");
 
-      expect(result.system).not.toContain("## STORE CATALOG (current stock)");
+      // The string may appear inline inside rule text; check it isn't rendered
+      // as a standalone section header (i.e. at the start of a line).
+      expect(result.system).not.toMatch(/^## STORE CATALOG \(current stock\)/m);
     });
   });
 });

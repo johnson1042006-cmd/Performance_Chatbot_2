@@ -5,7 +5,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // Notification / Audio constructors used by notifyEscalation.
 // ---------------------------------------------------------------------------
 
-const mockNotification = vi.fn();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockNotification: any = vi.fn();
 mockNotification.permission = "granted";
 mockNotification.requestPermission = vi.fn().mockResolvedValue("granted");
 
@@ -124,14 +125,15 @@ describe("Pusher escalation-requested binding", () => {
     const handlers: Record<string, (payload: unknown) => void> = {};
 
     const mockChannel = {
-      bind: vi.fn((event: string, handler: (payload: unknown) => void) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      bind: vi.fn((event: string, handler: (payload: any) => void) => {
         handlers[event] = handler;
       }),
       unbind_all: vi.fn(),
     };
 
     const mockPusher = {
-      subscribe: vi.fn(() => mockChannel),
+      subscribe: vi.fn().mockReturnValue(mockChannel),
       unsubscribe: vi.fn(),
     };
 
@@ -146,9 +148,9 @@ describe("Pusher escalation-requested binding", () => {
     channel.bind("session-closed", () => fetchSessions());
     channel.bind(
       "escalation-requested",
-      (payload: { sessionId: string; reason: string; urgency: string }) => {
+      (payload: unknown) => {
         fetchSessions();
-        notify(payload);
+        notify(payload as { sessionId: string; reason: string; urgency: string });
       }
     );
 

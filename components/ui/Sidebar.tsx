@@ -16,8 +16,6 @@ import {
   Search,
   TrendingUp,
   ListChecks,
-  Ticket,
-  ClipboardList,
 } from "lucide-react";
 import Badge from "./Badge";
 import AlertsBell from "@/components/dashboard/AlertsBell";
@@ -46,11 +44,6 @@ const navItems: NavItem[] = [
     icon: <History size={20} />,
   },
   {
-    label: "Tickets",
-    href: "/dashboard/tickets",
-    icon: <Ticket size={20} />,
-  },
-  {
     label: "Search",
     href: "/dashboard/manager/search",
     icon: <Search size={20} />,
@@ -60,12 +53,6 @@ const navItems: NavItem[] = [
     label: "Insights",
     href: "/dashboard/manager/insights",
     icon: <TrendingUp size={20} />,
-    managerOnly: true,
-  },
-  {
-    label: "Ticket Stats",
-    href: "/dashboard/manager/tickets",
-    icon: <ClipboardList size={20} />,
     managerOnly: true,
   },
   {
@@ -122,12 +109,10 @@ export default function Sidebar() {
     }
   }, []);
 
-  // Poll every 15s for unclaimed badge
   useEffect(() => {
     fetchUnclaimedCount();
-    const id = setInterval(fetchUnclaimedCount, 15_000);
 
-    // Also listen for Pusher dashboard events
+    // Listen for Pusher dashboard events
     let pusherCleanup = () => {};
     import("@/lib/pusher/client")
       .then(({ getPusherClient }) => {
@@ -145,7 +130,6 @@ export default function Sidebar() {
       .catch(() => {});
 
     return () => {
-      clearInterval(id);
       pusherCleanup();
     };
   }, [fetchUnclaimedCount]);

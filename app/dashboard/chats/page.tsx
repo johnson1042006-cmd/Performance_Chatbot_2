@@ -25,11 +25,6 @@ interface SessionData {
   customerRegion?: string | null;
   customerCountry?: string | null;
   lastCustomerActivityAt?: string | null;
-  linkedTicket?: {
-    id: string;
-    ticketNumber: number;
-    status: string;
-  } | null;
 }
 
 const MAX_PINNED = 6;
@@ -310,10 +305,6 @@ export default function LiveChatsPage() {
                 customerCity={activeSession.customerCity}
                 customerRegion={activeSession.customerRegion}
                 customerCountry={activeSession.customerCountry}
-                linkedTicketId={activeSession.linkedTicket?.id ?? null}
-                linkedTicketNumber={
-                  activeSession.linkedTicket?.ticketNumber ?? null
-                }
                 onRelease={handleReleaseSession}
                 onClaim={() => {
                   setPinnedTabs((prev) =>

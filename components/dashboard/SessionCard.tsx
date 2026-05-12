@@ -5,7 +5,7 @@ import Button from "@/components/ui/Button";
 import PageContextBadge from "./PageContextBadge";
 import LocationBadge from "./LocationBadge";
 import SlaPill from "./SlaPill";
-import { UserCheck, Ticket as TicketIcon } from "lucide-react";
+import { UserCheck } from "lucide-react";
 
 interface SessionCardProps {
   session: {
@@ -26,11 +26,6 @@ interface SessionCardProps {
       lowConfidenceLatest: boolean;
       negativeSentimentEver: boolean;
     };
-    linkedTicket?: {
-      id: string;
-      ticketNumber: number;
-      status: string;
-    } | null;
   };
   isActive?: boolean;
   isKeyboardSelected?: boolean;
@@ -98,15 +93,6 @@ export default function SessionCard({
                 }
                 className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"
               />
-            )}
-            {session.linkedTicket && (
-              <span
-                data-testid="session-ticket-badge"
-                title={`Linked ticket #${session.linkedTicket.ticketNumber} (${session.linkedTicket.status})`}
-                className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-text-secondary bg-background border border-border rounded-full px-1.5 py-0.5"
-              >
-                <TicketIcon size={9} />#{session.linkedTicket.ticketNumber}
-              </span>
             )}
           </p>
           <div className="flex items-center gap-2 mt-1 flex-wrap">

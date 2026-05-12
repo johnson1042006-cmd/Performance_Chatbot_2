@@ -8,8 +8,6 @@ import WeeklyMixChart from "@/components/dashboard/manager/WeeklyMixChart";
 import CsatCard from "@/components/dashboard/manager/CsatCard";
 import TopIntentsCompact from "@/components/dashboard/manager/TopIntentsCompact";
 import AgentStatsTable from "@/components/dashboard/manager/AgentStatsTable";
-import TicketsHubCard from "@/components/dashboard/manager/TicketsHubCard";
-
 interface Analytics {
   chatsToday: number;
   aiPercent: number;
@@ -90,15 +88,12 @@ export default function ManagerDashboard() {
             <CsatCard />
           </div>
 
-          {/* Row 4 — intents / agent leaderboard / tickets snapshot */}
-          <div className="col-span-12 sm:col-span-4">
+          {/* Row 4 — intents / agent leaderboard */}
+          <div className="col-span-12 sm:col-span-6">
             <TopIntentsCompact days={7} />
           </div>
-          <div className="col-span-12 sm:col-span-4">
+          <div className="col-span-12 sm:col-span-6">
             <AgentStatsTable compact days={7} />
-          </div>
-          <div className="col-span-12 sm:col-span-4">
-            <TicketsHubCard />
           </div>
 
           {/* Row 5 — recent conversations */}

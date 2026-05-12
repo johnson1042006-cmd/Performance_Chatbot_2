@@ -11,7 +11,7 @@
  *     auto_escalated event when hasAutoEscalated already returns true
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Mock all external I/O before the SUT is imported
@@ -177,7 +177,7 @@ describe("runAiTurn auto-escalation", () => {
       await runAiTurn({ sessionId: SESSION_ID, latestMessage: "useless bot" });
 
       const requestContact = mockTrigger.mock.calls.find(
-        ([channel, event]: [string, string]) =>
+        ([channel, event]) =>
           channel === `session-${SESSION_ID}` && event === "request-contact"
       );
       expect(requestContact).toBeDefined();
@@ -198,7 +198,7 @@ describe("runAiTurn auto-escalation", () => {
       //   2. The auto-escalation update (with autoEscalated: true)
       // We want the escalation one specifically.
       const escalationUpdate = mockTrigger.mock.calls.find(
-        ([channel, event, payload]: [string, string, Record<string, unknown>]) =>
+        ([channel, event, payload]) =>
           channel === "dashboard" &&
           event === "session-update" &&
           payload?.autoEscalated === true
@@ -242,7 +242,7 @@ describe("runAiTurn auto-escalation", () => {
       expect(result.autoEscalated?.reason).toBe("explicit_request");
 
       const requestContact = mockTrigger.mock.calls.find(
-        ([channel, event]: [string, string]) =>
+        ([channel, event]) =>
           channel === `session-${SESSION_ID}` && event === "request-contact"
       );
       expect(requestContact).toBeDefined();
@@ -332,7 +332,7 @@ describe("runAiTurn auto-escalation", () => {
       // Pusher request-contact MUST still fire even though we skipped the
       // escalateToHuman call
       const requestContact = mockTrigger.mock.calls.find(
-        ([channel, event]: [string, string]) =>
+        ([channel, event]) =>
           channel === `session-${SESSION_ID}` && event === "request-contact"
       );
       expect(requestContact).toBeDefined();
@@ -370,7 +370,7 @@ describe("runAiTurn auto-escalation", () => {
       });
 
       const contactEvents = mockTrigger.mock.calls.filter(
-        ([channel, event]: [string, string]) =>
+        ([channel, event]) =>
           channel === `session-${SESSION_ID}` && event === "request-contact"
       );
       // hasAutoEscalated guard ensures exactly one event per session
@@ -399,7 +399,7 @@ describe("runAiTurn auto-escalation", () => {
 
       // No request-contact
       const requestContact = mockTrigger.mock.calls.find(
-        ([channel, event]: [string, string]) =>
+        ([channel, event]) =>
           channel === `session-${SESSION_ID}` && event === "request-contact"
       );
       expect(requestContact).toBeUndefined();
@@ -435,7 +435,7 @@ describe("runAiTurn auto-escalation", () => {
 
     expect(result.autoEscalated).toBeNull();
     const requestContact = mockTrigger.mock.calls.find(
-      ([channel, event]: [string, string]) =>
+      ([channel, event]) =>
         channel === `session-${SESSION_ID}` && event === "request-contact"
     );
     expect(requestContact).toBeUndefined();
