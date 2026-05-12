@@ -593,6 +593,9 @@ export async function searchProducts(
   const [subCatResults, brandResults, bcKwResults, localMatches] = await Promise.all([
 
     // 3a: canonical subcategory/type/broad-type category
+    // Try ALL candidate category names in parallel and union results.
+    // Previously stopped at first hit — that missed "Offroad Helmets" when
+    // "Moto Helmets" existed but contained no brand-relevant products.
     (async (): Promise<BCProduct[]> => {
       let candidates: string[] | undefined;
       if (isSupportedProductType(productType)) {
@@ -606,12 +609,13 @@ export async function searchProducts(
         candidates = BROAD_TYPE_CATEGORIES[productType];
       }
       if (!candidates || candidates.length === 0) return [];
-      for (const catName of candidates) {
-        try {
-          const cat = await findCategoryByName(catName);
-          if (cat) {
-            const products = await getProductsByCategory(cat.id, 100);
-            if (products.length > 0) {
+
+      const perCat = await Promise.all(
+        candidates.map(async (catName) => {
+          try {
+            const cat = await findCategoryByName(catName);
+            if (cat) {
+              const products = await getProductsByCategory(cat.id, 100);
               if (productType && !isSupportedProductType(productType)) {
                 for (const p of products) {
                   (p as BCProduct & { _broadType?: string })._broadType = productType;
@@ -619,10 +623,18 @@ export async function searchProducts(
               }
               return products;
             }
-          }
-        } catch { /* continue to next candidate */ }
+          } catch { /* ignore */ }
+          return [] as BCProduct[];
+        })
+      );
+
+      const seen = new Map<number, BCProduct>();
+      for (const products of perCat) {
+        for (const p of products) {
+          if (!seen.has(p.id)) seen.set(p.id, p);
+        }
       }
-      return [];
+      return Array.from(seen.values());
     })(),
 
     // 3b: brand category — paginate 100 (double the old 50 limit)
