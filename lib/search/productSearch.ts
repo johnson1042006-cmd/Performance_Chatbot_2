@@ -21,6 +21,8 @@ import {
   isSupportedProductType,
   STREET_FALLBACK_PHRASE,
   type SubcategoryValue,
+  type SubcategoryRequest,
+  type SupportedProductType,
 } from "./subcategory";
 import { db } from "@/lib/db";
 import { sql } from "drizzle-orm";
@@ -308,6 +310,15 @@ const USE_CASE_SEARCH_TERMS: Record<string, Record<string, string[]>> = {
 };
 
 export function extractProductType(query: string): string | null {
+  // Broad-type regexes checked first — these return non-SupportedProductType
+  // strings that feed searchByBroadType instead of searchByTypeSubcategory.
+  if (/\b(communicator|intercom|bluetooth|comm system|comms?)\b/i.test(query)) return "comm";
+  if (/\b(goggles?|moto goggles?)\b/i.test(query)) return "goggles";
+  if (/\b(brake pads?|brake shoes?)\b/i.test(query)) return "brake";
+  if (/\b(sprockets?|front sprocket|rear sprocket)\b/i.test(query)) return "sprocket";
+  if (/\b(chain lube|chain wax)\b/i.test(query)) return "chemical";
+  if (/\b(air filters?|oil filters?|filter)\b/i.test(query)) return "filter";
+
   const lower = query.toLowerCase();
   for (const [type, terms] of Object.entries(PRODUCT_TYPE_MAP)) {
     for (const term of terms) {
@@ -371,6 +382,17 @@ function preferInStock(products: BCProduct[]): BCProduct[] {
 
 function filterByProductType(products: BCProduct[], type: string | null): BCProduct[] {
   if (!type || products.length === 0) return products;
+
+  // Broad types: trust the _broadType tag applied by searchByBroadType.
+  // Model-number-only SKUs (e.g. "EBC FA600HH") have no type word in their
+  // name, so PRODUCT_TYPE_MAP term matching would always miss them.
+  if (BROAD_TYPE_CATEGORIES[type]) {
+    const tagged = products.filter(
+      (p) => (p as BCProduct & { _broadType?: string })._broadType === type
+    );
+    return tagged.length > 0 ? tagged : products;
+  }
+
   const matching = products.filter((p) => productMatchesType(p, type));
   return matching.length > 0 ? matching : products;
 }
@@ -614,6 +636,100 @@ const CATEGORY_SYNONYMS: Record<string, string[]> = {
   stands: ["parts"],
 };
 
+// Canonical BC category names per productType + subcategory. Used to bypass
+// the brand-keyword trap where a query like "alpinestars mx helmets"
+// matches the Alpinestars brand category (mixed product types) and the
+// MX helmets never surface because their names like "Supertech M10"
+// don't contain "mx" or "moto" tokens. Try alternates in order.
+const TYPE_SUBCATEGORY_CATEGORIES: Partial<
+  Record<SupportedProductType, Partial<Record<SubcategoryValue, string[]>>>
+> = {
+  helmet: {
+    mx: ["MX Helmets", "Moto Helmets"],
+    full_face: ["Street Helmets", "Full Face Helmets"],
+    modular: ["Modular Helmets"],
+    adventure: ["Adventure Helmets"],
+    open_face: ["Open Face Helmets"],
+    half: ["Half Helmets"],
+  },
+  jacket: {
+    mx: ["MX Jackets", "Moto Jackets"],
+    street: ["Street Jackets"],
+    adventure: ["Adventure Jackets"],
+    cruiser: ["Cruiser Jackets"],
+    racing: ["Race Jackets", "Racing Jackets"],
+  },
+  boots: {
+    mx: ["MX Boots", "Moto Boots"],
+    street: ["Street Boots"],
+    adventure: ["Adventure Boots"],
+    racing: ["Race Boots", "Racing Boots"],
+    cruiser: ["Cruiser Boots"],
+  },
+  gloves: {
+    mx: ["MX Gloves", "Moto Gloves"],
+    street: ["Street Gloves"],
+    adventure: ["Adventure Gloves"],
+    racing: ["Race Gloves", "Racing Gloves"],
+    winter: ["Winter Gloves", "Heated Gloves"],
+  },
+  pants: {
+    mx: ["MX Pants", "Moto Pants"],
+    street: ["Street Pants"],
+    adventure: ["Adventure Pants"],
+    cruiser: ["Cruiser Pants"],
+  },
+  tire: {
+    dirt: ["Dirt Tires", "Offroad Tires"],
+    sport: ["Sport Tires", "Sportbike Tires"],
+    sport_touring: ["Sport Touring Tires"],
+    adventure: ["Adventure Tires", "Dual Sport Tires"],
+    cruiser: ["Cruiser Tires"],
+  },
+};
+
+// For productType-only queries (no explicit subcategory), default to the
+// street-appropriate canonical category. Catches "show me alpinestars
+// helmets" without subcategory — surfaces street/full-face Alpinestars
+// helmets first instead of hitting the brand-trap.
+const TYPE_DEFAULT_CATEGORIES: Partial<Record<SupportedProductType, string[]>> = {
+  helmet: ["Street Helmets", "Full Face Helmets"],
+  jacket: ["Street Jackets"],
+  boots: ["Street Boots"],
+  gloves: ["Street Gloves"],
+  pants: ["Street Pants"],
+  tire: ["Sport Touring Tires"],
+};
+
+const BROAD_TYPE_CATEGORIES: Record<string, string[]> = {
+  comm:     ["Comm Systems", "Electronics"],
+  goggles:  ["Goggles"],
+  brake:    ["Brake Pads/Brake Shoes"],
+  sprocket: ["Sprockets"],
+  filter:   ["Air Filters", "Oil Filters"],
+};
+
+async function searchByBroadType(broadType: string | null): Promise<BCProduct[]> {
+  if (!broadType) return [];
+  const candidates = BROAD_TYPE_CATEGORIES[broadType];
+  if (!candidates) return [];
+  for (const name of candidates) {
+    try {
+      const cat = await findCategoryByName(name);
+      if (cat) {
+        const products = await getProductsByCategory(cat.id, 50);
+        if (products.length > 0) {
+          for (const p of products) {
+            (p as BCProduct & { _broadType?: string })._broadType = broadType;
+          }
+          return products;
+        }
+      }
+    } catch { /* continue */ }
+  }
+  return [];
+}
+
 function expandCategoryTerms(keywords: string[]): string[] {
   const expanded = new Set<string>();
   for (const kw of keywords) {
@@ -647,6 +763,33 @@ async function searchByCategory(keywords: string[]): Promise<BCProduct[]> {
       const cat = await findCategoryByName(phrase);
       if (cat) {
         return getProductsByCategory(cat.id, 50);
+      }
+    } catch {
+      /* continue */
+    }
+  }
+  return [];
+}
+
+async function searchByTypeSubcategory(
+  productType: SupportedProductType | null,
+  subRequest: SubcategoryRequest
+): Promise<BCProduct[]> {
+  if (!productType) return [];
+  let candidates: string[] | undefined;
+  if (subRequest && subRequest.explicit) {
+    candidates = TYPE_SUBCATEGORY_CATEGORIES[productType]?.[subRequest.value];
+  }
+  if (!candidates || candidates.length === 0) {
+    candidates = TYPE_DEFAULT_CATEGORIES[productType];
+  }
+  if (!candidates) return [];
+  for (const name of candidates) {
+    try {
+      const cat = await findCategoryByName(name);
+      if (cat) {
+        const products = await getProductsByCategory(cat.id, 50);
+        if (products.length > 0) return products;
       }
     } catch {
       /* continue */
@@ -750,21 +893,41 @@ export async function searchProducts(
       ? ["touring"]
       : [];
 
+  const earlySubRequest = isSupportedProductType(earlyProductType)
+    ? extractSubcategoryRequest(normalizedQuery, earlyProductType)
+    : null;
+
   const keywordsForLocal = keywords.join(" ");
   const keywordQuery = keywords.slice(0, 6).join(" ");
 
-  const [localMatches, bcKeywordResults, categoryResults, useCaseResults, colorwayResults] =
-    await Promise.all([
-      searchLocalCatalog(keywordsForLocal, 10).catch(() => [] as LocalMatch[]),
-      searchProductsBC(keywordQuery).catch(() => [] as BCProduct[]),
-      searchByCategory(keywords).catch(() => [] as BCProduct[]),
-      useCaseKeywords.length > 0
-        ? searchByCategory(useCaseKeywords).catch(() => [] as BCProduct[])
-        : Promise.resolve([] as BCProduct[]),
-      detectedColor
-        ? searchByColorway(detectedColor, keywords).catch(() => [] as BCProduct[])
-        : Promise.resolve([] as BCProduct[]),
-    ]);
+  const [
+    localMatches,
+    bcKeywordResults,
+    categoryResults,
+    useCaseResults,
+    colorwayResults,
+    typeSubResults,
+    broadTypeResults,
+  ] = await Promise.all([
+    searchLocalCatalog(keywordsForLocal, 10).catch(() => [] as LocalMatch[]),
+    searchProductsBC(keywordQuery).catch(() => [] as BCProduct[]),
+    searchByCategory(keywords).catch(() => [] as BCProduct[]),
+    useCaseKeywords.length > 0
+      ? searchByCategory(useCaseKeywords).catch(() => [] as BCProduct[])
+      : Promise.resolve([] as BCProduct[]),
+    detectedColor
+      ? searchByColorway(detectedColor, keywords).catch(() => [] as BCProduct[])
+      : Promise.resolve([] as BCProduct[]),
+    searchByTypeSubcategory(
+      isSupportedProductType(earlyProductType) ? earlyProductType : null,
+      earlySubRequest
+    ).catch(() => [] as BCProduct[]),
+    searchByBroadType(
+      earlyProductType && !isSupportedProductType(earlyProductType)
+        ? earlyProductType
+        : null
+    ).catch(() => [] as BCProduct[]),
+  ]);
 
   const deduped = new Map<number, BCProduct>();
   function addProducts(products: BCProduct[]) {
@@ -779,6 +942,15 @@ export async function searchProducts(
   for (const p of useCaseResults) {
     (p as BCProduct & { _fromRaceCategory?: boolean })._fromRaceCategory = true;
   }
+
+  // Type+subcategory direct hits rank HIGHEST — these are the canonical BC
+  // category for the exact thing the customer asked for. Prevents the
+  // "alpinestars mx helmets returns 50 random Alpinestars products" trap.
+  addProducts(typeSubResults);
+
+  // Broad-type category hits rank second-highest — direct category lookup
+  // for non-SupportedProductType queries (sprockets, brake pads, goggles, etc.)
+  addProducts(broadTypeResults);
 
   // Use-case category results rank first (race/touring helmet intent)
   addProducts(useCaseResults);
@@ -856,8 +1028,12 @@ export async function searchProducts(
       fallbackQueries = [...useCaseTerms];
     } else if (isSupportedProductType(productType)) {
       fallbackQueries = [STREET_FALLBACK_PHRASE[productType]];
-    } else {
+    } else if (PRODUCT_TYPE_MAP[productType]) {
       fallbackQueries = [PRODUCT_TYPE_MAP[productType][0] + "s"];
+    } else {
+      // Broad type with no PRODUCT_TYPE_MAP entry — category search already
+      // ran via searchByBroadType; skip the keyword fallback.
+      fallbackQueries = [];
     }
 
     const fallbackSearches = fallbackQueries.flatMap((q) => [

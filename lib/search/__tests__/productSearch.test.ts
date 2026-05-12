@@ -563,4 +563,228 @@ describe("searchProducts", () => {
     expect(names).toEqual(["Disabled", "Good"]);
     expect(result.products.find((p) => p.name === "Hidden")).toBeUndefined();
   });
+
+  it("surfaces MX helmets for 'alpinestars mx helmets' via type+subcategory path", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const mxCat = { id: 99, name: "MX Helmets", parent_id: 0 };
+    const mxHelmet = (id: number, name: string) => ({
+      id, name, sku: `AS-${id}`,
+      description: "Professional motocross helmet designed for off-road riders.",
+      price: 499, sale_price: 0, retail_price: 0, calculated_price: 499,
+      inventory_level: 5, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [99], brand_id: 1,
+      custom_url: { url: `/helmets/${id}/` }, variants: [], images: [],
+    });
+    const fixtures = [
+      mxHelmet(101, "Alpinestars Supertech M10 Deegan Monster"),
+      mxHelmet(102, "Alpinestars Supertech M10 Unite"),
+      mxHelmet(103, "Alpinestars SM-10 Solid"),
+      mxHelmet(104, "Alpinestars S-M7 Core"),
+    ];
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => (name === "MX Helmets" ? mxCat : null)
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => (id === 99 ? fixtures : [])
+    );
+
+    const result = await searchProducts("alpinestars mx helmets");
+    const names = result.products.map((p) => p.name);
+    expect(names).toContain("Alpinestars Supertech M10 Deegan Monster");
+    expect(names).toContain("Alpinestars Supertech M10 Unite");
+    expect(names).toContain("Alpinestars SM-10 Solid");
+    expect(names).toContain("Alpinestars S-M7 Core");
+  });
+
+  it("surfaces Adventure Boots for 'show me adventure boots'", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const cat = { id: 88, name: "Adventure Boots", parent_id: 0 };
+    const boot = (id: number, name: string) => ({
+      id, name, sku: `B-${id}`, description: "adventure boots",
+      price: 299, sale_price: 0, retail_price: 0, calculated_price: 299,
+      inventory_level: 3, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [88], brand_id: 2,
+      custom_url: { url: `/boots/${id}/` }, variants: [], images: [],
+    });
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => (name === "Adventure Boots" ? cat : null)
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) =>
+        id === 88
+          ? [
+              boot(201, "Alpinestars Corozal Adventure Drystar Boot"),
+              boot(202, "Sidi Adventure 2 Gore Boot"),
+            ]
+          : []
+    );
+
+    const result = await searchProducts("show me adventure boots");
+    const names = result.products.map((p) => p.name);
+    expect(names).toContain("Alpinestars Corozal Adventure Drystar Boot");
+    expect(names).toContain("Sidi Adventure 2 Gore Boot");
+  });
+
+  it("surfaces Street Helmets default for 'show me alpinestars helmets' with no subcategory", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const streetCat = { id: 77, name: "Street Helmets", parent_id: 0 };
+    const streetHelmet = (id: number, name: string) => ({
+      id, name, sku: `H-${id}`,
+      description: "Full face street helmet for sport and touring riders.",
+      price: 599, sale_price: 0, retail_price: 0, calculated_price: 599,
+      inventory_level: 4, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [77], brand_id: 1,
+      custom_url: { url: `/helmets/${id}/` }, variants: [], images: [],
+    });
+    const fixtures = [
+      streetHelmet(301, "Alpinestars Supertech R10 Solid"),
+      streetHelmet(302, "Alpinestars Supertech R10 Element"),
+    ];
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => (name === "Street Helmets" ? streetCat : null)
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => (id === 77 ? fixtures : [])
+    );
+
+    const result = await searchProducts("show me alpinestars helmets");
+    const names = result.products.map((p) => p.name);
+    expect(names).toContain("Alpinestars Supertech R10 Solid");
+    expect(names).toContain("Alpinestars Supertech R10 Element");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// searchProducts — broad product types (comm / brake / sprocket)
+// ---------------------------------------------------------------------------
+describe("searchProducts — broad product types", () => {
+  vi.mock("@/lib/bigcommerce/client", () => ({
+    searchProductsBC: vi.fn().mockResolvedValue([]),
+    getProductBySKU: vi.fn().mockResolvedValue(null),
+    getProductByNameLike: vi.fn().mockResolvedValue([]),
+    getProductById: vi.fn().mockResolvedValue(null),
+    getProductsByCategory: vi.fn().mockResolvedValue([]),
+    findCategoryByName: vi.fn().mockResolvedValue(null),
+  }));
+
+  vi.mock("./localCatalogSearch", () => ({
+    searchLocalCatalog: vi.fn().mockResolvedValue([]),
+  }));
+
+  vi.mock("@/lib/db", () => ({
+    db: { execute: vi.fn().mockResolvedValue([]) },
+  }));
+
+  vi.mock("@/lib/db/schema", () => ({
+    productColorways: {},
+  }));
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("surfaces Comm Systems products for 'what bluetooth communicators do you have'", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const commCat = { id: 55, name: "Comm Systems", parent_id: 0 };
+    const commProduct = (id: number, name: string) => ({
+      id, name, sku: `CS-${id}`, description: "Bluetooth motorcycle communication system.",
+      price: 299, sale_price: 0, retail_price: 0, calculated_price: 299,
+      inventory_level: 8, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [55], brand_id: 10,
+      custom_url: { url: `/comm/${id}/` }, variants: [], images: [],
+    });
+    const fixtures = [
+      commProduct(501, "Cardo Packtalk Edge"),
+      commProduct(502, "Sena 50S Motorcycle Bluetooth Communication System"),
+    ];
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => (name === "Comm Systems" ? commCat : null)
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => (id === 55 ? fixtures : [])
+    );
+
+    const result = await searchProducts("what bluetooth communicators do you have");
+    const names = result.products.map((p) => p.name);
+    expect(names).toContain("Cardo Packtalk Edge");
+    expect(names).toContain("Sena 50S Motorcycle Bluetooth Communication System");
+  });
+
+  it("surfaces Brake Pads products (model-number SKUs) for 'do you have ebc brake pads'", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const brakeCat = { id: 66, name: "Brake Pads/Brake Shoes", parent_id: 0 };
+    const brakeProduct = (id: number, name: string) => ({
+      id, name, sku: name, description: "Sintered brake pad compound.",
+      price: 29, sale_price: 0, retail_price: 0, calculated_price: 29,
+      inventory_level: 12, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [66], brand_id: 20,
+      custom_url: { url: `/brake/${id}/` }, variants: [], images: [],
+    });
+    const fixtures = [
+      brakeProduct(601, "EBC FA600HH"),
+      brakeProduct(602, "EBC FA229HH"),
+    ];
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => (name === "Brake Pads/Brake Shoes" ? brakeCat : null)
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => (id === 66 ? fixtures : [])
+    );
+
+    const result = await searchProducts("do you have ebc brake pads");
+    const names = result.products.map((p) => p.name);
+    expect(names).toContain("EBC FA600HH");
+    expect(names).toContain("EBC FA229HH");
+  });
+
+  it("surfaces Sprockets products for 'show me sprockets'", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const sprocketCat = { id: 77, name: "Sprockets", parent_id: 0 };
+    const sprocketProduct = (id: number, name: string) => ({
+      id, name, sku: `SP-${id}`, description: "Hardened steel sprocket.",
+      price: 49, sale_price: 0, retail_price: 0, calculated_price: 49,
+      inventory_level: 6, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [77], brand_id: 30,
+      custom_url: { url: `/sprockets/${id}/` }, variants: [], images: [],
+    });
+    const fixtures = [
+      sprocketProduct(701, "Renthal 520 Rear Sprocket 48T"),
+      sprocketProduct(702, "Sunstar 520 Front Sprocket 13T"),
+    ];
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => (name === "Sprockets" ? sprocketCat : null)
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => (id === 77 ? fixtures : [])
+    );
+
+    const result = await searchProducts("show me sprockets");
+    const names = result.products.map((p) => p.name);
+    expect(names).toContain("Renthal 520 Rear Sprocket 48T");
+    expect(names).toContain("Sunstar 520 Front Sprocket 13T");
+  });
 });
