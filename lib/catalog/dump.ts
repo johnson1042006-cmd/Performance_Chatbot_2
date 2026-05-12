@@ -199,7 +199,7 @@ export async function dumpCatalog(): Promise<DumpResult> {
 
   const brandsByCategory: Record<string, string[]> = {};
   for (const [key, set] of Object.entries(brandsByCategoryMap)) {
-    brandsByCategory[key] = [...set].sort();
+    brandsByCategory[key] = Array.from(set).sort();
   }
 
   return {
