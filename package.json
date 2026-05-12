@@ -14,6 +14,7 @@
     "test:e2e:all": "npm run build && playwright test",
     "test:catalog": "playwright test e2e/catalog-coverage.spec.ts",
     "dump:catalog": "tsx scripts/dump-catalog.ts",
+    "catalog:refresh": "npx tsx scripts/refresh-catalog-skeleton.ts",
     "db:push": "npx drizzle-kit push",
     "db:seed": "npx tsx scripts/seed-users.ts",
     "db:seed:knowledge": "npx tsx scripts/seed-knowledge.ts",

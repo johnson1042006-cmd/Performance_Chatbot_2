@@ -368,4 +368,79 @@ describe("buildPrompt", () => {
       expect(result.system).toContain(`${i + 1}. ${AI_BEHAVIOR_RULES[i].rule}`);
     }
   });
+
+  // -------------------------------------------------------------------------
+  // Catalog index injection
+  // -------------------------------------------------------------------------
+
+  describe("when store_catalog_index row is present", () => {
+    beforeEach(async () => {
+      // Override the db mock so the knowledgeBase query returns a catalog-index row.
+      const dbModule = await import("@/lib/db");
+      const db = dbModule.db as any;
+      const selectMock = vi.fn();
+      const fromMock = vi.fn();
+      db.select = selectMock;
+      selectMock.mockReturnValue({ from: fromMock });
+
+      let callCount = 0;
+      fromMock.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            where: vi.fn().mockReturnValue({
+              orderBy: vi.fn().mockReturnValue({
+                limit: vi.fn().mockResolvedValue([]),
+              }),
+            }),
+          };
+        }
+        return Promise.resolve([
+          {
+            id: "uuid-catalog",
+            topic: "store_catalog_index",
+            content: "helmet:\n  Shoei: full_face\ncomm: Cardo, Sena",
+            updatedAt: new Date(),
+            isFaq: false,
+          },
+        ]);
+      });
+    });
+
+    it("injects ## STORE CATALOG block with catalog content", async () => {
+      const { buildPrompt } = await import("../buildPrompt");
+      const result = await buildPrompt("session-1", "do you carry helmets?");
+
+      expect(result.system).toContain("## STORE CATALOG (current stock)");
+      expect(result.system).toContain("helmet:\n  Shoei: full_face\ncomm: Cardo, Sena");
+    });
+
+    it("catalog-index entry does NOT appear under ## KNOWLEDGE BASE", async () => {
+      const { buildPrompt } = await import("../buildPrompt");
+      const result = await buildPrompt("session-1", "test");
+
+      // The formatted heading for store_catalog_index would be "STORE CATALOG INDEX"
+      // if it were rendered in the KB loop — verify it is not present there.
+      const kbStart = result.system.indexOf("## KNOWLEDGE BASE");
+      if (kbStart !== -1) {
+        const kbSection = result.system.slice(kbStart);
+        expect(kbSection).not.toContain("STORE CATALOG INDEX");
+      }
+      // Additionally, the raw topic string should not appear in the KB section.
+      expect(result.system).not.toMatch(
+        /## KNOWLEDGE BASE[\s\S]*### STORE CATALOG INDEX/
+      );
+    });
+  });
+
+  describe("when no catalog-index row is present", () => {
+    it("does not render ## STORE CATALOG header", async () => {
+      // The outer beforeEach returns [] for the knowledge-base query, so no
+      // store_catalog_index row — the block must stay absent.
+      const { buildPrompt } = await import("../buildPrompt");
+      const result = await buildPrompt("session-1", "test");
+
+      expect(result.system).not.toContain("## STORE CATALOG (current stock)");
+    });
+  });
 });

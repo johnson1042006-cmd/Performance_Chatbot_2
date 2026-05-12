@@ -1,3 +1,9 @@
+// The dynamic STORE CATALOG (current stock) block in the system prompt is
+// the authoritative source for CURRENT brand availability. PRODUCT_TAXONOMY
+// is the durable discipline/use-case reference — it tells the model which
+// brands belong to which riding discipline, even when those brands have a
+// small or stale presence in the live catalog.
+
 /**
  * Static product taxonomy for Performance Cycle (performancecycle.com).
  *
