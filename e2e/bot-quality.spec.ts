@@ -597,7 +597,7 @@ test.describe("Search refinement — brand context preserved across narrowing", 
     // The bot should either show an Alpinestars MX helmet (SM5/SM8/Supertech)
     // or honestly acknowledge no in-stock Alpinestars MX BEFORE pivoting —
     // it must not silently pivot to Fox/Bell as if Alpinestars never existed.
-    const namesAlpinestarsMX = /alpinestars\s+(sm-?[58]|supertech\s+s?-?m?\s*1?0|m10)/i.test(reply2);
+    const namesAlpinestarsMX = /alpinestars\s+(sm-?[58]|supertech\s+s?-?m?-?\s*1?0|m10)/i.test(reply2);
     const honestlyAcknowledges = /not\s+(finding|seeing)\s+alpinestars|don't\s+have\s+alpinestars|alpinestars\s+.{0,30}\s+out\s+of\s+stock/i.test(reply2);
     expect(
       namesAlpinestarsMX || honestlyAcknowledges,

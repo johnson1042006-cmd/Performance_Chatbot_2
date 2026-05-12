@@ -4,7 +4,6 @@ import {
   searchProductsBC,
   getProductBySKU,
   getProductByNameLike,
-  getProductById,
   getProductsByCategory,
   findCategoryByName,
   type BCProduct,
@@ -17,15 +16,12 @@ import {
 import {
   classifyProductSubcategory,
   extractSubcategoryRequest,
-  biasBySubcategory,
   isSupportedProductType,
-  STREET_FALLBACK_PHRASE,
+  OFF_STREET_SUBCATEGORIES,
   type SubcategoryValue,
   type SubcategoryRequest,
   type SupportedProductType,
 } from "./subcategory";
-import { db } from "@/lib/db";
-import { sql } from "drizzle-orm";
 
 const SKU_PATTERN = /\b[A-Z0-9]{2,}[-_]?[A-Z0-9]{2,}[-_]?[A-Z0-9]*\b/i;
 
@@ -254,64 +250,9 @@ const PRODUCT_TYPE_MAP: Record<string, string[]> = {
   accessory: ["accessory", "accessories", "add-on", "add-ons", "extras", "accessory pack"],
 };
 
-const TYPE_EXCLUSION_TERMS: Record<string, string[]> = {
-  jacket: ["chest protector", "body armor", "roost guard", "roost deflector", "chest guard",
-    "under jersey", "pressure suit", "subframe", "bio-foam", "plastic shell"],
-  // Filter out helmet ACCESSORIES that mention "helmet" in their name
-  // (shields, visors, Pinlock inserts, sun shades, breath boxes, comm units,
-  // bags, locks). These should surface for accessory queries, not helmet
-  // queries. Match terms are checked as substrings on name + first 800
-  // chars of description.
-  helmet: [
-    "helmet bag", "helmet lock", "helmet shield", "helmet visor",
-    "sun shield", "sun shade", "inner shield", "iridium shield",
-    "smoke shield", "tinted shield", "clear shield", "replacement shield",
-    "face shield", "pinlock", "anti-fog", "breath box", "breathbox",
-    "breath deflector", "chin curtain", "helmet liner", "cheek pad",
-    "communication system", "intercom", "cardo", "sena",
-  ],
-  boots: ["boot bag", "boot liner"],
-  gloves: ["glove box", "glove compartment"],
-  airbag: ["replacement canister", "canister only"],
-};
-
-const USE_CASE_SEARCH_TERMS: Record<string, Record<string, string[]>> = {
-  helmet: {
-    touring: ["modular helmet", "touring helmet", "full face helmet"],
-    sport: ["full face helmet", "race helmet", "street helmet"],
-    adventure: ["adventure helmet", "dual sport helmet", "adv helmet"],
-    street: ["full face helmet", "street helmet", "modular helmet"],
-    cruiser: ["half helmet", "open face helmet", "3/4 helmet"],
-    offroad: ["motocross helmet", "mx helmet", "dirt helmet"],
-    commute: ["modular helmet", "full face helmet", "street helmet"],
-  },
-  jacket: {
-    touring: ["touring jacket", "adventure jacket", "waterproof jacket"],
-    sport: ["leather jacket", "race jacket", "sport jacket"],
-    adventure: ["adventure jacket", "adv jacket", "dual sport jacket"],
-    cruiser: ["leather jacket", "cruiser jacket"],
-  },
-  boots: {
-    touring: ["touring boots", "adventure boots", "waterproof boots"],
-    sport: ["race boots", "sport boots", "track boots"],
-    adventure: ["adventure boots", "dual sport boots"],
-  },
-  airbag: {
-    street: ["tech-air airbag", "airbag vest", "klim ai-1", "tech-air plasma"],
-    offroad: ["tech-air offroad", "tech-air mx", "offroad airbag"],
-    avalanche: ["avalanche airbag", "klim atlas avalanche", "klim aspect avalanche"],
-    mx: ["tech-air mx", "tech-air offroad", "offroad airbag"],
-  },
-  suit: {
-    track: ["race suit", "one piece suit", "leather suit", "track suit"],
-    sport: ["race suit", "one piece suit", "leather suit", "track suit"],
-    street: ["riding suit", "leather suit"],
-  },
-};
-
 export function extractProductType(query: string): string | null {
   // Broad-type regexes checked first — these return non-SupportedProductType
-  // strings that feed searchByBroadType instead of searchByTypeSubcategory.
+  // strings that feed the broad-type category path instead of subcategory routing.
   if (/\b(communicator|intercom|bluetooth|comm system|comms?)\b/i.test(query)) return "comm";
   if (/\b(goggles?|moto goggles?)\b/i.test(query)) return "goggles";
   if (/\b(brake pads?|brake shoes?)\b/i.test(query)) return "brake";
@@ -329,105 +270,9 @@ export function extractProductType(query: string): string | null {
   return null;
 }
 
-const USE_CASE_KEYWORDS = [
-  "touring", "sport", "adventure", "street", "cruiser", "offroad",
-  "commute", "commuting", "track", "race", "racing", "dirt", "mx",
-  "dual sport", "adv", "avalanche",
-];
-
-function extractUseCase(query: string): string | null {
-  const lower = query.toLowerCase();
-  for (const uc of USE_CASE_KEYWORDS) {
-    if (lower.includes(uc)) {
-      if (uc === "commuting") return "commute";
-      if (uc === "track" || uc === "race" || uc === "racing") return "sport";
-      if (uc === "dirt" || uc === "mx") return "offroad";
-      if (uc === "dual sport" || uc === "adv") return "adventure";
-      return uc;
-    }
-  }
-  return null;
-}
-
-function productMatchesType(product: BCProduct, type: string): boolean {
-  const terms = PRODUCT_TYPE_MAP[type];
-  if (!terms) return false;
-  const nameLower = product.name.toLowerCase();
-  const descLower = (product.description || "").replace(/<[^>]*>/g, "").toLowerCase();
-  const matched = terms.some((term) => nameLower.includes(term) || descLower.substring(0, 500).includes(term));
-  if (!matched) return false;
-
-  const exclusions = TYPE_EXCLUSION_TERMS[type];
-  if (exclusions) {
-    const combined = nameLower + " " + descLower.substring(0, 800);
-    if (exclusions.some((ex) => combined.includes(ex))) return false;
-  }
-  return true;
-}
-
 function isInStock(product: BCProduct): boolean {
   if (product.inventory_tracking === "none") return true;
   return product.inventory_level > 0;
-}
-
-function preferInStock(products: BCProduct[]): BCProduct[] {
-  const inStock: BCProduct[] = [];
-  const oos: BCProduct[] = [];
-  for (const p of products) {
-    if (isInStock(p)) inStock.push(p);
-    else oos.push(p);
-  }
-  return inStock.length > 0 ? [...inStock, ...oos] : oos;
-}
-
-function filterByProductType(products: BCProduct[], type: string | null): BCProduct[] {
-  if (!type || products.length === 0) return products;
-
-  // Broad types: trust the _broadType tag applied by searchByBroadType.
-  // Model-number-only SKUs (e.g. "EBC FA600HH") have no type word in their
-  // name, so PRODUCT_TYPE_MAP term matching would always miss them.
-  if (BROAD_TYPE_CATEGORIES[type]) {
-    const tagged = products.filter(
-      (p) => (p as BCProduct & { _broadType?: string })._broadType === type
-    );
-    return tagged.length > 0 ? tagged : products;
-  }
-
-  const matching = products.filter((p) => productMatchesType(p, type));
-  return matching.length > 0 ? matching : products;
-}
-
-const PREMIUM_BRANDS = new Set([
-  "alpinestars", "shoei", "arai", "schuberth", "sidi", "klim",
-  "rev'it", "revit", "fox racing", "fox", "bell", "scorpion",
-  "gaerne", "dainese", "agv", "nolan", "icon", "ls2",
-  "michelin", "dunlop", "pirelli", "metzeler", "avon",
-  "akrapovic", "yoshimura",
-]);
-
-const PREMIUM_BRANDS_LIST = Array.from(PREMIUM_BRANDS);
-
-function isPremiumBrand(productName: string): boolean {
-  const lower = productName.toLowerCase();
-  return PREMIUM_BRANDS_LIST.some((brand) => lower.startsWith(brand) || lower.includes(brand + " "));
-}
-
-function scoreRelevance(product: BCProduct, keywords: string[]): number {
-  const nameLower = product.name.toLowerCase();
-  const descLower = (product.description || "").replace(/<[^>]*>/g, "").toLowerCase().substring(0, 600);
-  let score = 0;
-  for (const kw of keywords) {
-    if (nameLower.includes(kw)) score += 3;
-    else if (descLower.includes(kw)) score += 1;
-  }
-  if (isInStock(product)) score += 2;
-  if (isPremiumBrand(product.name)) score += 1;
-  if ((product as BCProduct & { _fromRaceCategory?: boolean })._fromRaceCategory) score += 2;
-  return score;
-}
-
-function rankByRelevance(products: BCProduct[], keywords: string[]): BCProduct[] {
-  return [...products].sort((a, b) => scoreRelevance(b, keywords) - scoreRelevance(a, keywords));
 }
 
 export interface BudgetInfo {
@@ -591,51 +436,6 @@ async function enrichLocalMatch(match: LocalMatch): Promise<BCProduct | null> {
   }
 }
 
-const CATEGORY_SYNONYMS: Record<string, string[]> = {
-  mx: ["moto"],
-  motocross: ["moto"],
-  dirt: ["moto", "offroad"],
-  offroad: ["moto"],
-  "dual sport": ["adventure", "dual sport"],
-  "dual-sport": ["adventure", "dual sport"],
-  adv: ["adventure"],
-  "full face": ["street", "full face", "race"],
-  "open face": ["open face"],
-  modular: ["modular"],
-  flip: ["modular"],
-  snow: ["snow", "snowmobile"],
-  snowmobile: ["snow"],
-  backcountry: ["snow"],
-  "snow plow": ["snow"],
-  snowplow: ["snow"],
-  kids: ["kids"],
-  youth: ["kids"],
-  touring: ["street", "touring"],
-  sport: ["street", "sport", "race"],
-  adventure: ["adventure", "dual sport"],
-  street: ["street"],
-  race: ["race"],
-  cruiser: ["cruiser", "street"],
-  electronics: ["electronics"],
-  communication: ["electronics"],
-  intercom: ["electronics"],
-  bluetooth: ["electronics"],
-  gps: ["electronics"],
-  camera: ["electronics"],
-  "phone mount": ["electronics"],
-  ebike: ["ebikes"],
-  "e-bike": ["ebikes"],
-  "ebikes": ["ebikes"],
-  "electric bike": ["ebikes"],
-  "electric motorcycle": ["ebikes"],
-  electric: ["ebikes"],
-  parts: ["parts"],
-  maintenance: ["parts"],
-  controls: ["parts"],
-  tools: ["parts"],
-  stands: ["parts"],
-};
-
 // Canonical BC category names per productType + subcategory. Used to bypass
 // the brand-keyword trap where a query like "alpinestars mx helmets"
 // matches the Alpinestars brand category (mixed product types) and the
@@ -645,60 +445,59 @@ const TYPE_SUBCATEGORY_CATEGORIES: Partial<
   Record<SupportedProductType, Partial<Record<SubcategoryValue, string[]>>>
 > = {
   helmet: {
-    mx: ["MX Helmets", "Moto Helmets"],
-    full_face: ["Street Helmets", "Full Face Helmets"],
-    modular: ["Modular Helmets"],
-    adventure: ["Adventure Helmets"],
-    open_face: ["Open Face Helmets"],
-    half: ["Half Helmets"],
+    mx:         ["MX Helmets", "Moto Helmets", "Offroad Helmets"],
+    full_face:  ["Street Helmets", "Full Face Helmets"],
+    modular:    ["Modular Helmets"],
+    adventure:  ["Adventure Helmets"],
+    open_face:  ["Open Face Helmets"],
+    half:       ["Half Helmets"],
   },
   jacket: {
-    mx: ["MX Jackets", "Moto Jackets"],
-    street: ["Street Jackets"],
+    mx:      ["MX Jackets", "Moto Jackets"],
+    street:  ["Street Jackets"],
     adventure: ["Adventure Jackets"],
     cruiser: ["Cruiser Jackets"],
-    racing: ["Race Jackets", "Racing Jackets"],
+    racing:  ["Race Jackets", "Racing Jackets"],
   },
   boots: {
-    mx: ["MX Boots", "Moto Boots"],
-    street: ["Street Boots"],
+    mx:        ["MX Boots", "Moto Boots"],
+    street:    ["Street Boots"],
     adventure: ["Adventure Boots"],
-    racing: ["Race Boots", "Racing Boots"],
-    cruiser: ["Cruiser Boots"],
+    racing:    ["Race Boots", "Racing Boots"],
+    cruiser:   ["Cruiser Boots"],
   },
   gloves: {
-    mx: ["MX Gloves", "Moto Gloves"],
-    street: ["Street Gloves"],
+    mx:        ["MX Gloves", "Moto Gloves"],
+    street:    ["Street Gloves"],
     adventure: ["Adventure Gloves"],
-    racing: ["Race Gloves", "Racing Gloves"],
-    winter: ["Winter Gloves", "Heated Gloves"],
+    racing:    ["Race Gloves", "Racing Gloves"],
+    winter:    ["Winter Gloves", "Heated Gloves"],
   },
   pants: {
-    mx: ["MX Pants", "Moto Pants"],
-    street: ["Street Pants"],
+    mx:        ["MX Pants", "Moto Pants"],
+    street:    ["Street Pants"],
     adventure: ["Adventure Pants"],
-    cruiser: ["Cruiser Pants"],
+    cruiser:   ["Cruiser Pants"],
   },
   tire: {
-    dirt: ["Dirt Tires", "Offroad Tires"],
-    sport: ["Sport Tires", "Sportbike Tires"],
+    dirt:          ["Dirt Tires", "Offroad Tires"],
+    sport:         ["Sport Tires", "Sportbike Tires"],
     sport_touring: ["Sport Touring Tires"],
-    adventure: ["Adventure Tires", "Dual Sport Tires"],
-    cruiser: ["Cruiser Tires"],
+    adventure:     ["Adventure Tires", "Dual Sport Tires"],
+    cruiser:       ["Cruiser Tires"],
   },
 };
 
 // For productType-only queries (no explicit subcategory), default to the
 // street-appropriate canonical category. Catches "show me alpinestars
-// helmets" without subcategory — surfaces street/full-face Alpinestars
-// helmets first instead of hitting the brand-trap.
+// helmets" without subcategory — surfaces street/full-face items first.
 const TYPE_DEFAULT_CATEGORIES: Partial<Record<SupportedProductType, string[]>> = {
   helmet: ["Street Helmets", "Full Face Helmets"],
   jacket: ["Street Jackets"],
-  boots: ["Street Boots"],
+  boots:  ["Street Boots"],
   gloves: ["Street Gloves"],
-  pants: ["Street Pants"],
-  tire: ["Sport Touring Tires"],
+  pants:  ["Street Pants"],
+  tire:   ["Sport Touring Tires"],
 };
 
 const BROAD_TYPE_CATEGORIES: Record<string, string[]> = {
@@ -709,147 +508,48 @@ const BROAD_TYPE_CATEGORIES: Record<string, string[]> = {
   filter:   ["Air Filters", "Oil Filters"],
 };
 
-async function searchByBroadType(broadType: string | null): Promise<BCProduct[]> {
-  if (!broadType) return [];
-  const candidates = BROAD_TYPE_CATEGORIES[broadType];
-  if (!candidates) return [];
-  for (const name of candidates) {
-    try {
-      const cat = await findCategoryByName(name);
-      if (cat) {
-        const products = await getProductsByCategory(cat.id, 50);
-        if (products.length > 0) {
-          for (const p of products) {
-            (p as BCProduct & { _broadType?: string })._broadType = broadType;
-          }
-          return products;
-        }
-      }
-    } catch { /* continue */ }
+// ---------------------------------------------------------------------------
+// Known brands — used by extractBrand to detect a brand token in the query.
+// Multi-word brands come before single-word prefixes they share (e.g.
+// "fox racing" before "fox") so first-match is unambiguous.
+// Lowercase; extractBrand lowercases the query before comparing.
+// ---------------------------------------------------------------------------
+
+const KNOWN_BRANDS_LOWER: string[] = [
+  "alpinestars", "shoei", "arai", "schuberth", "sidi", "klim",
+  "rev'it", "revit", "rev it",
+  "fox racing", "fox",
+  "bell", "scorpion", "gaerne", "dainese", "agv", "nolan", "hjc",
+  "icon", "ls2", "simpson", "shark", "o'neal", "oneal", "leatt",
+  "6d", "troy lee designs", "tld", "answer", "thor", "fly racing", "fly",
+  "michelin", "dunlop", "pirelli", "metzeler", "bridgestone", "shinko",
+  "continental", "kenda", "maxxis", "irc",
+  "bilt", "highway 21", "z1r", "tourmaster", "tour master", "noru",
+  "sedici", "gmax", "cortech", "joe rocket", "speed and strength",
+  "oxford", "sw-motech", "givi", "shad", "kriega",
+  "evs", "leatt brace", "atlas", "fxr", "509", "100%",
+  "cardo", "sena", "ebc", "renthal", "sunstar", "akrapovic", "yoshimura",
+  "garmin", "insta360",
+];
+
+/**
+ * Scan the query for a known brand token. Multi-word brands are checked before
+ * any single-word prefix they share. Returns the matched brand (lowercase) or
+ * null if none found.
+ */
+export function extractBrand(query: string): string | null {
+  const lower = query.toLowerCase();
+  for (const b of KNOWN_BRANDS_LOWER) {
+    const escaped = b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`(^|[^a-z0-9'])${escaped}($|[^a-z0-9'])`, "i");
+    if (re.test(lower)) return b;
   }
-  return [];
+  return null;
 }
 
-function expandCategoryTerms(keywords: string[]): string[] {
-  const expanded = new Set<string>();
-  for (const kw of keywords) {
-    expanded.add(kw);
-    const synonyms = CATEGORY_SYNONYMS[kw.toLowerCase()];
-    if (synonyms) {
-      for (const s of synonyms) expanded.add(s);
-    }
-  }
-  // Also try two-word combinations for multi-word synonyms
-  for (let i = 0; i < keywords.length - 1; i++) {
-    const pair = `${keywords[i]} ${keywords[i + 1]}`.toLowerCase();
-    const synonyms = CATEGORY_SYNONYMS[pair];
-    if (synonyms) {
-      for (const s of synonyms) expanded.add(s);
-    }
-  }
-  return Array.from(expanded);
-}
-
-async function searchByCategory(keywords: string[]): Promise<BCProduct[]> {
-  const expandedTerms = expandCategoryTerms(keywords);
-
-  const phrases = [
-    expandedTerms.join(" "),
-    ...expandedTerms.filter((w) => w.length > 2),
-  ];
-
-  for (const phrase of phrases) {
-    try {
-      const cat = await findCategoryByName(phrase);
-      if (cat) {
-        return getProductsByCategory(cat.id, 50);
-      }
-    } catch {
-      /* continue */
-    }
-  }
-  return [];
-}
-
-async function searchByTypeSubcategory(
-  productType: SupportedProductType | null,
-  subRequest: SubcategoryRequest
-): Promise<BCProduct[]> {
-  if (!productType) return [];
-  let candidates: string[] | undefined;
-  if (subRequest && subRequest.explicit) {
-    candidates = TYPE_SUBCATEGORY_CATEGORIES[productType]?.[subRequest.value];
-  }
-  if (!candidates || candidates.length === 0) {
-    candidates = TYPE_DEFAULT_CATEGORIES[productType];
-  }
-  if (!candidates) return [];
-  for (const name of candidates) {
-    try {
-      const cat = await findCategoryByName(name);
-      if (cat) {
-        const products = await getProductsByCategory(cat.id, 50);
-        if (products.length > 0) return products;
-      }
-    } catch {
-      /* continue */
-    }
-  }
-  return [];
-}
-
-async function searchByColorway(
-  color: string,
-  keywords: string[]
-): Promise<BCProduct[]> {
-  try {
-    const colorTerms = expandColorQuery(color);
-    if (colorTerms.length === 0) return [];
-
-    const colorConditions = colorTerms.map(
-      (c) => sql`colorway_lower LIKE ${`%${c.toLowerCase()}%`}`
-    );
-    const colorWhere = colorConditions.reduce(
-      (acc, cond) => sql`${acc} OR ${cond}`
-    );
-
-    const expandedCatTerms = expandCategoryTerms(keywords);
-    const catKeywords = expandedCatTerms.filter(
-      (w) => w.length > 1 && !ALL_COLOR_WORDS.has(w.toLowerCase())
-    );
-
-    let query;
-    if (catKeywords.length > 0) {
-      const catConditions = catKeywords.map(
-        (w) => sql`(category ILIKE ${`%${w}%`} OR product_name ILIKE ${`%${w}%`})`
-      );
-      const catWhere = catConditions.reduce(
-        (acc, cond) => sql`${acc} OR ${cond}`
-      );
-      query = sql`SELECT DISTINCT bc_product_id FROM product_colorways WHERE (${colorWhere}) AND (${catWhere}) LIMIT 15`;
-    } else {
-      query = sql`SELECT DISTINCT bc_product_id FROM product_colorways WHERE (${colorWhere}) LIMIT 15`;
-    }
-
-    const rows = await db.execute(query);
-    const ids: number[] = [];
-    const rawRows = Array.isArray(rows) ? rows : ((rows as unknown as { rows: { bc_product_id: number }[] }).rows || []);
-    for (const r of rawRows) {
-      const id = (r as { bc_product_id: number }).bc_product_id;
-      if (id) ids.push(id);
-    }
-
-    if (ids.length === 0) return [];
-
-    const products = await Promise.all(
-      ids.map((id) => getProductById(id).catch(() => null))
-    );
-    return products.filter((p): p is BCProduct => p !== null && p.is_visible);
-  } catch (e) {
-    console.error("Colorway search error:", e);
-    return [];
-  }
-}
+// ---------------------------------------------------------------------------
+// searchProducts — single scored pipeline
+// ---------------------------------------------------------------------------
 
 export async function searchProducts(
   query: string
@@ -859,239 +559,208 @@ export async function searchProducts(
 
   const normalizedQuery = query.trim();
 
+  // Step 1: SKU exact match (fastest path)
   const detectedColor = extractColorFromQuery(normalizedQuery);
+  const skuMatch = normalizedQuery.match(SKU_PATTERN);
+  if (skuMatch) {
+    const skuProduct = await getProductBySKU(skuMatch[0]);
+    if (skuProduct?.is_visible) return { products: [skuProduct], detectedColor };
+  }
+
+  // Step 2: Extract signals
+  const productType = extractProductType(normalizedQuery);
+  const subRequest: SubcategoryRequest = isSupportedProductType(productType)
+    ? extractSubcategoryRequest(normalizedQuery, productType)
+    : null;
+  const budget = extractBudget(normalizedQuery);
+  const brand = extractBrand(normalizedQuery);
 
   const allKeywords = extractKeywords(normalizedQuery);
-  let keywords = detectedColor
+  const keywords = detectedColor
     ? allKeywords.filter((kw) => !ALL_COLOR_WORDS.has(kw.toLowerCase()))
     : allKeywords;
-  if (keywords.length === 0) keywords = allKeywords;
-  if (keywords.length === 0) return { products: [], detectedColor };
+  const kwTokens = keywords.length > 0 ? keywords : allKeywords;
+
+  if (kwTokens.length === 0) return { products: [], detectedColor };
 
   const applyColor = (results: BCProduct[]) =>
     detectedColor && results.length > 0
       ? boostColorMatches(results, detectedColor)
       : results;
 
-  // 1. Exact SKU lookup (fastest path)
-  const skuMatch = normalizedQuery.match(SKU_PATTERN);
-  if (skuMatch) {
-    const skuProduct = await getProductBySKU(skuMatch[0]);
-    if (skuProduct && skuProduct.is_visible) {
-      return { products: [skuProduct], detectedColor };
+  // Step 3: Build ONE candidate pool via four parallel strategies.
+  // All four run concurrently; results are unioned and deduplicated (≤ 200).
+  const [subCatResults, brandResults, bcKwResults, localMatches] = await Promise.all([
+
+    // 3a: canonical subcategory/type/broad-type category
+    (async (): Promise<BCProduct[]> => {
+      let candidates: string[] | undefined;
+      if (isSupportedProductType(productType)) {
+        if (subRequest && subRequest.explicit) {
+          candidates = TYPE_SUBCATEGORY_CATEGORIES[productType]?.[subRequest.value];
+        }
+        if (!candidates || candidates.length === 0) {
+          candidates = TYPE_DEFAULT_CATEGORIES[productType];
+        }
+      } else if (productType) {
+        candidates = BROAD_TYPE_CATEGORIES[productType];
+      }
+      if (!candidates || candidates.length === 0) return [];
+      for (const catName of candidates) {
+        try {
+          const cat = await findCategoryByName(catName);
+          if (cat) {
+            const products = await getProductsByCategory(cat.id, 100);
+            if (products.length > 0) {
+              if (productType && !isSupportedProductType(productType)) {
+                for (const p of products) {
+                  (p as BCProduct & { _broadType?: string })._broadType = productType;
+                }
+              }
+              return products;
+            }
+          }
+        } catch { /* continue to next candidate */ }
+      }
+      return [];
+    })(),
+
+    // 3b: brand category — paginate 100 (double the old 50 limit)
+    (async (): Promise<BCProduct[]> => {
+      if (!brand) return [];
+      try {
+        const cat = await findCategoryByName(brand);
+        if (cat) return getProductsByCategory(cat.id, 100);
+      } catch { /* */ }
+      return [];
+    })(),
+
+    // 3c: BC keyword search
+    searchProductsBC(kwTokens.slice(0, 6).join(" ")).catch(() => [] as BCProduct[]),
+
+    // 3d: local catalog (enrichment happens after all parallel work completes)
+    searchLocalCatalog(kwTokens.join(" "), 20).catch(() => [] as LocalMatch[]),
+  ]);
+
+  // Enrich local matches in parallel
+  const enriched: BCProduct[] = [];
+  if (localMatches.length > 0) {
+    const enrichResults = await Promise.all(
+      localMatches.slice(0, 12).map((m) => enrichLocalMatch(m))
+    );
+    for (const p of enrichResults) {
+      if (p?.is_visible) enriched.push(p);
     }
   }
 
-  // 2. Run ALL search sources in parallel — local catalog, BC keyword, category, and colorway index
-  const earlyProductType = extractProductType(normalizedQuery);
-  const earlyUseCase = extractUseCase(normalizedQuery);
-
-  const useCaseKeywords: string[] =
-    earlyProductType === "helmet" && earlyUseCase === "sport"
-      ? ["race"]
-      : earlyProductType === "helmet" && earlyUseCase === "touring"
-      ? ["touring"]
-      : [];
-
-  const earlySubRequest = isSupportedProductType(earlyProductType)
-    ? extractSubcategoryRequest(normalizedQuery, earlyProductType)
-    : null;
-
-  const keywordsForLocal = keywords.join(" ");
-  const keywordQuery = keywords.slice(0, 6).join(" ");
-
-  const [
-    localMatches,
-    bcKeywordResults,
-    categoryResults,
-    useCaseResults,
-    colorwayResults,
-    typeSubResults,
-    broadTypeResults,
-  ] = await Promise.all([
-    searchLocalCatalog(keywordsForLocal, 10).catch(() => [] as LocalMatch[]),
-    searchProductsBC(keywordQuery).catch(() => [] as BCProduct[]),
-    searchByCategory(keywords).catch(() => [] as BCProduct[]),
-    useCaseKeywords.length > 0
-      ? searchByCategory(useCaseKeywords).catch(() => [] as BCProduct[])
-      : Promise.resolve([] as BCProduct[]),
-    detectedColor
-      ? searchByColorway(detectedColor, keywords).catch(() => [] as BCProduct[])
-      : Promise.resolve([] as BCProduct[]),
-    searchByTypeSubcategory(
-      isSupportedProductType(earlyProductType) ? earlyProductType : null,
-      earlySubRequest
-    ).catch(() => [] as BCProduct[]),
-    searchByBroadType(
-      earlyProductType && !isSupportedProductType(earlyProductType)
-        ? earlyProductType
-        : null
-    ).catch(() => [] as BCProduct[]),
-  ]);
-
+  // Union all sources into a deduplicated pool (≤ 200 visible products)
   const deduped = new Map<number, BCProduct>();
   function addProducts(products: BCProduct[]) {
     for (const p of products) {
-      if (p.is_visible && !deduped.has(p.id)) {
+      if (p.is_visible && !deduped.has(p.id) && deduped.size < 200) {
         deduped.set(p.id, p);
       }
     }
   }
+  addProducts(subCatResults);
+  addProducts(brandResults);
+  addProducts(bcKwResults);
+  addProducts(enriched);
 
-  // Tag race/touring category products before dedup so scoreRelevance can boost them
-  for (const p of useCaseResults) {
-    (p as BCProduct & { _fromRaceCategory?: boolean })._fromRaceCategory = true;
-  }
+  const pool = Array.from(deduped.values());
 
-  // Type+subcategory direct hits rank HIGHEST — these are the canonical BC
-  // category for the exact thing the customer asked for. Prevents the
-  // "alpinestars mx helmets returns 50 random Alpinestars products" trap.
-  addProducts(typeSubResults);
-
-  // Broad-type category hits rank second-highest — direct category lookup
-  // for non-SupportedProductType queries (sprockets, brake pads, goggles, etc.)
-  addProducts(broadTypeResults);
-
-  // Use-case category results rank first (race/touring helmet intent)
-  addProducts(useCaseResults);
-
-  // Colorway index results are highest priority for color+type queries
-  addProducts(colorwayResults);
-
-  // Category results are the most relevant for type-based queries like "street helmets"
-  addProducts(categoryResults);
-
-  // BC keyword results search descriptions, so they catch category terms too
-  addProducts(bcKeywordResults);
-
-  // Enrich local catalog matches with full BC data
-  if (localMatches.length > 0) {
-    const enrichPromises = localMatches
-      .slice(0, 12)
-      .map((m) => enrichLocalMatch(m));
-    const enriched = await Promise.all(enrichPromises);
-    const localProducts = enriched.filter(
-      (p): p is BCProduct => p !== null && p.is_visible
-    );
-    addProducts(localProducts);
-
-    // If enrichment failed for all, add raw local catalog entries
-    if (localProducts.length === 0 && deduped.size === 0) {
-      const fallback: BCProduct[] = localMatches.slice(0, 10).map((m, idx) => ({
-        id: -(idx + 1),
-        name: m.name,
-        sku: "",
-        price: m.price ? parseFloat(m.price) : 0,
-        sale_price: 0,
-        retail_price: 0,
-        calculated_price: m.price ? parseFloat(m.price) : 0,
-        description: "",
-        is_visible: true,
-        availability: "available" as const,
-        inventory_level: -1,
-        inventory_tracking: "none" as const,
-        categories: [],
-        brand_id: 0,
-        variants: [],
-        images: [],
-        custom_url: { url: m.url || "", is_customized: false },
-      }));
-      const results = applyColor(fallback);
-      return { products: results, detectedColor };
-    }
-  }
-
-  let results = Array.from(deduped.values());
-
-  // If still too few results, retry with the full natural-language query
-  if (results.length < 3 && keywordQuery !== normalizedQuery) {
-    const rawResults = await searchProductsBC(normalizedQuery).catch(() => []);
-    addProducts(rawResults);
-    results = Array.from(deduped.values());
-  }
-
-  const productType = extractProductType(normalizedQuery);
-
-  // Apply type filtering FIRST so we know how many relevant products we have
-  results = filterByProductType(results, productType);
-
-  // Use-case fallback: detect cruiser/touring/sport/etc. and pull style-
-  // specific results so e.g. "touring helmet" surfaces modular/touring lids.
-  if (results.length < 3 && productType) {
-    const useCase = extractUseCase(normalizedQuery);
-    const useCaseTerms = useCase
-      ? USE_CASE_SEARCH_TERMS[productType]?.[useCase]
-      : null;
-
-    let fallbackQueries: string[];
-    if (useCaseTerms) {
-      fallbackQueries = [...useCaseTerms];
-    } else if (isSupportedProductType(productType)) {
-      fallbackQueries = [STREET_FALLBACK_PHRASE[productType]];
-    } else if (PRODUCT_TYPE_MAP[productType]) {
-      fallbackQueries = [PRODUCT_TYPE_MAP[productType][0] + "s"];
-    } else {
-      // Broad type with no PRODUCT_TYPE_MAP entry — category search already
-      // ran via searchByBroadType; skip the keyword fallback.
-      fallbackQueries = [];
-    }
-
-    const fallbackSearches = fallbackQueries.flatMap((q) => [
-      searchProductsBC(q).catch(() => [] as BCProduct[]),
-      searchByCategory(q.split(" ")).catch(() => [] as BCProduct[]),
-    ]);
-
-    const fallbackResults = await Promise.all(fallbackSearches);
-    for (const batch of fallbackResults) addProducts(batch);
-    results = filterByProductType(Array.from(deduped.values()), productType);
-  }
-
-  // Street-bias top-up: when the customer asked generically about a
-  // street-default product type ("what helmets do you have", "I need a
-  // jacket") AND did not request a specific style, proactively pull in
-  // street products so the bias step has a real lead pool. Without this the
-  // BC parent-category lookup can dominate with whichever subcategory BC
-  // sorted first (often Moto/MX), and the bias has no street items to
-  // promote.
-  if (
-    productType &&
-    isSupportedProductType(productType) &&
-    extractSubcategoryRequest(normalizedQuery, productType) === null &&
-    !extractUseCase(normalizedQuery)
-  ) {
-    const streetTopUp = await searchProductsBC(
-      STREET_FALLBACK_PHRASE[productType]
-    ).catch(() => [] as BCProduct[]);
-    addProducts(streetTopUp);
-    results = filterByProductType(Array.from(deduped.values()), productType);
-  }
-  results = rankByRelevance(results, keywords);
-  results = preferInStock(results);
-
-  // Subcategory classification + bias for street-default product types.
-  // For helmet/jacket/boots/gloves/pants/tire we attach a `_subcategory`
-  // field to each product (read by buildPrompt for prompt tagging) and
-  // either hard-filter (explicit ask) or promote-street/demote-offroad
-  // (ambiguous ask). Other product types pass through unchanged.
-  if (isSupportedProductType(productType)) {
-    const subRequest = extractSubcategoryRequest(normalizedQuery, productType);
-    const annotated = await Promise.all(
-      results.map(async (p) => {
-        const sub = await classifyProductSubcategory(p, productType).catch(
-          () => null as SubcategoryValue | null
-        );
-        (p as BCProduct & { _subcategory?: SubcategoryValue | null })._subcategory = sub;
-        return p;
-      })
-    );
-    results = biasBySubcategory(
-      annotated as Array<BCProduct & { _subcategory?: SubcategoryValue | null }>,
+  if (pool.length === 0) {
+    console.warn("[searchProducts] zero_result", {
+      query: normalizedQuery,
       productType,
-      subRequest
+      brand,
+      subcategoryRequest: subRequest,
+    });
+    return { products: [], detectedColor };
+  }
+
+  // Step 4: Annotate subcategories for supported product types.
+  // classifyProductSubcategory uses a 5-min TTL in-process cache, so this is
+  // cheap even at pool size 200.
+  if (isSupportedProductType(productType)) {
+    await Promise.all(
+      pool.map((p) =>
+        classifyProductSubcategory(p, productType)
+          .then((sub) => {
+            (p as BCProduct & { _subcategory?: SubcategoryValue | null })._subcategory = sub;
+          })
+          .catch(() => {})
+      )
     );
   }
 
+  // Expanded color set for the +40 scoring signal
+  const expandedColors = detectedColor
+    ? new Set(expandColorQuery(detectedColor).map((c) => c.toLowerCase()))
+    : new Set<string>();
+
+  // Step 5: Single scoring pass
+  function scoreProduct(p: BCProduct): number {
+    let score = 0;
+    const nameLower = p.name.toLowerCase();
+    const price = p.calculated_price || p.price;
+    const sub = (p as BCProduct & { _subcategory?: SubcategoryValue | null })._subcategory ?? null;
+
+    // +100: explicit subcategory match
+    if (subRequest && subRequest.explicit && sub === subRequest.value) score += 100;
+
+    // +80: brand token in product name
+    if (brand && nameLower.includes(brand)) score += 80;
+
+    // +60: product type term in name
+    if (productType && PRODUCT_TYPE_MAP[productType]?.some((t) => nameLower.includes(t))) score += 60;
+
+    // +40: detected color matches a variant or appears in name
+    if (
+      detectedColor &&
+      (productHasColor(p, expandedColors) || nameLower.includes(detectedColor))
+    ) score += 40;
+
+    // +30: in stock
+    if (isInStock(p)) score += 30;
+
+    // +5 per keyword overlap (max 4 tokens → max +20)
+    score += Math.min(4, kwTokens.filter((kw) => nameLower.includes(kw)).length) * 5;
+
+    // -50: off-street bias when customer was ambiguous (not "any", not explicit)
+    if (
+      isSupportedProductType(productType) &&
+      subRequest === null &&
+      sub &&
+      OFF_STREET_SUBCATEGORIES.has(sub)
+    ) score -= 50;
+
+    // -1000: hard budget penalty (effectively a filter via sort + slice)
+    if (budget?.max && price > budget.max) score -= 1000;
+
+    return score;
+  }
+
+  // Step 6: Sort desc, apply hard budget filter, take top 12, boost color
+  pool.sort((a, b) => scoreProduct(b) - scoreProduct(a));
+
+  // Hard-filter products that exceed a stated budget max so the LLM is never
+  // shown items the customer explicitly said they can't afford.
+  const withinBudget = budget?.max
+    ? pool.filter((p) => (p.calculated_price || p.price) <= budget.max!)
+    : pool;
+
+  let results = withinBudget.slice(0, 12);
   results = applyColor(results);
+
+  if (results.length === 0) {
+    console.warn("[searchProducts] zero_result", {
+      query: normalizedQuery,
+      productType,
+      brand,
+      subcategoryRequest: subRequest,
+    });
+  }
 
   return { products: results, detectedColor };
 }

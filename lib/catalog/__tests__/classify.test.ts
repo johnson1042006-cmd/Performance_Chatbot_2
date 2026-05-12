@@ -10,7 +10,7 @@ import { describe, it, expect } from "vitest";
 import {
   classifyBroadCategory,
   classifyBroadSubcategory,
-} from "../classify";
+} from "../skeleton";
 
 // ---------------------------------------------------------------------------
 // Helpers

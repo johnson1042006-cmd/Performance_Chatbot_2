@@ -15,7 +15,7 @@ import {
 import {
   classifyBroadCategory,
   classifyBroadSubcategory,
-} from "@/lib/catalog/classify";
+} from "@/lib/catalog/skeleton";
 
 // ---------------------------------------------------------------------------
 // Public types

@@ -664,6 +664,95 @@ describe("searchProducts", () => {
     expect(names).toContain("Alpinestars Supertech R10 Solid");
     expect(names).toContain("Alpinestars Supertech R10 Element");
   });
+
+  it("'show me street gloves under $80' hard-filters out products > $80", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const gloveCat = { id: 55, name: "Street Gloves", parent_id: 0 };
+    const makeGlove = (id: number, name: string, price: number) => ({
+      id, name, sku: `GL-${id}`,
+      description: "Street riding gloves.",
+      price, sale_price: 0, retail_price: 0, calculated_price: price,
+      inventory_level: 5, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [55], brand_id: 1,
+      custom_url: { url: `/gloves/${id}/` }, variants: [], images: [],
+    });
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => (name === "Street Gloves" ? gloveCat : null)
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) =>
+        id === 55
+          ? [
+              makeGlove(901, "Alpinestars SP-8 V3 Gloves", 49),
+              makeGlove(902, "Alpinestars SP Air Gloves", 149),
+            ]
+          : []
+    );
+
+    const result = await searchProducts("show me street gloves under $80");
+    const names = result.products.map((p) => p.name);
+    expect(names).toContain("Alpinestars SP-8 V3 Gloves");
+    expect(names).not.toContain("Alpinestars SP Air Gloves");
+  });
+
+  it("'blue helmet under $500' detects color AND hard-filters products over budget", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const streetCat = { id: 66, name: "Street Helmets", parent_id: 0 };
+    const blueVariant = {
+      id: 1,
+      option_display_name: "Color",
+      label: "Blue",
+    };
+    const redVariant = {
+      id: 2,
+      option_display_name: "Color",
+      label: "Red",
+    };
+    const makeHelmet = (
+      id: number,
+      name: string,
+      price: number,
+      variantColor: typeof blueVariant | typeof redVariant | null
+    ) => ({
+      id, name, sku: `H-${id}`,
+      description: "Street helmet.",
+      price, sale_price: 0, retail_price: 0, calculated_price: price,
+      inventory_level: 3, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [66], brand_id: 1,
+      custom_url: { url: `/helmets/${id}/` },
+      variants: variantColor
+        ? [{ id: id * 10, option_values: [variantColor], inventory_level: 3 }]
+        : [],
+      images: [],
+    });
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => (name === "Street Helmets" ? streetCat : null)
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) =>
+        id === 66
+          ? [
+              makeHelmet(801, "Shoei RF-1400 Blue", 399, blueVariant),
+              makeHelmet(802, "Shoei RF-1400 Red", 399, redVariant),
+              makeHelmet(803, "Shoei X-SPR Pro", 799, null),
+            ]
+          : []
+    );
+
+    const result = await searchProducts("blue helmet under $500");
+    expect(result.detectedColor).toBe("blue");
+    const names = result.products.map((p) => p.name);
+    expect(names).toContain("Shoei RF-1400 Blue");
+    expect(names).not.toContain("Shoei X-SPR Pro");
+  });
 });
 
 // ---------------------------------------------------------------------------
