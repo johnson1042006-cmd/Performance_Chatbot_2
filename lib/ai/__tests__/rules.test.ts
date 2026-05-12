@@ -63,6 +63,12 @@ describe("catalog_confirms_availability rule", () => {
     expect(rule!.rule).toContain("NEVER tell the customer to call 303-744-2011");
   });
 
+  it("rule text opens with affirmation, not search-miss framing", () => {
+    const rule = AI_BEHAVIOR_RULES.find((r) => r.id === "catalog_confirms_availability");
+    expect(rule).toBeDefined();
+    expect(rule!.rule).toContain("OPEN by AFFIRMING availability");
+  });
+
   it("no_call_store rule covers STORE CATALOG shopping queries", () => {
     const rule = AI_BEHAVIOR_RULES.find((r) => r.id === "no_call_store");
     expect(rule).toBeDefined();
