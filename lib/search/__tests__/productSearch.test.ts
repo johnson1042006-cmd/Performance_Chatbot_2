@@ -565,10 +565,11 @@ describe("searchProducts", () => {
   });
 
   it("surfaces MX helmets for 'alpinestars mx helmets' via type+subcategory path", async () => {
+    // "Offroad Helmets" is the real BC category (93 products) — "MX Helmets" never exists.
     const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
     const { searchProducts } = await import("../productSearch");
 
-    const mxCat = { id: 99, name: "MX Helmets", parent_id: 0 };
+    const offroadCat = { id: 99, name: "Offroad Helmets", parent_id: 0 };
     const mxHelmet = (id: number, name: string) => ({
       id, name, sku: `AS-${id}`,
       description: "Professional motocross helmet designed for off-road riders.",
@@ -586,7 +587,7 @@ describe("searchProducts", () => {
     ];
 
     (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
-      async (name: string) => (name === "MX Helmets" ? mxCat : null)
+      async (name: string) => (name === "Offroad Helmets" ? offroadCat : null)
     );
     (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
       async (id: number) => (id === 99 ? fixtures : [])
@@ -601,10 +602,11 @@ describe("searchProducts", () => {
   });
 
   it("surfaces Adventure Boots for 'show me adventure boots'", async () => {
+    // BC has no "Adventure Boots" leaf — the code falls back to "Boots" (310 products).
     const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
     const { searchProducts } = await import("../productSearch");
 
-    const cat = { id: 88, name: "Adventure Boots", parent_id: 0 };
+    const bootsCat = { id: 88, name: "Boots", parent_id: 0 };
     const boot = (id: number, name: string) => ({
       id, name, sku: `B-${id}`, description: "adventure boots",
       price: 299, sale_price: 0, retail_price: 0, calculated_price: 299,
@@ -615,7 +617,7 @@ describe("searchProducts", () => {
     });
 
     (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
-      async (name: string) => (name === "Adventure Boots" ? cat : null)
+      async (name: string) => (name === "Boots" ? bootsCat : null)
     );
     (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
       async (id: number) =>
@@ -666,10 +668,11 @@ describe("searchProducts", () => {
   });
 
   it("'show me street gloves under $80' hard-filters out products > $80", async () => {
+    // BC has no "Street Gloves" leaf — the code uses the top-level "Gloves" category (860 products).
     const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
     const { searchProducts } = await import("../productSearch");
 
-    const gloveCat = { id: 55, name: "Street Gloves", parent_id: 0 };
+    const gloveCat = { id: 55, name: "Gloves", parent_id: 0 };
     const makeGlove = (id: number, name: string, price: number) => ({
       id, name, sku: `GL-${id}`,
       description: "Street riding gloves.",
@@ -681,7 +684,7 @@ describe("searchProducts", () => {
     });
 
     (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
-      async (name: string) => (name === "Street Gloves" ? gloveCat : null)
+      async (name: string) => (name === "Gloves" ? gloveCat : null)
     );
     (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
       async (id: number) =>
@@ -752,6 +755,59 @@ describe("searchProducts", () => {
     const names = result.products.map((p) => p.name);
     expect(names).toContain("Shoei RF-1400 Blue");
     expect(names).not.toContain("Shoei X-SPR Pro");
+  });
+
+  it("'show me race helmets' surfaces products from the Race Helmets BC category", async () => {
+    // Regression: Race Helmets is a sibling shelf to Street Helmets (42 products:
+    // Arai Corsair X, HJC RPHA 1N, Shoei X-Fourteen etc.).  The full_face
+    // subcategory must include "Race Helmets" so these are never invisible.
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const raceCat   = { id: 42, name: "Race Helmets",   parent_id: 0 };
+    const streetCat = { id: 77, name: "Street Helmets", parent_id: 0 };
+
+    const makeHelmet = (id: number, name: string, catId: number) => ({
+      id, name, sku: `RH-${id}`,
+      description: "Homologated race helmet for circuit use.",
+      price: 849, sale_price: 0, retail_price: 0, calculated_price: 849,
+      inventory_level: 2, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [catId], brand_id: 5,
+      custom_url: { url: `/helmets/${id}/` }, variants: [], images: [],
+    });
+
+    const raceFixtures = [
+      makeHelmet(301, "Arai Corsair-X Helmet",         42),
+      makeHelmet(302, "HJC RPHA 1N Helmet",            42),
+      makeHelmet(303, "Shoei X-Fourteen Helmet",       42),
+    ];
+    const streetFixtures = [
+      makeHelmet(401, "Shoei RF-1400 Street Helmet",   77),
+    ];
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => {
+        if (name === "Race Helmets")   return raceCat;
+        if (name === "Street Helmets") return streetCat;
+        return null;
+      }
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => {
+        if (id === 42) return raceFixtures;
+        if (id === 77) return streetFixtures;
+        return [];
+      }
+    );
+
+    const result = await searchProducts("show me race helmets");
+    const names = result.products.map((p) => p.name);
+
+    // All three Race Helmets shelf products must appear
+    expect(names).toContain("Arai Corsair-X Helmet");
+    expect(names).toContain("HJC RPHA 1N Helmet");
+    expect(names).toContain("Shoei X-Fourteen Helmet");
   });
 });
 

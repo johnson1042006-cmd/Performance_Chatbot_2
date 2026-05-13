@@ -445,46 +445,60 @@ const TYPE_SUBCATEGORY_CATEGORIES: Partial<
   Record<SupportedProductType, Partial<Record<SubcategoryValue, string[]>>>
 > = {
   helmet: {
-    mx:         ["MX Helmets", "Moto Helmets", "Offroad Helmets"],
-    full_face:  ["Street Helmets", "Full Face Helmets"],
+    // "MX Helmets" and "Fox Helmets" are searched because Fox V1 variants live
+    // only under the Fox brand shelf, not in the canonical Offroad Helmets leaf.
+    mx:         ["Moto Helmets", "Offroad Helmets", "Fox Helmets"],
+    // "Race Helmets" is a sibling shelf to "Street Helmets" (42 products:
+    // Arai Corsair X, HJC RPHA 1N, Shoei X-Fourteen etc.).
+    full_face:  ["Street Helmets", "Race Helmets"],
     modular:    ["Modular Helmets"],
     adventure:  ["Adventure Helmets"],
     open_face:  ["Open Face Helmets"],
-    half:       ["Half Helmets"],
+    // No "Half Helmets" BC category exists; Open Face is the closest real leaf.
+    half:       ["Open Face Helmets"],
   },
   jacket: {
-    mx:      ["MX Jackets", "Moto Jackets"],
-    street:  ["Street Jackets"],
-    adventure: ["Adventure Jackets"],
-    cruiser: ["Cruiser Jackets"],
-    racing:  ["Race Jackets", "Racing Jackets"],
+    // BC has no compound "Street Jackets" / "Moto Jackets" etc. leaves.
+    // Products are tagged "Jackets" + a style tag ("Street", "Moto", …).
+    // Use the real top-level "Jackets" category and let scoring differentiate.
+    mx:        ["Offroad Jackets", "Jackets"],
+    street:    ["Jackets"],
+    adventure: ["Jackets"],
+    cruiser:   ["Jackets"],
+    racing:    ["Jackets"],
   },
   boots: {
-    mx:        ["MX Boots", "Moto Boots"],
+    mx:        ["Moto Boots", "Boots"],
     street:    ["Street Boots"],
-    adventure: ["Adventure Boots"],
-    racing:    ["Race Boots", "Racing Boots"],
-    cruiser:   ["Cruiser Boots"],
+    // BC has no "Adventure Boots", "Race Boots", or "Cruiser Boots" leaves.
+    adventure: ["Boots"],
+    racing:    ["Boots"],
+    cruiser:   ["Boots"],
   },
   gloves: {
-    mx:        ["MX Gloves", "Moto Gloves"],
-    street:    ["Street Gloves"],
-    adventure: ["Adventure Gloves"],
-    racing:    ["Race Gloves", "Racing Gloves"],
-    winter:    ["Winter Gloves", "Heated Gloves"],
+    // BC has no compound glove leaves except Heated Gloves and Snow Gloves.
+    mx:        ["Gloves"],
+    street:    ["Gloves"],
+    adventure: ["Gloves"],
+    racing:    ["Gloves"],
+    // "Winter Gloves" doesn't exist; use the two real cold-weather leaves.
+    winter:    ["Heated Gloves", "Snow Gloves"],
   },
   pants: {
-    mx:        ["MX Pants", "Moto Pants"],
+    // "MX Pants" doesn't exist; "Cruiser Pants" doesn't exist.
+    mx:        ["Moto Pants", "Pants"],
     street:    ["Street Pants"],
-    adventure: ["Adventure Pants"],
-    cruiser:   ["Cruiser Pants"],
+    adventure: ["Adventure Pants", "Pants"],
+    cruiser:   ["Pants"],
   },
   tire: {
-    dirt:          ["Dirt Tires", "Offroad Tires"],
-    sport:         ["Sport Tires", "Sportbike Tires"],
-    sport_touring: ["Sport Touring Tires"],
-    adventure:     ["Adventure Tires", "Dual Sport Tires"],
-    cruiser:       ["Cruiser Tires"],
+    // BC has no type-specific tire subcategory leaves at all — only "Tires".
+    // classifyProductSubcategory still classifies each tire by name/desc for scoring.
+    dirt:          ["Tires"],
+    sport:         ["Tires"],
+    sport_touring: ["Tires"],
+    adventure:     ["Tires"],
+    cruiser:       ["Tires"],
   },
 };
 
@@ -492,12 +506,12 @@ const TYPE_SUBCATEGORY_CATEGORIES: Partial<
 // street-appropriate canonical category. Catches "show me alpinestars
 // helmets" without subcategory — surfaces street/full-face items first.
 const TYPE_DEFAULT_CATEGORIES: Partial<Record<SupportedProductType, string[]>> = {
-  helmet: ["Street Helmets", "Full Face Helmets"],
-  jacket: ["Street Jackets"],
+  helmet: ["Street Helmets", "Race Helmets"],
+  jacket: ["Jackets"],
   boots:  ["Street Boots"],
-  gloves: ["Street Gloves"],
+  gloves: ["Gloves"],
   pants:  ["Street Pants"],
-  tire:   ["Sport Touring Tires"],
+  tire:   ["Tires"],
 };
 
 const BROAD_TYPE_CATEGORIES: Record<string, string[]> = {
@@ -522,6 +536,7 @@ const KNOWN_BRANDS_LOWER: string[] = [
   "bell", "scorpion", "gaerne", "dainese", "agv", "nolan", "hjc",
   "icon", "ls2", "simpson", "shark", "o'neal", "oneal", "leatt",
   "6d", "troy lee designs", "tld", "answer", "thor", "fly racing", "fly",
+  "fasthouse", "kyt",
   "michelin", "dunlop", "pirelli", "metzeler", "bridgestone", "shinko",
   "continental", "kenda", "maxxis", "irc",
   "bilt", "highway 21", "z1r", "tourmaster", "tour master", "noru",
