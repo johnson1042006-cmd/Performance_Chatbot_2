@@ -31,6 +31,7 @@ const EXPECTED_RULE_IDS = [
   "inventory_preference",
   "product_type_accuracy",
   "airbag_categorization",
+  "tech_air_service_routing",
   "brand_preference",
   "size_in_variant_data_only",
   "variant_level_stock_accuracy",

@@ -62,9 +62,9 @@ test("auto-escalation: three frustrated messages surface email-capture form", as
       body: JSON.stringify({
         autoOpenOnFirstVisit: true,
         persona: {
-          name: "Jake",
+          name: "Agent",
           title: "Product Specialist",
-          avatarUrl: "/jake-avatar.svg",
+          avatarUrl: "/agent-avatar.svg",
         },
       }),
     })

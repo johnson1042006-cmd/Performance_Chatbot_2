@@ -469,9 +469,9 @@ CRITICAL: BOPIS is available ONLY at the Centennial location. We do not have mul
     topic: "bot_persona",
     forceUpdate: true,
     content: JSON.stringify({
-      name: "Jake",
+      name: "Agent",
       title: "Product Specialist",
-      avatarUrl: "/jake-avatar.svg",
+      avatarUrl: "/agent-avatar.svg",
       sizingGuard: "SIZING GUARD: When a customer asks about sizing for a category you lack specific data on (jackets, boots, gloves, pants), do NOT substitute another category's sizing guide. Helmet sizing applies ONLY to helmets. For all other apparel: direct customer to product page brand size chart, offer 303-744-2011 for fit guidance, and mention in-store fit consultation.",
     }),
   },

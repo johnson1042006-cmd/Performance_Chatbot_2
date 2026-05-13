@@ -5,9 +5,9 @@ import { inArray } from "drizzle-orm";
 import { log, serializeError } from "@/lib/log";
 
 const DEFAULT_PERSONA = {
-  name: "Jake",
+  name: "Agent",
   title: "Product Specialist",
-  avatarUrl: "/jake-avatar.svg",
+  avatarUrl: "/agent-avatar.svg",
 };
 
 const CORS_HEADERS = {

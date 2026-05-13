@@ -53,9 +53,9 @@ test("streaming: AI bubble fills progressively over SSE", async ({ page }) => {
       body: JSON.stringify({
         autoOpenOnFirstVisit: true,
         persona: {
-          name: "Jake",
+          name: "Agent",
           title: "Product Specialist",
-          avatarUrl: "/jake-avatar.svg",
+          avatarUrl: "/agent-avatar.svg",
         },
       }),
     })

@@ -72,9 +72,9 @@ async function stubRoutes(page: import("@playwright/test").Page) {
       body: JSON.stringify({
         autoOpenOnFirstVisit: true,
         persona: {
-          name: "Jake",
+          name: "Agent",
           title: "Product Specialist",
-          avatarUrl: "/jake-avatar.svg",
+          avatarUrl: "/agent-avatar.svg",
         },
       }),
     })

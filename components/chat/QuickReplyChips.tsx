@@ -30,7 +30,7 @@ const CHIPS: ChipDef[] = [
   { id: "track_order", label: "Track an order", icon: Package },
   { id: "return_exchange", label: "Start a return / exchange", icon: RotateCcw },
   { id: "helmet_sizing", label: "Helmet sizing help", icon: HardHat },
-  { id: "tech_air", label: "Book Tech-Air service", icon: Shield },
+  { id: "tech_air", label: "Tech-Air service", icon: Shield },
   { id: "find_tires", label: "Find tires for my bike", icon: Disc },
   { id: "talk_to_human", label: "Talk to a human", icon: Headphones },
 ];

@@ -7,8 +7,6 @@ import QuickReplyChips, { type QuickReplyChipId } from "./QuickReplyChips";
 import OrderLookupForm from "./OrderLookupForm";
 import EmailCaptureForm from "./EmailCaptureForm";
 import EndOfSessionCard from "./EndOfSessionCard";
-import TechAirRequestForm from "./TechAirRequestForm";
-import { detectTechAirServiceIntent } from "./techAirIntent";
 import TireFitmentForm, { type TireFitmentPayload } from "./TireFitmentForm";
 import ActionChips from "./ActionChips";
 import { Send, Loader2, Clock } from "lucide-react";
@@ -30,9 +28,9 @@ interface Persona {
 }
 
 const DEFAULT_PERSONA: Persona = {
-  name: "Jake",
+  name: "Agent",
   title: "Product Specialist",
-  avatarUrl: "/jake-avatar.svg",
+  avatarUrl: "/agent-avatar.svg",
 };
 
 const CHIP_AUTOSEND: Partial<Record<QuickReplyChipId, string>> = {
@@ -116,7 +114,7 @@ export default function ChatWidget() {
   const [pageContext, setPageContext] = useState<PageContext | null>(null);
   const [persona, setPersona] = useState<Persona>(DEFAULT_PERSONA);
   const [chipForm, setChipForm] = useState<
-    "none" | "order_lookup" | "email_capture" | "tech_air" | "tire_fitment"
+    "none" | "order_lookup" | "email_capture" | "tire_fitment"
   >("none");
   const [humanBannerVisible, setHumanBannerVisible] = useState(false);
   const [tireContext, setTireContext] = useState<TireFitmentPayload | null>(null);
@@ -627,39 +625,6 @@ export default function ChatWidget() {
     // Lightweight intent match for customer-typed messages that should open
     // a structured flow instead of sending free-text.
     const lower = trimmed.toLowerCase();
-    const wantsTechAir = detectTechAirServiceIntent(trimmed);
-    if (wantsTechAir) {
-      if (!override) setInput("");
-      const ensureSession = async (): Promise<string | null> => {
-        if (dbSessionIdRef.current) return dbSessionIdRef.current;
-        try {
-          const sRes = await fetchWithTimeout(
-            "/api/sessions",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ customerIdentifier, pageContext }),
-            },
-            SESSION_FETCH_MS
-          );
-          const sData = await sRes.json().catch(() => ({}));
-          if (sData.session?.id) {
-            setDbSessionId(sData.session.id);
-            return sData.session.id as string;
-          }
-          return null;
-        } catch {
-          return null;
-        }
-      };
-      const sid = await ensureSession();
-      if (sid) setChipForm("tech_air");
-      else
-        appendLocalError(
-          "We couldn't start the Tech-Air form right now. Please try again."
-        );
-      return;
-    }
 
     const wantsTires =
       lower.includes("tires for my") ||
@@ -852,28 +817,7 @@ export default function ChatWidget() {
         return;
       }
       if (id === "tech_air") {
-        // Ensure we have a session before opening the form.
-        if (!dbSessionIdRef.current) {
-          try {
-            const sRes = await fetchWithTimeout(
-              "/api/sessions",
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ customerIdentifier, pageContext }),
-              },
-              SESSION_FETCH_MS
-            );
-            const sData = await sRes.json().catch(() => ({}));
-            if (sData.session?.id) setDbSessionId(sData.session.id);
-          } catch {
-            appendLocalError(
-              "We couldn't start your chat session. Please try again."
-            );
-            return;
-          }
-        }
-        setChipForm("tech_air");
+        void sendMessage("I need help with Tech-Air service");
         return;
       }
       if (id === "find_tires") {
@@ -1056,12 +1000,6 @@ export default function ChatWidget() {
         )}
         {chipForm === "email_capture" && dbSessionId && (
           <EmailCaptureForm
-            sessionId={dbSessionId}
-            onClose={() => setChipForm("none")}
-          />
-        )}
-        {chipForm === "tech_air" && dbSessionId && (
-          <TechAirRequestForm
             sessionId={dbSessionId}
             onClose={() => setChipForm("none")}
           />

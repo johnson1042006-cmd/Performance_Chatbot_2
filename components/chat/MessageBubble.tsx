@@ -23,13 +23,13 @@ export default function MessageBubble({
   const isCustomer = role === "customer";
   const isAI = role === "ai";
 
-  // For AI messages we display the persona (Jake) like a regular agent so the
+  // For AI messages we display the persona like a regular agent so the
   // customer doesn't feel like they're talking to a bot. The purple left
   // border and "AI" chip are intentionally gone — manager dashboard still
   // labels the message AI via the message-ai data-testid. Falls back to
-  // "Assistant" if no persona was supplied.
+  // "Agent" if no persona was supplied.
   const displayName = isAI
-    ? personaName || "Assistant"
+    ? personaName || "Agent"
     : agentName || "Agent";
   const displayAvatar = isAI ? personaAvatarUrl : undefined;
   const initials = displayName

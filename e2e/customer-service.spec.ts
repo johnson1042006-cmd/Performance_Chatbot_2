@@ -60,9 +60,9 @@ test.describe("Customer service chips — Track an order", () => {
         body: JSON.stringify({
           autoOpenOnFirstVisit: true,
           persona: {
-            name: "Jake",
+            name: "Agent",
             title: "Product Specialist",
-            avatarUrl: "/jake-avatar.svg",
+            avatarUrl: "/agent-avatar.svg",
           },
         }),
       })
@@ -122,133 +122,6 @@ test.describe("Customer service chips — Track an order", () => {
   });
 });
 
-test.describe("Customer service chips — Tech-Air service request", () => {
-  test("submitting Tech-Air request shows confirmation and sends email", async ({
-    page,
-  }) => {
-    const fakeSessionId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
-
-    await page.route("**/api/sessions", async (route) => {
-      if (route.request().method() === "POST") {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({
-            session: { id: fakeSessionId, status: "waiting" },
-          }),
-        });
-      } else {
-        await route.continue();
-      }
-    });
-
-    // Minimal stubs to keep widget stable.
-    let messagesResponse = { messages: [] as Array<Record<string, unknown>> };
-    await page.route(`**/api/sessions/${fakeSessionId}/messages`, async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(messagesResponse),
-      });
-    });
-    await page.route(`**/api/sessions/${fakeSessionId}`, async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          session: { id: fakeSessionId, claimedByKind: null },
-        }),
-      });
-    });
-    await page.route(
-      `**/api/sessions/${fakeSessionId}/heartbeat`,
-      (route) => route.fulfill({ status: 200, body: "{}" })
-    );
-    await page.route("**/api/embed/config", (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          autoOpenOnFirstVisit: true,
-          persona: {
-            name: "Jake",
-            title: "Product Specialist",
-            avatarUrl: "/jake-avatar.svg",
-          },
-        }),
-      })
-    );
-
-    // Stub the service-request route to behave like production: on success it
-    // persists/broadcasts an AI confirmation message; we simulate that by
-    // updating the messages poll response.
-    await page.route(
-      `**/api/sessions/${fakeSessionId}/service-request`,
-      async (route) => {
-        const body = route.request().postDataJSON() as {
-          airbagModel: string;
-          serialNumber: string;
-          email: string;
-        };
-        expect(body.airbagModel).toBe("Tech-Air 5");
-        expect(body.serialNumber).toBe("SN123");
-        expect(body.email).toBe("alex@example.com");
-
-        messagesResponse = {
-          messages: [
-            {
-              id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
-              role: "ai",
-              content:
-                "Got it — your Tech-Air service request is in. We'll reply to **alex@example.com** within 1 business day to confirm next steps.",
-              sentAt: new Date().toISOString(),
-            },
-          ],
-        };
-
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ ok: true }),
-        });
-      }
-    );
-
-    await page.goto("/embed");
-    await expect(page.getByTestId("chip-tech_air")).toBeVisible({
-      timeout: 10000,
-    });
-    await page.getByTestId("chip-tech_air").click();
-
-    await expect(page.getByTestId("tech-air-request-form")).toBeVisible();
-    await page.locator("#techair-full-name").fill("Alex Rider");
-    await page.locator("#techair-email").fill("alex@example.com");
-    await page.locator("#techair-phone").fill("3035551212");
-    await page.locator("#techair-model").selectOption("Tech-Air 5");
-    await page.locator("#techair-serial").fill("SN123");
-    await page.locator("#techair-service").selectOption("Cartridge replacement");
-    await page.locator("#techair-description").fill("Error light E1");
-    await page
-      .locator("#techair-return-address")
-      .fill("Alex Rider\n123 Main St\nCentennial, CO 80112");
-    await page
-      .locator('input[name="techair-preferred-return-shipping"][value="Standard ground"]')
-      .check();
-    await page.locator('input[type="checkbox"]').check();
-
-    await page.getByTestId("tech-air-request-submit").click();
-
-    await expect(page.locator('[data-testid="message-ai"]')).toContainText(
-      "your Tech-Air service request is in",
-      { timeout: 15000 }
-    );
-    // Note: end-to-end email subject assertions live in the unit test for
-    // renderTechAirRequest (lib/email/templates/__tests__/tech-air-request.test.ts).
-    // Asserting on /api/e2e/email-log here would be misleading because this
-    // spec stubs the service-request route, so the real email is never sent.
-  });
-});
-
 test.describe("Customer service chips — Find tires", () => {
   test("tire fitment form submits and shows catalog link + connect chip", async ({
     page,
@@ -297,9 +170,9 @@ test.describe("Customer service chips — Find tires", () => {
         body: JSON.stringify({
           autoOpenOnFirstVisit: true,
           persona: {
-            name: "Jake",
+            name: "Agent",
             title: "Product Specialist",
-            avatarUrl: "/jake-avatar.svg",
+            avatarUrl: "/agent-avatar.svg",
           },
         }),
       })
@@ -393,9 +266,9 @@ test.describe("Customer service chips — Talk to a human", () => {
         body: JSON.stringify({
           autoOpenOnFirstVisit: true,
           persona: {
-            name: "Jake",
+            name: "Agent",
             title: "Product Specialist",
-            avatarUrl: "/jake-avatar.svg",
+            avatarUrl: "/agent-avatar.svg",
           },
         }),
       })
@@ -509,9 +382,9 @@ test.describe("End-of-session feedback", () => {
         body: JSON.stringify({
           autoOpenOnFirstVisit: true,
           persona: {
-            name: "Jake",
+            name: "Agent",
             title: "Product Specialist",
-            avatarUrl: "/jake-avatar.svg",
+            avatarUrl: "/agent-avatar.svg",
           },
         }),
       })

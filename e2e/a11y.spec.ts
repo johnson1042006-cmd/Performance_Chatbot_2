@@ -45,12 +45,6 @@ test.describe("Accessibility (axe)", () => {
     await runAxe(page, "/embed (order lookup form)");
     await page.getByLabel("Cancel").click();
 
-    // Tech-Air form
-    await page.getByTestId("chip-tech_air").click();
-    await page.getByTestId("tech-air-request-form").waitFor();
-    await runAxe(page, "/embed (tech-air form)");
-    await page.getByLabel("Cancel").click();
-
     // Tire fitment form
     await page.getByTestId("chip-find_tires").click();
     await page.getByTestId("tire-fitment-form").waitFor();

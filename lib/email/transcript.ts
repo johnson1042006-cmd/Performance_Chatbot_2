@@ -38,11 +38,11 @@ async function loadPersonaName(): Promise<string> {
       .from(knowledgeBase)
       .where(eq(knowledgeBase.topic, "bot_persona"))
       .limit(1);
-    if (!row) return "Jake";
+    if (!row) return "Agent";
     const parsed = JSON.parse(row.content);
-    return typeof parsed?.name === "string" ? parsed.name : "Jake";
+    return typeof parsed?.name === "string" ? parsed.name : "Agent";
   } catch {
-    return "Jake";
+    return "Agent";
   }
 }
 
