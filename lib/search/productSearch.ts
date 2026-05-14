@@ -605,7 +605,7 @@ export async function searchProducts(
 
   // Step 3: Build ONE candidate pool via four parallel strategies.
   // All four run concurrently; results are unioned and deduplicated (≤ 200).
-  const [subCatResults, brandResults, bcKwResults, localMatches] = await Promise.all([
+  const [subCatResults, brandResults, bcKwResults, localMatches, nameMatches] = await Promise.all([
 
     // 3a: canonical subcategory/type/broad-type category
     // Try ALL candidate category names in parallel and union results.
@@ -667,6 +667,15 @@ export async function searchProducts(
 
     // 3d: local catalog (enrichment happens after all parallel work completes)
     searchLocalCatalog(kwTokens.join(" "), 20).catch(() => [] as LocalMatch[]),
+
+    // 3e: direct name-match lookup. Catches "badlands pro", "supertech m10",
+    // "ram-x" style queries where the customer names a specific product without
+    // mentioning brand or productType. We always run this when we have at least
+    // 2 distinctive tokens — the cost is one extra BC API call and the coverage
+    // gain is substantial.
+    (kwTokens.length >= 2
+      ? getProductByNameLike(kwTokens.join(" "), 10).catch(() => [] as BCProduct[])
+      : Promise.resolve([] as BCProduct[])),
   ]);
 
   // Enrich local matches in parallel
@@ -689,6 +698,9 @@ export async function searchProducts(
       }
     }
   }
+  // Direct name matches are highest-confidence for product-name queries —
+  // add them before broader keyword results to guarantee pool inclusion.
+  addProducts(nameMatches);
   addProducts(subCatResults);
   addProducts(brandResults);
   addProducts(bcKwResults);
@@ -751,8 +763,10 @@ export async function searchProducts(
     // +30: in stock
     if (isInStock(p)) score += 30;
 
-    // +5 per keyword overlap (max 4 tokens → max +20)
-    score += Math.min(4, kwTokens.filter((kw) => nameLower.includes(kw)).length) * 5;
+    // +10 per keyword overlap (max 4 tokens → max +40). Higher weight matters
+    // for product-name queries where subcategory/brand/type bonuses don't fire
+    // and the only signal is "the customer typed words from the product name".
+    score += Math.min(4, kwTokens.filter((kw) => nameLower.includes(kw)).length) * 10;
 
     // -50: off-street bias when customer was ambiguous (not "any", not explicit)
     if (

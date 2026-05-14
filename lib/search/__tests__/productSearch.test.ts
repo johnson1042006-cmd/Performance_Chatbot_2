@@ -809,6 +809,134 @@ describe("searchProducts", () => {
     expect(names).toContain("HJC RPHA 1N Helmet");
     expect(names).toContain("Shoei X-Fourteen Helmet");
   });
+
+  // -------------------------------------------------------------------------
+  // Name-match candidate source regression tests
+  // -------------------------------------------------------------------------
+
+  it("surfaces Klim Badlands Pro Jacket for 'do you guys have the badlands pro?'", async () => {
+    const { getProductByNameLike } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const badlandsJacket = {
+      id: 900, name: "Klim Badlands Pro Jacket", sku: "KL-BPJ",
+      description: "Adventure touring jacket.",
+      price: 549, sale_price: 0, retail_price: 0, calculated_price: 549,
+      inventory_level: 3, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [10], brand_id: 5,
+      custom_url: { url: "/klim-badlands-pro-jacket/" }, variants: [], images: [],
+    };
+
+    (getProductByNameLike as ReturnType<typeof vi.fn>).mockResolvedValue([badlandsJacket]);
+
+    const result = await searchProducts("do you guys have the badlands pro?");
+    const names = result.products.map((p) => p.name);
+    expect(names).toContain("Klim Badlands Pro Jacket");
+  });
+
+  it("surfaces Alpinestars Supertech M10 for 'show me the supertech m10'", async () => {
+    const { getProductByNameLike } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const supertechM10 = {
+      id: 901, name: "Alpinestars Supertech M10 Helmet", sku: "AS-STM10",
+      description: "MX helmet.",
+      price: 699, sale_price: 0, retail_price: 0, calculated_price: 699,
+      inventory_level: 5, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [11], brand_id: 6,
+      custom_url: { url: "/alpinestars-supertech-m10/" }, variants: [], images: [],
+    };
+
+    (getProductByNameLike as ReturnType<typeof vi.fn>).mockResolvedValue([supertechM10]);
+
+    const result = await searchProducts("show me the supertech m10");
+    const names = result.products.map((p) => p.name);
+    expect(names).toContain("Alpinestars Supertech M10 Helmet");
+  });
+
+  it("surfaces Arai Ram-X for 'ram-x helmet' even with Street Helmets pool contributing", async () => {
+    const { getProductByNameLike, findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const ramX = {
+      id: 902, name: "Arai Ram-X Helmet", sku: "ARAI-RX",
+      description: "Full-face street helmet.",
+      price: 849, sale_price: 0, retail_price: 0, calculated_price: 849,
+      inventory_level: 2, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [20], brand_id: 7,
+      custom_url: { url: "/arai-ram-x/" }, variants: [], images: [],
+    };
+    const otherHelmet = {
+      id: 903, name: "Shoei RF-1400 Helmet", sku: "SH-RF14",
+      description: "Street helmet.",
+      price: 599, sale_price: 0, retail_price: 0, calculated_price: 599,
+      inventory_level: 10, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [20], brand_id: 8,
+      custom_url: { url: "/shoei-rf-1400/" }, variants: [], images: [],
+    };
+
+    const streetCatH = { id: 20, name: "Street Helmets", parent_id: 0 };
+
+    (getProductByNameLike as ReturnType<typeof vi.fn>).mockResolvedValue([ramX]);
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => (name === "Street Helmets" ? streetCatH : null)
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => (id === 20 ? [ramX, otherHelmet] : [])
+    );
+
+    const result = await searchProducts("ram-x helmet");
+    const names = result.products.map((p) => p.name);
+    expect(names).toContain("Arai Ram-X Helmet");
+  });
+
+  it("regression: alpinestars mx helmets still surfaces Supertech fixtures, not displaced by name-match noise", async () => {
+    const { getProductByNameLike, findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const motoHelmetsCat = { id: 30, name: "Moto Helmets", parent_id: 0 };
+    const alpineCat = { id: 31, name: "Alpinestars", parent_id: 0 };
+
+    const supertech = (id: number, name: string) => ({
+      id, name, sku: `AS-${id}`,
+      description: "MX helmet.",
+      price: 699, sale_price: 0, retail_price: 0, calculated_price: 699,
+      inventory_level: 4, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [30, 31], brand_id: 6,
+      custom_url: { url: `/alpinestars/${id}/` }, variants: [], images: [],
+    });
+    const fixtures = [
+      supertech(910, "Alpinestars Supertech SM-10 Helmet"),
+      supertech(911, "Alpinestars Supertech M10 Helmet"),
+      supertech(912, "Alpinestars Supertech S-M7 Helmet"),
+    ];
+
+    (getProductByNameLike as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => {
+        if (name === "Moto Helmets") return motoHelmetsCat;
+        if (name === "Alpinestars") return alpineCat;
+        return null;
+      }
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => {
+        if (id === 30 || id === 31) return fixtures;
+        return [];
+      }
+    );
+
+    const result = await searchProducts("show me alpinestars mx helmets");
+    const names = result.products.map((p) => p.name);
+    expect(names).toContain("Alpinestars Supertech SM-10 Helmet");
+    expect(names).toContain("Alpinestars Supertech M10 Helmet");
+    expect(names).toContain("Alpinestars Supertech S-M7 Helmet");
+  });
 });
 
 // ---------------------------------------------------------------------------
