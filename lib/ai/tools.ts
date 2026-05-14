@@ -253,7 +253,14 @@ export const tools: Anthropic.Tool[] = [
   {
     name: "search_products",
     description:
-      "Search the Performance Cycle catalog. Use BEFORE naming any product not on the current page or already in conversation history. Optional filters narrow results by product type (helmet, jacket, boots, gloves, suit, airbag, exhaust, etc.), maximum budget, color, and in-stock-only.",
+      "Search the Performance Cycle catalog. Use BEFORE naming any product not on the " +
+      "current page or already in conversation history. CRITICAL: when the customer mentions " +
+      "a specific product by name (e.g. 'badlands pro', 'corsair x', 'supertech m10'), " +
+      "pass ONLY those distinctive name tokens as the query — do NOT add words from earlier " +
+      "in the conversation (brand, product type, use case). Adding context words to a " +
+      "specific-product query degrades name matching. Use the productType filter separately " +
+      "if you need to scope. Optional filters narrow results by product type (helmet, jacket, " +
+      "boots, gloves, suit, airbag, exhaust, etc.), maximum budget, color, and in-stock-only.",
     input_schema: {
       type: "object",
       properties: {

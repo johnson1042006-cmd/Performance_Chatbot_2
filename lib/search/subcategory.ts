@@ -24,21 +24,25 @@ export type HelmetStyle =
   | "modular"
   | "adventure"
   | "mx"
-  | "half";
+  | "half"
+  | "snow"
+  | "racing";
 
 export type JacketStyle =
   | "street"
   | "mx"
   | "adventure"
   | "cruiser"
-  | "racing";
+  | "racing"
+  | "snow";
 
 export type BootStyle =
   | "street"
   | "mx"
   | "adventure"
   | "racing"
-  | "cruiser";
+  | "cruiser"
+  | "snow";
 
 export type GloveStyle =
   | "street"
@@ -51,7 +55,8 @@ export type PantStyle =
   | "street"
   | "mx"
   | "adventure"
-  | "cruiser";
+  | "cruiser"
+  | "snow";
 
 export type TireStyle =
   | "sport"
@@ -103,6 +108,8 @@ export const OFF_STREET_SUBCATEGORIES: Set<SubcategoryValue> = new Set<Subcatego
   "mx",
   "adventure",
   "dirt",
+  "snow",
+  "racing",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -137,14 +144,17 @@ const CATEGORY_NAME_RULES: Record<
   Array<{ pattern: RegExp; value: SubcategoryValue }>
 > = {
   helmet: [
+    { pattern: /\bsnow\b/i, value: "snow" },
+    { pattern: /\brace\s+helmets?\b/i, value: "racing" },
     { pattern: /open[\s-]?face/i, value: "open_face" },
     { pattern: /modular|flip[\s-]?up/i, value: "modular" },
     { pattern: /half|beanie|shorty|3\s*\/\s*4|three[\s-]?quarter/i, value: "half" },
     { pattern: /adventure|adv|dual[\s-]?sport/i, value: "adventure" },
     { pattern: /moto|mx|motocross|off[\s-]?road|dirt/i, value: "mx" },
-    { pattern: /street|sport|race|track|full[\s-]?face/i, value: "full_face" },
+    { pattern: /street|sport|full[\s-]?face/i, value: "full_face" },
   ],
   jacket: [
+    { pattern: /\bsnow\b/i, value: "snow" },
     { pattern: /moto|mx|motocross|off[\s-]?road|dirt|jersey/i, value: "mx" },
     { pattern: /adventure|adv|dual[\s-]?sport/i, value: "adventure" },
     { pattern: /cruiser|harley|leather/i, value: "cruiser" },
@@ -152,6 +162,7 @@ const CATEGORY_NAME_RULES: Record<
     { pattern: /street|sport|touring|textile|mesh|waterproof/i, value: "street" },
   ],
   boots: [
+    { pattern: /\bsnow\b/i, value: "snow" },
     { pattern: /moto|mx|motocross|off[\s-]?road|dirt/i, value: "mx" },
     { pattern: /adventure|adv|dual[\s-]?sport/i, value: "adventure" },
     { pattern: /cruiser|harley/i, value: "cruiser" },
@@ -166,6 +177,7 @@ const CATEGORY_NAME_RULES: Record<
     { pattern: /street|sport|touring|summer|riding/i, value: "street" },
   ],
   pants: [
+    { pattern: /\bsnow\b/i, value: "snow" },
     { pattern: /moto|mx|motocross|off[\s-]?road|dirt/i, value: "mx" },
     { pattern: /adventure|adv|dual[\s-]?sport/i, value: "adventure" },
     { pattern: /cruiser|harley|leather/i, value: "cruiser" },
@@ -301,20 +313,24 @@ const TEXT_RULES: Record<
   Array<{ pattern: RegExp; value: SubcategoryValue }>
 > = {
   helmet: [
+    { pattern: /\bsnowmobile\b|\bsnowmobiling\b|\bsled\b/i, value: "snow" },
+    { pattern: /\brace\b|\btrack\b|\bcircuit\b|\bgp\b|\bracing\b/i, value: "racing" },
     { pattern: /\bopen[\s-]?face\b|\b3\s*\/\s*4\b|three[\s-]?quarter/i, value: "open_face" },
     { pattern: /\bmodular\b|\bflip[\s-]?up\b/i, value: "modular" },
     { pattern: /\bhalf[\s-]?helmet\b|\bbeanie\b|\bshorty\b/i, value: "half" },
-    { pattern: /\badventure\b|\badv\b|\bdual[\s-]?sport\b/i, value: "adventure" },
+    { pattern: /\badventure\b|\bdual[\s-]?sport\b/i, value: "adventure" },
     { pattern: /\bmotocross\b|\bmx\b|\boff[\s-]?road\b|\bdirt\b|\bmoto\b/i, value: "mx" },
-    { pattern: /\bfull[\s-]?face\b|\brace[\s-]?helmet\b|\bstreet[\s-]?helmet\b|\bsport[\s-]?helmet\b/i, value: "full_face" },
+    { pattern: /\bfull[\s-]?face\b|\bstreet[\s-]?helmet\b|\bsport[\s-]?helmet\b/i, value: "full_face" },
   ],
   jacket: [
+    { pattern: /\bsnowmobile\b|\bsnowmobiling\b|\bsled\b/i, value: "snow" },
     { pattern: /\bjersey\b|\bmx\b|\bmotocross\b|\boff[\s-]?road\b|\bdirt\b/i, value: "mx" },
     { pattern: /\badventure\b|\badv\b|\bdual[\s-]?sport\b/i, value: "adventure" },
     { pattern: /\bleather\b|\bcruiser\b|\bharley\b/i, value: "cruiser" },
     { pattern: /\brace\b|\btrack\b|\bleathers\b/i, value: "racing" },
   ],
   boots: [
+    { pattern: /\bsnowmobile\b|\bsnowmobiling\b|\bsled\b/i, value: "snow" },
     { pattern: /\bmx\b|\bmotocross\b|\boff[\s-]?road\b|\bdirt\b/i, value: "mx" },
     { pattern: /\badventure\b|\badv\b|\bdual[\s-]?sport\b/i, value: "adventure" },
     { pattern: /\brace\b|\btrack\b/i, value: "racing" },
@@ -327,6 +343,7 @@ const TEXT_RULES: Record<
     { pattern: /\brace\b|\btrack\b|\bgauntlet\b/i, value: "racing" },
   ],
   pants: [
+    { pattern: /\bsnowmobile\b|\bsnowmobiling\b|\bsled\b/i, value: "snow" },
     { pattern: /\bmx\b|\bmotocross\b|\boff[\s-]?road\b|\bdirt\b/i, value: "mx" },
     { pattern: /\badventure\b|\badv\b|\bdual[\s-]?sport\b/i, value: "adventure" },
     { pattern: /\bleather[\s-]?pants?\b|\bcruiser\b/i, value: "cruiser" },
@@ -407,20 +424,24 @@ const EXPLICIT_RULES: Record<
   Array<{ pattern: RegExp; value: SubcategoryValue }>
 > = {
   helmet: [
+    { pattern: /\bsnow(?:mobil(?:e|ing))?\b|\bsled(?:ding)?\b/i, value: "snow" },
+    { pattern: /\brac(?:e|ing)\b|\btrack\b|\bcircuit\b|\bgp\s+helmet\b/i, value: "racing" },
     { pattern: /\bopen[\s-]?face\b|\b3\s*\/\s*4\b|three[\s-]?quarter/i, value: "open_face" },
     { pattern: /\bmodular\b|\bflip[\s-]?up\b/i, value: "modular" },
     { pattern: /\bhalf[\s-]?helmets?\b|\bbeanie\b|\bshorty\b/i, value: "half" },
     { pattern: /\badventure\b|\badv\b|\bdual[\s-]?sport\b/i, value: "adventure" },
     { pattern: /\bmotocross\b|\bmx\b|\boff[\s-]?road\b|\bdirt\b/i, value: "mx" },
-    { pattern: /\bfull[\s-]?face\b|\brace\b|\btrack\b/i, value: "full_face" },
+    { pattern: /\bfull[\s-]?face\b/i, value: "full_face" },
   ],
   jacket: [
+    { pattern: /\bsnow(?:mobil(?:e|ing))?\b|\bsled(?:ding)?\b/i, value: "snow" },
     { pattern: /\bjersey\b|\bmotocross\b|\bmx\b|\boff[\s-]?road\b|\bdirt\b/i, value: "mx" },
     { pattern: /\badventure\b|\badv\b|\bdual[\s-]?sport\b/i, value: "adventure" },
     { pattern: /\bcruiser\b|\bharley\b|\bleather[\s-]?jacket\b/i, value: "cruiser" },
     { pattern: /\brace\b|\btrack\b|\bleathers\b/i, value: "racing" },
   ],
   boots: [
+    { pattern: /\bsnow(?:mobil(?:e|ing))?\b|\bsled(?:ding)?\b/i, value: "snow" },
     { pattern: /\bmx\b|\bmotocross\b|\boff[\s-]?road\b|\bdirt\b/i, value: "mx" },
     { pattern: /\badventure\b|\badv\b|\bdual[\s-]?sport\b/i, value: "adventure" },
     { pattern: /\brace\b|\btrack\b/i, value: "racing" },
@@ -433,6 +454,7 @@ const EXPLICIT_RULES: Record<
     { pattern: /\brace\b|\btrack\b|\bgauntlet\b/i, value: "racing" },
   ],
   pants: [
+    { pattern: /\bsnow(?:mobil(?:e|ing))?\b|\bsled(?:ding)?\b/i, value: "snow" },
     { pattern: /\bmx\b|\bmotocross\b|\boff[\s-]?road\b|\bdirt\b/i, value: "mx" },
     { pattern: /\badventure\b|\badv\b|\bdual[\s-]?sport\b/i, value: "adventure" },
     { pattern: /\bcruiser\b|\bharley\b|\bleather[\s-]?pants?\b/i, value: "cruiser" },

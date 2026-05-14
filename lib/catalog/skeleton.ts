@@ -413,20 +413,24 @@ const CAT_SUB_RULES: Partial<
   Record<SupportedProductType, Array<{ pattern: RegExp; value: string }>>
 > = {
   helmet: [
-    { pattern: /open[\s-]?face/i,                             value: "open_face"  },
-    { pattern: /modular|flip[\s-]?up/i,                       value: "modular"    },
-    { pattern: /half|beanie|shorty|3\s*\/\s*4|three[\s-]?quarter/i, value: "half" },
-    { pattern: /adventure|adv|dual[\s-]?sport/i,              value: "adventure"  },
-    { pattern: /moto|mx|motocross|off[\s-]?road|dirt/i,       value: "mx"         },
-    { pattern: /street|sport|race|track|full[\s-]?face/i,     value: "full_face"  },
+    { pattern: /\bsnow\b/i,                                        value: "snow"      },
+    { pattern: /\brace\s+helmets?\b/i,                             value: "racing"    },
+    { pattern: /open[\s-]?face/i,                                  value: "open_face" },
+    { pattern: /modular|flip[\s-]?up/i,                            value: "modular"   },
+    { pattern: /half|beanie|shorty|3\s*\/\s*4|three[\s-]?quarter/i, value: "half"    },
+    { pattern: /adventure|adv|dual[\s-]?sport/i,                   value: "adventure" },
+    { pattern: /moto|mx|motocross|off[\s-]?road|dirt/i,            value: "mx"        },
+    { pattern: /street|sport|full[\s-]?face/i,                     value: "full_face" },
   ],
   jacket: [
+    { pattern: /\bsnow\b/i,                                    value: "snow"      },
     { pattern: /moto|mx|motocross|off[\s-]?road|dirt|jersey/i, value: "mx"       },
     { pattern: /adventure|adv|dual[\s-]?sport/i,               value: "adventure" },
     { pattern: /cruiser|harley|leather/i,                      value: "cruiser"   },
     { pattern: /race|track/i,                                  value: "racing"    },
   ],
   boots: [
+    { pattern: /\bsnow\b/i,                             value: "snow"      },
     { pattern: /moto|mx|motocross|off[\s-]?road|dirt/i, value: "mx"       },
     { pattern: /adventure|adv|dual[\s-]?sport/i,        value: "adventure" },
     { pattern: /cruiser|harley/i,                       value: "cruiser"   },
@@ -439,6 +443,7 @@ const CAT_SUB_RULES: Partial<
     { pattern: /race|track|gauntlet/i,                  value: "racing"    },
   ],
   pants: [
+    { pattern: /\bsnow\b/i,                             value: "snow"      },
     { pattern: /moto|mx|motocross|off[\s-]?road|dirt/i, value: "mx"       },
     { pattern: /adventure|adv|dual[\s-]?sport/i,        value: "adventure" },
     { pattern: /cruiser|harley|leather/i,               value: "cruiser"   },

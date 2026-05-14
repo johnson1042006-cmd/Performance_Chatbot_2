@@ -448,14 +448,16 @@ const TYPE_SUBCATEGORY_CATEGORIES: Partial<
     // "MX Helmets" and "Fox Helmets" are searched because Fox V1 variants live
     // only under the Fox brand shelf, not in the canonical Offroad Helmets leaf.
     mx:         ["Moto Helmets", "Offroad Helmets", "Fox Helmets"],
-    // "Race Helmets" is a sibling shelf to "Street Helmets" (42 products:
-    // Arai Corsair X, HJC RPHA 1N, Shoei X-Fourteen etc.).
-    full_face:  ["Street Helmets", "Race Helmets"],
+    full_face:  ["Street Helmets"],
+    // Race Helmets is its own BC shelf (42 products: Arai Corsair X, HJC RPHA 1N,
+    // Shoei X-Fourteen, Alpinestars Supertech R10, KYT KX-1 Race GP etc.).
+    racing:     ["Race Helmets"],
     modular:    ["Modular Helmets"],
     adventure:  ["Adventure Helmets"],
     open_face:  ["Open Face Helmets"],
     // No "Half Helmets" BC category exists; Open Face is the closest real leaf.
     half:       ["Open Face Helmets"],
+    snow:       ["Snow Helmets"],
   },
   jacket: {
     // BC has no compound "Street Jackets" / "Moto Jackets" etc. leaves.
@@ -466,6 +468,7 @@ const TYPE_SUBCATEGORY_CATEGORIES: Partial<
     adventure: ["Jackets"],
     cruiser:   ["Jackets"],
     racing:    ["Jackets"],
+    snow:      ["Snow Jackets"],
   },
   boots: {
     mx:        ["Moto Boots", "Boots"],
@@ -474,6 +477,7 @@ const TYPE_SUBCATEGORY_CATEGORIES: Partial<
     adventure: ["Boots"],
     racing:    ["Boots"],
     cruiser:   ["Boots"],
+    snow:      ["Snow Boots"],
   },
   gloves: {
     // BC has no compound glove leaves except Heated Gloves and Snow Gloves.
@@ -490,6 +494,7 @@ const TYPE_SUBCATEGORY_CATEGORIES: Partial<
     street:    ["Street Pants"],
     adventure: ["Adventure Pants", "Pants"],
     cruiser:   ["Pants"],
+    snow:      ["Snow Pants/Bibs"],
   },
   tire: {
     // BC has no type-specific tire subcategory leaves at all — only "Tires".
@@ -560,6 +565,36 @@ export function extractBrand(query: string): string | null {
     if (re.test(lower)) return b;
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Brand diversification helper
+// ---------------------------------------------------------------------------
+//
+// When the customer hasn't named a specific brand, cap any single brand_id to
+// `cap` slots in the top-`take` results so a brand whose model names happen to
+// keyword-match doesn't dominate the list. Sort order within each brand is
+// preserved (callers should pass an already score-sorted slice).
+// The cap is strict: if fewer than `take` products remain after applying it, we
+// return a shorter list rather than padding back from capped brands.
+
+function diversifyByBrand(
+  products: BCProduct[],
+  cap: number,
+  take: number
+): BCProduct[] {
+  const brandCount = new Map<string, number>();
+  const result: BCProduct[] = [];
+  for (const p of products) {
+    if (result.length >= take) break;
+    const key = String(p.brand_id ?? "unknown");
+    const seen = brandCount.get(key) ?? 0;
+    if (seen < cap) {
+      result.push(p);
+      brandCount.set(key, seen + 1);
+    }
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -668,14 +703,49 @@ export async function searchProducts(
     // 3d: local catalog (enrichment happens after all parallel work completes)
     searchLocalCatalog(kwTokens.join(" "), 20).catch(() => [] as LocalMatch[]),
 
-    // 3e: direct name-match lookup. Catches "badlands pro", "supertech m10",
-    // "ram-x" style queries where the customer names a specific product without
-    // mentioning brand or productType. We always run this when we have at least
-    // 2 distinctive tokens — the cost is one extra BC API call and the coverage
-    // gain is substantial.
-    (kwTokens.length >= 2
-      ? getProductByNameLike(kwTokens.join(" "), 10).catch(() => [] as BCProduct[])
-      : Promise.resolve([] as BCProduct[])),
+    // 3e: multi-strategy name lookup. Tries the full join first, then progressively
+    // shorter sub-strings of consecutive tokens. Each strategy is a name:like substring
+    // match against BC's product catalog. Handles both clean name queries ("badlands
+    // pro") and context-padded queries ("klim badlands pro adventure jacket") where
+    // the bot infers brand/type from conversation history and adds words to the query
+    // that don't appear together in any real product name.
+    (async (): Promise<BCProduct[]> => {
+      const tokens = kwTokens.filter((t) => t.length >= 3);
+
+      // Edge-case: < 2 long tokens but >= 2 raw kwTokens — try raw join to preserve
+      // current behaviour for queries like "rpha 1n" where "1n" is 2 chars and gets
+      // filtered out by the >= 3 length guard above.
+      if (tokens.length < 2) {
+        if (kwTokens.length >= 2) {
+          try { return await getProductByNameLike(kwTokens.join(" "), 10); } catch { /**/ }
+        }
+        return [];
+      }
+
+      const tried = new Set<string>();
+      const strategies: string[] = [];
+      strategies.push(tokens.join(" "));                           // full join
+      if (tokens.length >= 3) {
+        strategies.push(tokens.slice(0, 3).join(" "));             // first 3
+        strategies.push(tokens.slice(-3).join(" "));               // last 3
+        // All 2-token consecutive windows — catches model names embedded mid-query.
+        for (let i = 0; i < tokens.length - 1; i++) {
+          strategies.push(tokens.slice(i, i + 2).join(" "));
+        }
+      } else {
+        strategies.push(tokens.join(" "));
+      }
+
+      for (const s of strategies) {
+        if (tried.has(s) || s.length < 5) continue;
+        tried.add(s);
+        try {
+          const r = await getProductByNameLike(s, 10);
+          if (r.length > 0) return r;
+        } catch { /* try next */ }
+      }
+      return [];
+    })(),
   ]);
 
   // Enrich local matches in parallel
@@ -708,9 +778,30 @@ export async function searchProducts(
 
   const pool = Array.from(deduped.values());
 
-  if (pool.length === 0) {
-    console.warn("[searchProducts] zero_result", {
+  if (pool.length === 0 && kwTokens.length >= 3) {
+    // Last-ditch retry: try name:like with each individual distinctive token.
+    // Catches truly contaminated queries where every parallel source returned empty.
+    const longTokens = kwTokens.filter((t) => t.length >= 4);
+    const retried = new Set<string>();
+    for (const t of longTokens) {
+      if (retried.has(t)) continue;
+      retried.add(t);
+      try {
+        const r = await getProductByNameLike(t, 10);
+        for (const p of r) {
+          if (p.is_visible && !deduped.has(p.id) && deduped.size < 200) {
+            deduped.set(p.id, p);
+          }
+        }
+        if (deduped.size >= 5) break;
+      } catch { /* */ }
+    }
+  }
+  const finalPool = Array.from(deduped.values());
+  if (finalPool.length === 0) {
+    console.warn("[searchProducts] zero_result_after_retry", {
       query: normalizedQuery,
+      kwTokens,
       productType,
       brand,
       subcategoryRequest: subRequest,
@@ -723,7 +814,7 @@ export async function searchProducts(
   // cheap even at pool size 200.
   if (isSupportedProductType(productType)) {
     await Promise.all(
-      pool.map((p) =>
+      finalPool.map((p) =>
         classifyProductSubcategory(p, productType)
           .then((sub) => {
             (p as BCProduct & { _subcategory?: SubcategoryValue | null })._subcategory = sub;
@@ -783,15 +874,37 @@ export async function searchProducts(
   }
 
   // Step 6: Sort desc, apply hard budget filter, take top 12, boost color
-  pool.sort((a, b) => scoreProduct(b) - scoreProduct(a));
+  console.log("[searchProducts] diag", {
+    query: normalizedQuery,
+    kwTokens,
+    productType,
+    brand,
+    subRequest: subRequest?.value ?? null,
+    detectedColor,
+    sources: {
+      nameMatches: nameMatches.length,
+      subCat: subCatResults.length,
+      brand: brandResults.length,
+      bcKw: bcKwResults.length,
+      enriched: enriched.length,
+    },
+    poolSize: finalPool.length,
+    top5Names: finalPool.slice(0, 5).map((p) => p.name),
+  });
+  finalPool.sort((a, b) => scoreProduct(b) - scoreProduct(a));
 
   // Hard-filter products that exceed a stated budget max so the LLM is never
   // shown items the customer explicitly said they can't afford.
   const withinBudget = budget?.max
-    ? pool.filter((p) => (p.calculated_price || p.price) <= budget.max!)
-    : pool;
+    ? finalPool.filter((p) => (p.calculated_price || p.price) <= budget.max!)
+    : finalPool;
 
-  let results = withinBudget.slice(0, 12);
+  // Brand diversification: when the customer didn't name a brand, cap any
+  // single brand to 3 of the top 12 slots. When a brand was specified
+  // (e.g. "KYT racing helmets") the cap is lifted so all matching products show.
+  let results = brand
+    ? withinBudget.slice(0, 12)
+    : diversifyByBrand(withinBudget, 3, 12);
   results = applyColor(results);
 
   if (results.length === 0) {

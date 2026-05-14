@@ -937,6 +937,170 @@ describe("searchProducts", () => {
     expect(names).toContain("Alpinestars Supertech M10 Helmet");
     expect(names).toContain("Alpinestars Supertech S-M7 Helmet");
   });
+
+  // -------------------------------------------------------------------------
+  // New name-match tests (Layer 1A / 1B coverage)
+  // -------------------------------------------------------------------------
+
+  it("'badlands pro' (clean 2-token query) finds Klim Badlands Pro Jacket via full-join name match", async () => {
+    const { getProductByNameLike } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const jacket = {
+      id: 920, name: "Klim Badlands Pro Jacket", sku: "KL-BPJ2",
+      description: "Adventure touring jacket.",
+      price: 549, sale_price: 0, retail_price: 0, calculated_price: 549,
+      inventory_level: 3, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [10], brand_id: 5,
+      custom_url: { url: "/klim-badlands-pro-jacket/" }, variants: [], images: [],
+    };
+
+    (getProductByNameLike as ReturnType<typeof vi.fn>).mockResolvedValue([jacket]);
+
+    const result = await searchProducts("badlands pro");
+    expect(result.products.map((p) => p.name)).toContain("Klim Badlands Pro Jacket");
+  });
+
+  it("'klim badlands pro adventure jacket' finds Klim Badlands Pro Jacket via shorter substring window — full join doesn't match but 'klim badlands pro' does", async () => {
+    const { getProductByNameLike } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const jacket = {
+      id: 921, name: "Klim Badlands Pro Jacket", sku: "KL-BPJ3",
+      description: "Adventure touring jacket.",
+      price: 549, sale_price: 0, retail_price: 0, calculated_price: 549,
+      inventory_level: 3, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [10], brand_id: 5,
+      custom_url: { url: "/klim-badlands-pro-jacket/" }, variants: [], images: [],
+    };
+
+    // Full 4-token join "klim badlands pro adventure" returns empty; first-3 "klim badlands pro" returns the jacket.
+    (getProductByNameLike as ReturnType<typeof vi.fn>).mockImplementation(
+      async (q: string) => {
+        if (q === "klim badlands pro adventure") return [];
+        if (q.includes("klim badlands pro") || q.includes("badlands pro")) return [jacket];
+        return [];
+      }
+    );
+
+    const result = await searchProducts("klim badlands pro adventure jacket");
+    expect(result.products.map((p) => p.name)).toContain("Klim Badlands Pro Jacket");
+  });
+
+  it("'corsair x' finds Arai Corsair X via BC keyword search (phrase-synonym collapses to single token 'corsair-x')", async () => {
+    const { searchProductsBC } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const corsairX = {
+      id: 922, name: "Arai Corsair-X Helmet", sku: "ARAI-CX",
+      description: "FIM homologated race helmet.",
+      price: 899, sale_price: 0, retail_price: 0, calculated_price: 899,
+      inventory_level: 2, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [42], brand_id: 7,
+      custom_url: { url: "/arai-corsair-x/" }, variants: [], images: [],
+    };
+
+    // "corsair x" → PHRASE_SYNONYMS → "corsair-x" (1 token); IIFE short-circuits
+    // to [] for single-token queries. Product is found via searchProductsBC.
+    (searchProductsBC as ReturnType<typeof vi.fn>).mockResolvedValue([corsairX]);
+
+    const result = await searchProducts("corsair x");
+    expect(result.products.map((p) => p.name)).toContain("Arai Corsair-X Helmet");
+  });
+
+  it("'rpha 1n' finds HJC RPHA 1N via raw-kwTokens join fallback in the name-match IIFE", async () => {
+    const { getProductByNameLike } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const rpha1n = {
+      id: 923, name: "HJC RPHA 1N Helmet", sku: "HJC-RPHA1N",
+      description: "FIM homologated road race helmet.",
+      price: 849, sale_price: 0, retail_price: 0, calculated_price: 849,
+      inventory_level: 4, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [42], brand_id: 8,
+      custom_url: { url: "/hjc-rpha-1n/" }, variants: [], images: [],
+    };
+
+    // "rpha 1n" → kwTokens ["rpha","1n"]; tokens filtered to >=3 chars = ["rpha"]
+    // (length 1 < 2) → IIFE falls back to kwTokens.join(" ") = "rpha 1n".
+    (getProductByNameLike as ReturnType<typeof vi.fn>).mockImplementation(
+      async (q: string) => (q === "rpha 1n" ? [rpha1n] : [])
+    );
+
+    const result = await searchProducts("rpha 1n");
+    expect(result.products.map((p) => p.name)).toContain("HJC RPHA 1N Helmet");
+  });
+
+  it("last-ditch retry recovers when full pool is empty — 'klim badlands jacket' returns Klim Badlands Pro Jacket via per-token retry", async () => {
+    const { getProductByNameLike, searchProductsBC, findCategoryByName } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const jacket = {
+      id: 924, name: "Klim Badlands Pro Jacket", sku: "KL-BPJ4",
+      description: "Adventure touring jacket.",
+      price: 549, sale_price: 0, retail_price: 0, calculated_price: 549,
+      inventory_level: 3, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [10], brand_id: 5,
+      custom_url: { url: "/klim-badlands-pro-jacket/" }, variants: [], images: [],
+    };
+
+    // Ensure all parallel sources return [] so pool is truly empty before retry fires.
+    (searchProductsBC as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+    // "klim badlands jacket" → tokens ["klim","badlands","jacket"] (all >=3 chars)
+    // Full-join "klim badlands jacket" returns []; first-3 is same; 2-token windows
+    // "klim badlands" and "badlands jacket" also return [].
+    // Pool is empty → last-ditch retry fires (kwTokens.length === 3 >= 3).
+    // Per-token tries: "klim" (4 chars) → [], "badlands" (8 chars) → [jacket].
+    (getProductByNameLike as ReturnType<typeof vi.fn>).mockImplementation(
+      async (q: string) => (q === "badlands" ? [jacket] : [])
+    );
+
+    const result = await searchProducts("klim badlands jacket");
+    expect(result.products.map((p) => p.name)).toContain("Klim Badlands Pro Jacket");
+  });
+
+  it("regression: 'what jackets do you have' (ambiguous) still ranks street jackets above mx jackets (-50 off-street penalty)", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const jacketsCat = { id: 50, name: "Jackets", parent_id: 0 };
+
+    const makeJacket = (id: number, name: string, desc: string) => ({
+      id, name, sku: `J-${id}`, description: desc,
+      price: 299, sale_price: 0, retail_price: 0, calculated_price: 299,
+      inventory_level: 5, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [50], brand_id: 1,
+      custom_url: { url: `/jackets/${id}/` }, variants: [], images: [],
+    });
+
+    const streetJacket = makeJacket(930, "Rev'it Tornado 4 Street Jacket", "Street riding jacket for urban commuters.");
+    const mxJacket     = makeJacket(931, "Fox Racing 180 MX Jacket", "Motocross off-road race jacket for dirt riding.");
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => (name === "Jackets" ? jacketsCat : null)
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => (id === 50 ? [mxJacket, streetJacket] : [])
+    );
+
+    const result = await searchProducts("what jackets do you have");
+    const names = result.products.map((p) => p.name);
+    const streetIdx = names.indexOf("Rev'it Tornado 4 Street Jacket");
+    const mxIdx     = names.indexOf("Fox Racing 180 MX Jacket");
+
+    expect(streetIdx).toBeGreaterThanOrEqual(0);
+    expect(mxIdx).toBeGreaterThanOrEqual(0);
+    // Street jacket must rank above MX jacket when the customer gave no subcategory signal.
+    expect(streetIdx).toBeLessThan(mxIdx);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1059,5 +1223,464 @@ describe("searchProducts — broad product types", () => {
     const names = result.products.map((p) => p.name);
     expect(names).toContain("Renthal 520 Rear Sprocket 48T");
     expect(names).toContain("Sunstar 520 Front Sprocket 13T");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// searchProducts — snow subcategory (Layer 4)
+// ---------------------------------------------------------------------------
+describe("searchProducts — snow subcategory", () => {
+  vi.mock("@/lib/bigcommerce/client", () => ({
+    searchProductsBC: vi.fn().mockResolvedValue([]),
+    getProductBySKU: vi.fn().mockResolvedValue(null),
+    getProductByNameLike: vi.fn().mockResolvedValue([]),
+    getProductById: vi.fn().mockResolvedValue(null),
+    getProductsByCategory: vi.fn().mockResolvedValue([]),
+    findCategoryByName: vi.fn().mockResolvedValue(null),
+  }));
+
+  vi.mock("./localCatalogSearch", () => ({
+    searchLocalCatalog: vi.fn().mockResolvedValue([]),
+  }));
+
+  vi.mock("@/lib/db", () => ({
+    db: { execute: vi.fn().mockResolvedValue([]) },
+  }));
+
+  vi.mock("@/lib/db/schema", () => ({
+    productColorways: {},
+  }));
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const makeProduct = (
+    id: number, name: string, sku: string, catId: number, desc = ""
+  ) => ({
+    id, name, sku,
+    description: desc,
+    price: 299, sale_price: 0, retail_price: 0, calculated_price: 299,
+    inventory_level: 5, inventory_tracking: "product",
+    availability: "available", is_visible: true,
+    categories: [catId], brand_id: 10,
+    custom_url: { url: `/${sku.toLowerCase()}/` }, variants: [], images: [],
+  });
+
+  it("'do you have jackets for snowmobiling' returns Snow Jackets", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const snowJacketsCat = { id: 200, name: "Snow Jackets", parent_id: 0 };
+    const fixtures = [
+      makeProduct(2001, "Klim Latitude Jacket", "KL-LAT", 200, "Snowmobile jacket."),
+      makeProduct(2002, "509 Range Insulated Jacket", "509-RNG", 200, "Snowmobile jacket."),
+    ];
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => (name === "Snow Jackets" ? snowJacketsCat : null)
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => (id === 200 ? fixtures : [])
+    );
+
+    const result = await searchProducts("do you have jackets for snowmobiling");
+    const names = result.products.map((p) => p.name);
+    expect(names).toContain("Klim Latitude Jacket");
+    expect(names).toContain("509 Range Insulated Jacket");
+  });
+
+  it("'snowmobile boots' returns Snow Boots", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const snowBootsCat = { id: 201, name: "Snow Boots", parent_id: 0 };
+    const fixtures = [
+      makeProduct(2010, "Klim Adrenaline GTX Boot", "KL-AGB", 201, "Snowmobile boot."),
+      makeProduct(2011, "509 Raid Boot", "509-RAID", 201, "Snowmobile boot."),
+    ];
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => (name === "Snow Boots" ? snowBootsCat : null)
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => (id === 201 ? fixtures : [])
+    );
+
+    const result = await searchProducts("snowmobile boots");
+    const names = result.products.map((p) => p.name);
+    expect(names).toContain("Klim Adrenaline GTX Boot");
+    expect(names).toContain("509 Raid Boot");
+  });
+
+  it("'snowmobiling pants' returns Snow Pants/Bibs", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const snowPantsCat = { id: 202, name: "Snow Pants/Bibs", parent_id: 0 };
+    const fixtures = [
+      makeProduct(2020, "Klim Togwotee Pant", "KL-TOG", 202, "Snowmobile pant."),
+      makeProduct(2021, "FXR Excursion Bib", "FXR-EXC", 202, "Snowmobile bib."),
+    ];
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => (name === "Snow Pants/Bibs" ? snowPantsCat : null)
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => (id === 202 ? fixtures : [])
+    );
+
+    const result = await searchProducts("snowmobiling pants");
+    const names = result.products.map((p) => p.name);
+    expect(names).toContain("Klim Togwotee Pant");
+    expect(names).toContain("FXR Excursion Bib");
+  });
+
+  it("'do you carry snow helmets' returns Snow Helmets", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const snowHelmetsCat = { id: 203, name: "Snow Helmets", parent_id: 0 };
+    const fixtures = [
+      makeProduct(2030, "Klim F5 Koroyd Helmet", "KL-F5K", 203, "Snowmobile helmet."),
+      makeProduct(2031, "509 Delta V Ignite Helmet", "509-DVI", 203, "Snowmobile helmet."),
+    ];
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => (name === "Snow Helmets" ? snowHelmetsCat : null)
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => (id === 203 ? fixtures : [])
+    );
+
+    const result = await searchProducts("do you carry snow helmets");
+    const names = result.products.map((p) => p.name);
+    expect(names).toContain("Klim F5 Koroyd Helmet");
+    expect(names).toContain("509 Delta V Ignite Helmet");
+  });
+
+  it("'winter riding jacket' (NOT snow) returns adventure/street jackets — winter riding is not snowmobile gear", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const jacketsCat = { id: 210, name: "Jackets", parent_id: 0 };
+    const snowJacketsCat = { id: 211, name: "Snow Jackets", parent_id: 0 };
+
+    const streetJacket = makeProduct(2040, "Klim Latitude Street Jacket", "KL-LATS", 210, "Waterproof street touring jacket.");
+    const snowJacket   = makeProduct(2041, "Klim Altitude Snowmobile Jacket", "KL-ALTSNOW", 211, "Snowmobile jacket for sled riders.");
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => {
+        if (name === "Jackets") return jacketsCat;
+        if (name === "Snow Jackets") return snowJacketsCat;
+        return null;
+      }
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => {
+        if (id === 210) return [streetJacket];
+        if (id === 211) return [snowJacket];
+        return [];
+      }
+    );
+
+    // "winter riding jacket" — "winter" alone should NOT trigger the snow subcategory
+    // (snow EXPLICIT_RULES requires "snow", "snowmobile", "snowmobiling", "sled" or "sledding").
+    // The query has no productType "jacket" extracted from "winter riding jacket"...
+    // Actually "winter riding jacket" → productType = "jacket". subRequest = null (no snow keyword).
+    // So it falls back to street-default and the "Jackets" top-level category is used.
+    const result = await searchProducts("winter riding jacket");
+    const names = result.products.map((p) => p.name);
+    // The snow jacket should NOT appear because "Snow Jackets" is not queried
+    // when the snow subcategory is not triggered.
+    expect(names).toContain("Klim Latitude Street Jacket");
+    expect(names).not.toContain("Klim Altitude Snowmobile Jacket");
+  });
+
+  it("'show me jackets' (ambiguous) ranks snow jackets BELOW street jackets (-50 off-street penalty)", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const jacketsCat = { id: 220, name: "Jackets", parent_id: 0 };
+
+    const streetJacket = makeProduct(2050, "Rev'it Tornado 4 Street Jacket", "RV-T4", 220,
+      "Street motorcycle jacket for urban and touring use.");
+    const snowJacket   = makeProduct(2051, "Klim Latitude Snow Jacket", "KL-LATSNOW", 220,
+      "Snowmobile jacket designed for sled riders in cold conditions.");
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => (name === "Jackets" ? jacketsCat : null)
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => (id === 220 ? [snowJacket, streetJacket] : [])
+    );
+
+    const result = await searchProducts("show me jackets");
+    const names = result.products.map((p) => p.name);
+    const streetIdx = names.indexOf("Rev'it Tornado 4 Street Jacket");
+    const snowIdx   = names.indexOf("Klim Latitude Snow Jacket");
+
+    expect(streetIdx).toBeGreaterThanOrEqual(0);
+    expect(snowIdx).toBeGreaterThanOrEqual(0);
+    // Snow is in OFF_STREET_SUBCATEGORIES → -50 penalty → ranks below street.
+    expect(streetIdx).toBeLessThan(snowIdx);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// searchProducts — racing subcategory + brand diversification (Layer 5)
+// ---------------------------------------------------------------------------
+describe("searchProducts — racing helmets + brand diversification", () => {
+  vi.mock("@/lib/bigcommerce/client", () => ({
+    searchProductsBC: vi.fn().mockResolvedValue([]),
+    getProductBySKU: vi.fn().mockResolvedValue(null),
+    getProductByNameLike: vi.fn().mockResolvedValue([]),
+    getProductById: vi.fn().mockResolvedValue(null),
+    getProductsByCategory: vi.fn().mockResolvedValue([]),
+    findCategoryByName: vi.fn().mockResolvedValue(null),
+  }));
+
+  vi.mock("./localCatalogSearch", () => ({
+    searchLocalCatalog: vi.fn().mockResolvedValue([]),
+  }));
+
+  vi.mock("@/lib/db", () => ({
+    db: { execute: vi.fn().mockResolvedValue([]) },
+  }));
+
+  vi.mock("@/lib/db/schema", () => ({
+    productColorways: {},
+  }));
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const makeHelmet = (id: number, name: string, brandId: number, catId: number, desc = "") => ({
+    id, name, sku: `H-${id}`, description: desc,
+    price: 799, sale_price: 0, retail_price: 0, calculated_price: 799,
+    inventory_level: 3, inventory_tracking: "product",
+    availability: "available", is_visible: true,
+    categories: [catId], brand_id: brandId,
+    custom_url: { url: `/${name.toLowerCase().replace(/\s+/g, "-")}/` }, variants: [], images: [],
+  });
+
+  it("'what helmets do you guys carry for racing' fetches Race Helmets and returns diverse brands", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const raceCat = { id: 42, name: "Race Helmets", parent_id: 0 };
+
+    const ARAI = 1, SHOEI = 2, HJC = 3, ALPINESTARS = 4, KYT = 5;
+    const fixtures = [
+      makeHelmet(3001, "Arai Corsair-X Helmet",          ARAI,        42, "FIM homologated race helmet."),
+      makeHelmet(3002, "Shoei X-15 Helmet",              SHOEI,       42, "FIM homologated race helmet."),
+      makeHelmet(3003, "HJC RPHA 1N Helmet",             HJC,         42, "FIM race helmet."),
+      makeHelmet(3004, "Alpinestars Supertech R10 Helmet", ALPINESTARS, 42, "FIM homologated race helmet."),
+      makeHelmet(3005, "KYT KX-1 Race GP Helmet",        KYT,         42, "Race GP helmet."),
+      makeHelmet(3006, "KYT NZ-Race Helmet",             KYT,         42, "Track day race helmet."),
+    ];
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => (name === "Race Helmets" ? raceCat : null)
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => (id === 42 ? fixtures : [])
+    );
+
+    const result = await searchProducts("what helmets do you guys carry for racing");
+    const names = result.products.map((p) => p.name);
+
+    // Race helmets category must be fetched and mixed brands must appear.
+    expect(names.some((n) => n.includes("Arai") || n.includes("Shoei") || n.includes("HJC") || n.includes("Alpinestars"))).toBe(true);
+    // No single brand exceeds 3 slots (diversification cap).
+    const kytCount = names.filter((n) => n.includes("KYT")).length;
+    expect(kytCount).toBeLessThanOrEqual(3);
+  });
+
+  it("brand diversification — pool dominated by one brand, no brand specified → max 3 per brand in top 12", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const raceCat = { id: 43, name: "Race Helmets", parent_id: 0 };
+
+    const KYT = 10, ARAI = 11, SHOEI = 12;
+    const fixtures = [
+      // 5 KYT helmets first (would dominate without diversification)
+      makeHelmet(3010, "KYT KX-1 Race GP",       KYT,  43, "race helmet"),
+      makeHelmet(3011, "KYT NZ-Race",            KYT,  43, "race helmet"),
+      makeHelmet(3012, "KYT KX-1 Race GP Blue",  KYT,  43, "race helmet"),
+      makeHelmet(3013, "KYT KX-1 Race GP Red",   KYT,  43, "race helmet"),
+      makeHelmet(3014, "KYT NZ-Race White",      KYT,  43, "race helmet"),
+      // 5 Arai
+      makeHelmet(3015, "Arai Corsair-X A",       ARAI, 43, "race helmet"),
+      makeHelmet(3016, "Arai Corsair-X B",       ARAI, 43, "race helmet"),
+      makeHelmet(3017, "Arai Corsair-X C",       ARAI, 43, "race helmet"),
+      makeHelmet(3018, "Arai Corsair-X D",       ARAI, 43, "race helmet"),
+      makeHelmet(3019, "Arai Corsair-X E",       ARAI, 43, "race helmet"),
+      // 2 Shoei
+      makeHelmet(3020, "Shoei X-15 A",           SHOEI, 43, "race helmet"),
+      makeHelmet(3021, "Shoei X-15 B",           SHOEI, 43, "race helmet"),
+    ];
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => (name === "Race Helmets" ? raceCat : null)
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => (id === 43 ? fixtures : [])
+    );
+
+    const result = await searchProducts("show me race helmets");
+    const brandIds = result.products.map((p) => p.brand_id);
+
+    // No brand should occupy more than 3 of the top 12 slots.
+    const counts = new Map<number, number>();
+    for (const b of brandIds) {
+      counts.set(b!, (counts.get(b!) ?? 0) + 1);
+    }
+    Array.from(counts.values()).forEach((count) => {
+      expect(count).toBeLessThanOrEqual(3);
+    });
+    // All three brands should be represented.
+    expect(counts.has(KYT)).toBe(true);
+    expect(counts.has(ARAI)).toBe(true);
+    expect(counts.has(SHOEI)).toBe(true);
+  });
+
+  it("brand specified — 'show me KYT racing helmets' should NOT cap KYT", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const raceCat = { id: 44, name: "Race Helmets", parent_id: 0 };
+    const kytCat  = { id: 45, name: "KYT",          parent_id: 0 };
+
+    const KYT = 20;
+    const fixtures = [
+      makeHelmet(3030, "KYT KX-1 Race GP A", KYT, 44, "race helmet"),
+      makeHelmet(3031, "KYT KX-1 Race GP B", KYT, 44, "race helmet"),
+      makeHelmet(3032, "KYT KX-1 Race GP C", KYT, 44, "race helmet"),
+      makeHelmet(3033, "KYT NZ-Race A",      KYT, 44, "race helmet"),
+      makeHelmet(3034, "KYT NZ-Race B",      KYT, 44, "race helmet"),
+    ];
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => {
+        if (name === "Race Helmets") return raceCat;
+        if (name === "kyt") return kytCat;
+        return null;
+      }
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => ([44, 45].includes(id) ? fixtures : [])
+    );
+
+    const result = await searchProducts("show me KYT racing helmets");
+    const kytCount = result.products.filter((p) => p.brand_id === KYT).length;
+    // Brand was specified → no cap → all 5 KYT helmets should appear.
+    expect(kytCount).toBe(5);
+  });
+
+  it("regression: 'full face helmets' returns Street Helmets, NOT Race Helmets", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const streetCat = { id: 50, name: "Street Helmets", parent_id: 0 };
+    const raceCat   = { id: 51, name: "Race Helmets",   parent_id: 0 };
+
+    const streetHelmet = makeHelmet(3040, "Shoei RF-1400 Street Helmet", 1, 50, "Full face street helmet.");
+    const raceHelmet   = makeHelmet(3041, "Arai Corsair-X Race Helmet",  2, 51, "FIM race helmet.");
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => {
+        if (name === "Street Helmets") return streetCat;
+        if (name === "Race Helmets")   return raceCat;
+        return null;
+      }
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => {
+        if (id === 50) return [streetHelmet];
+        if (id === 51) return [raceHelmet];
+        return [];
+      }
+    );
+
+    const result = await searchProducts("full face helmets");
+    const names = result.products.map((p) => p.name);
+
+    // full_face subRequest → only "Street Helmets" category fetched.
+    expect(names).toContain("Shoei RF-1400 Street Helmet");
+    expect(names).not.toContain("Arai Corsair-X Race Helmet");
+  });
+
+  it("regression: 'show me helmets' (ambiguous) ranks Street Helmets above Race Helmets (racing in OFF_STREET → -50 demote)", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const streetCat = { id: 60, name: "Street Helmets", parent_id: 0 };
+    // No subRequest → default categories for helmet are ["Street Helmets","Race Helmets"]
+    const raceCat   = { id: 61, name: "Race Helmets",   parent_id: 0 };
+
+    const streetHelmet = makeHelmet(3050, "Bell Race Star Flex DLX", 5, 60, "Full face street sport helmet.");
+    const raceHelmet   = makeHelmet(3051, "KYT KX-1 Race GP",        6, 61, "FIM race helmet.");
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => {
+        if (name === "Street Helmets") return streetCat;
+        if (name === "Race Helmets")   return raceCat;
+        return null;
+      }
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => {
+        if (id === 60) return [streetHelmet];
+        if (id === 61) return [raceHelmet];
+        return [];
+      }
+    );
+
+    const result = await searchProducts("show me helmets");
+    const names = result.products.map((p) => p.name);
+    const streetIdx = names.indexOf("Bell Race Star Flex DLX");
+    const raceIdx   = names.indexOf("KYT KX-1 Race GP");
+
+    expect(streetIdx).toBeGreaterThanOrEqual(0);
+    expect(raceIdx).toBeGreaterThanOrEqual(0);
+    // racing is in OFF_STREET_SUBCATEGORIES → -50 penalty → below street.
+    expect(streetIdx).toBeLessThan(raceIdx);
+  });
+
+  it("regression: 'do you have alpinestars MX helmets' still surfaces Supertech SM-10/M10/S-M7 — brand specified so no diversification cap", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const motoHelmetsCat = { id: 30, name: "Moto Helmets",     parent_id: 0 };
+    const alpineCat      = { id: 31, name: "Alpinestars",      parent_id: 0 };
+
+    const ALPINESTARS = 6;
+    const fixtures = [
+      makeHelmet(3060, "Alpinestars Supertech SM-10 Helmet", ALPINESTARS, 30, "MX helmet."),
+      makeHelmet(3061, "Alpinestars Supertech M10 Helmet",   ALPINESTARS, 30, "MX helmet."),
+      makeHelmet(3062, "Alpinestars Supertech S-M7 Helmet",  ALPINESTARS, 30, "MX helmet."),
+    ];
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => {
+        if (name === "Moto Helmets") return motoHelmetsCat;
+        if (name === "alpinestars")  return alpineCat;
+        return null;
+      }
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => ([30, 31].includes(id) ? fixtures : [])
+    );
+
+    const result = await searchProducts("do you have alpinestars MX helmets");
+    const names = result.products.map((p) => p.name);
+
+    // Brand was specified → no cap → all 3 Alpinestars helmets must appear.
+    expect(names).toContain("Alpinestars Supertech SM-10 Helmet");
+    expect(names).toContain("Alpinestars Supertech M10 Helmet");
+    expect(names).toContain("Alpinestars Supertech S-M7 Helmet");
   });
 });
