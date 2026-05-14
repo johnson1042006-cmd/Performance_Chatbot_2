@@ -15,6 +15,12 @@ export function renderMarkdown(text: string): string {
     '<a href="$2" target="_blank" rel="noopener noreferrer" class="underline text-blue-600 hover:text-blue-800">$1</a>'
   );
 
+  // Auto-link bare URLs not already inside an href attribute
+  html = html.replace(
+    /(?<!href=")https?:\/\/[^\s<&"]+/g,
+    '<a href="$&" target="_blank" rel="noopener noreferrer" class="underline text-blue-600 hover:text-blue-800">$&</a>'
+  );
+
   // Bold: **text**
   html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
 
