@@ -57,7 +57,6 @@ describe("tech_air_service_routing rule", () => {
     expect(rule).toBeDefined();
     expect(rule!.rule).toContain("https://performancecycle.com/tech-air-service/");
     expect(rule!.rule).toContain("PC%20-%20Tech-Air%20Service%20Request%20Form.pdf");
-    expect(rule!.rule).toContain("escalate_to_human");
   });
 });
 

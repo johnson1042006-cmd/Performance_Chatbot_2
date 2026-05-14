@@ -107,6 +107,10 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
   const useTools = aiToolsEnabled();
   const toolCalls: ToolCallEvent[] = [];
 
+  const isTechAirServiceRequest =
+    /tech.?air/i.test(latestMessage) &&
+    /\b(service|send.+in|recharge|recertif|deployed|expir|replac|fix|broken|warranty|repair|fired)\b/i.test(latestMessage);
+
   const aiResponse = await callClaude(system, conversationMessages, {
     ...(useTools
       ? {
@@ -189,12 +193,14 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
 
   // Auto-escalation: at most once per session.
   //
-  // Three triggers (any one is sufficient):
-  //  1. sentiment.score === -1  — 2+ frustrated messages in last 4
-  //  2. confidence === "low"    — AI hedged on the answer
-  //  3. aiEscalatedViaTool      — Claude called escalate_to_human tool
-  //  4. isExplicitHumanRequest  — customer explicitly asked for a person in
-  //                               this message (even as a first message)
+  // Five triggers (any one is sufficient):
+  //  1. sentiment.score === -1     — 2+ frustrated messages in last 4
+  //  2. confidence === "low"       — AI hedged on the answer
+  //  3. aiEscalatedViaTool         — Claude called escalate_to_human tool
+  //  4. isExplicitHumanRequest     — customer explicitly asked for a person
+  //  5. isTechAirServiceRequest    — service routing (escalation is server-side
+  //                                  because callClaude discards pre-tool text,
+  //                                  so Claude just provides links; we escalate here)
   //
   // When the tool already fired escalateToHuman (trigger 3) we skip the
   // duplicate call to avoid double-clearing aiClaimDueAt and double-emitting
@@ -220,15 +226,18 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
     sentiment.score === -1 ||
     confidence.confidence === "low" ||
     aiEscalatedViaTool ||
-    isExplicitHumanRequest;
+    isExplicitHumanRequest ||
+    isTechAirServiceRequest;
   if (shouldEscalate) {
     const already = await hasAutoEscalated(sessionId);
     if (!already) {
-      const reason: "frustrated_customer" | "unsupported" | "explicit_request" =
+      const reason: "frustrated_customer" | "unsupported" | "explicit_request" | "tech_air_service" =
         sentiment.score === -1
           ? "frustrated_customer"
           : isExplicitHumanRequest
           ? "explicit_request"
+          : isTechAirServiceRequest
+          ? "tech_air_service"
           : "unsupported";
       // Skip escalateToHuman when the tool already called it this turn —
       // aiClaimDueAt was already cleared and escalation-requested already

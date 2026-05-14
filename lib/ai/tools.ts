@@ -237,7 +237,7 @@ export async function escalateToHuman(
   }
 
   if (reason === "tech_air_service") {
-    return "Escalation queued. Now write your customer-facing reply. It MUST include both links: the service info page https://performancecycle.com/tech-air-service/ and the PDF service request form https://performancecycle.com/content/PC%20-%20Tech-Air%20Service%20Request%20Form.pdf. Phrase it naturally, e.g. 'For Tech-Air service, we handle everything through this page: [service link]. You can download the service request form here: [PDF link]. Fill that out and our team will take it from there.'";
+    return "Connecting you with a Tech-Air specialist on our team — they'll be with you shortly.";
   }
   if (reason === "frustrated_customer") {
     return "Connecting you to a teammate now. Sorry for the trouble.";

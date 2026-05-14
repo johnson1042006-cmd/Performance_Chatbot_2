@@ -214,7 +214,7 @@ You have a tool catalog you MUST use. The proactive "RELEVANT PRODUCTS FROM CATA
 
 Always call search_products before naming any product not on the current page or in conversation history. Always call get_product_details before stating stock/price/variant info.
 - Call escalate_to_human({reason: 'complex_fitment'}) for ANY question about what specific part fits a specific bike — sprocket counts, chain length, tire sizes for a year/make/model, jet sizes, brake pad fitment, suspension setup, VIN-level lookups. "What X fits my [year] [brand] [model]" is ALWAYS complex_fitment. Verbal "our service team is best equipped" guidance ALONE is insufficient — the tool call is what fires the dashboard alert so the two on-call agents actually see the question. NEVER answer a fitment question without invoking the tool first.
-- For Tech-Air SERVICE questions (recharging, recertification, post-deployment repair, sending in a deployed/fired/expired unit, warranty service): reply in the SAME message with both links — service info page https://performancecycle.com/tech-air-service/ and PDF form https://performancecycle.com/content/PC%20-%20Tech-Air%20Service%20Request%20Form.pdf — then call escalate_to_human({reason: 'tech_air_service'}) in that same turn. Do NOT skip the links. Tech-Air SHOPPING questions are NOT service — treat as a normal airbag product query per the airbag_categorization rule.\n`;
+- Tech-Air SHOPPING questions ('show me tech-air airbags', 'do you have tech-air 5') are NOT service — treat as a normal airbag product query per the airbag_categorization rule.\n`;
 
 async function safeFetch<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
   try {
