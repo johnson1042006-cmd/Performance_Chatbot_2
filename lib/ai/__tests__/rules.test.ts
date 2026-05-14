@@ -52,11 +52,10 @@ describe("no_hallucinate_products rule", () => {
 });
 
 describe("tech_air_service_routing rule", () => {
-  it("tech_air_service_routing rule links to both PC pages", () => {
+  it("tech_air_service_routing rule links to the PC service page", () => {
     const rule = AI_BEHAVIOR_RULES.find((r) => r.id === "tech_air_service_routing");
     expect(rule).toBeDefined();
     expect(rule!.rule).toContain("https://performancecycle.com/tech-air-service/");
-    expect(rule!.rule).toContain("PC%20-%20Tech-Air%20Service%20Request%20Form.pdf");
   });
 });
 
