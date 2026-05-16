@@ -48,6 +48,7 @@ const STOP_WORDS = new Set([
   "pretty", "kind", "type", "pair", "one", "two", "ones", "new", "old",
   "big", "small", "little", "gonna", "wanna", "gotta", "maybe", "probably",
   "someone", "anything", "everything", "lot", "lots", "bit", "sure", "well",
+  "colorway", // customer-facing concept word; never appears in product names
 ]);
 
 const PHRASE_SYNONYMS: [RegExp, string][] = [
@@ -250,6 +251,12 @@ const PRODUCT_TYPE_MAP: Record<string, string[]> = {
   accessory: ["accessory", "accessories", "add-on", "add-ons", "extras", "accessory pack"],
 };
 
+// Every keyword string that maps to a product type. Used by the per-token
+// distinctive-lookup filter to skip type words that would match too broadly.
+const TYPE_TOKEN_SET = new Set<string>(
+  Object.values(PRODUCT_TYPE_MAP).flat().map((s) => s.toLowerCase())
+);
+
 export function extractProductType(query: string): string | null {
   // Broad-type regexes checked first — these return non-SupportedProductType
   // strings that feed the broad-type category path instead of subcategory routing.
@@ -378,14 +385,18 @@ export function extractKeywords(query: string): string[] {
     processed = processed.replace(pattern, replacement);
   }
 
-  const words = processed
-    .replace(/[?!.,;:'"()]/g, "")
-    .split(/\s+/)
-    .filter((w) => {
-      if (STOP_WORDS.has(w)) return false;
-      if (/^\d+$/.test(w)) return true;
-      return w.length > 1;
-    });
+  // Match hyphenated model codes (rf-1400, x-14, m10-deegan) as single
+  // tokens before falling through to plain alphanumeric tokens, so that
+  // model codes are never split on the hyphen by the length filter.
+  const rawTokens =
+    processed
+      .replace(/[?!.,;:'"()]/g, "")
+      .match(/[a-z0-9]+(?:-[a-z0-9]+)+|[a-z0-9]+/g) ?? [];
+  const words = rawTokens.filter((w) => {
+    if (STOP_WORDS.has(w)) return false;
+    if (/^\d+$/.test(w)) return true;
+    return w.length > 1;
+  });
 
   const expanded: string[] = [];
   for (const w of words) {
@@ -551,6 +562,9 @@ const KNOWN_BRANDS_LOWER: string[] = [
   "cardo", "sena", "ebc", "renthal", "sunstar", "akrapovic", "yoshimura",
   "garmin", "insta360",
 ];
+
+// O(1) lookup set for brand filtering in per-token distinctive-lookup pass.
+const KNOWN_BRANDS_SET = new Set(KNOWN_BRANDS_LOWER);
 
 /**
  * Scan the query for a known brand token. Multi-word brands are checked before
@@ -744,7 +758,42 @@ export async function searchProducts(
           if (r.length > 0) return r;
         } catch { /* try next */ }
       }
-      return [];
+
+      // Per-token fallback: try each distinctive token individually.
+      // Fires after all window strategies return empty. Catches contaminated
+      // queries ("rf-1400 yagyo colorway helmet") where the identifying token
+      // ("yagyo") is surrounded by noise that prevents any window from
+      // forming a clean substring match, but the token alone is a valid
+      // BC name:like hit. Capped at 4 API calls and 8 results.
+      const distinctiveTokens = tokens.filter((t) => {
+        if (t.length < 4) return false;
+        if (STOP_WORDS.has(t)) return false;
+        if (KNOWN_BRANDS_SET.has(t)) return false;
+        if (TYPE_TOKEN_SET.has(t)) return false;
+        return true;
+      });
+
+      const seenIds = new Set<number>();
+      const collected: BCProduct[] = [];
+      let perTokenQueries = 0;
+
+      for (const t of distinctiveTokens) {
+        if (tried.has(t) || perTokenQueries >= 4) break;
+        tried.add(t);
+        perTokenQueries++;
+        try {
+          const r = await getProductByNameLike(t, 10);
+          for (const p of r) {
+            if (!seenIds.has(p.id)) {
+              seenIds.add(p.id);
+              collected.push(p);
+            }
+          }
+          if (collected.length >= 8) break;
+        } catch { /* try next */ }
+      }
+
+      return collected;
     })(),
   ]);
 

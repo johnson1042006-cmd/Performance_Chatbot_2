@@ -128,6 +128,18 @@ describe("extractKeywords", () => {
     expect(kw).toContain("shoei");
     expect(kw).toContain("rf-1400");
   });
+
+  it("preserves hyphenated model codes as single tokens — rf-1400 stays whole, not split into rf and 1400", () => {
+    const kw = extractKeywords("RF-1400 Yagyo");
+    expect(kw).toContain("rf-1400");
+    expect(kw).not.toContain("rf");
+  });
+
+  it("filters 'colorway' as a stop word — never appears in kwTokens", () => {
+    expect(extractKeywords("colorway")).not.toContain("colorway");
+    expect(extractKeywords("Yagyo colorway")).not.toContain("colorway");
+    expect(extractKeywords("Shoei RF-1400 Yagyo colorway helmet")).not.toContain("colorway");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1100,6 +1112,148 @@ describe("searchProducts", () => {
     expect(mxIdx).toBeGreaterThanOrEqual(0);
     // Street jacket must rank above MX jacket when the customer gave no subcategory signal.
     expect(streetIdx).toBeLessThan(mxIdx);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Per-token fallback (nameMatches IIFE) — Yagyo / RF-1400 contamination tests
+  // ---------------------------------------------------------------------------
+
+  it("'shoei rf-1400 yagyo colorway helmet' (contaminated) finds Shoei RF-1400 Yagyo via per-token 'yagyo' fallback when all window strategies miss", async () => {
+    const { getProductByNameLike, searchProductsBC, findCategoryByName } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const yagyoHelmet = {
+      id: 960, name: "Shoei RF-1400 Yagyo Helmet", sku: "SH-RF1400-YG",
+      description: "Shoei RF-1400 Yagyo colorway full-face helmet.",
+      price: 649, sale_price: 0, retail_price: 0, calculated_price: 649,
+      inventory_level: 2, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [20], brand_id: 2,
+      custom_url: { url: "/shoei-rf-1400-yagyo/" }, variants: [], images: [],
+    };
+
+    // All parallel broad sources return empty so per-token is the only path.
+    (searchProductsBC as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+    // Window strategies all return []; only the standalone "yagyo" token hits.
+    // "rf-1400" is distinctive too — let it also resolve so either token works.
+    (getProductByNameLike as ReturnType<typeof vi.fn>).mockImplementation(
+      async (q: string) => {
+        if (q === "yagyo" || q === "rf-1400") return [yagyoHelmet];
+        return [];
+      }
+    );
+
+    const result = await searchProducts("Shoei RF-1400 Yagyo colorway helmet");
+    expect(result.products.map((p) => p.name)).toContain("Shoei RF-1400 Yagyo Helmet");
+  });
+
+  it("'shoei rf-1400 yagyo helmet' (colorway already stripped) still finds Yagyo via per-token when window strategies miss", async () => {
+    const { getProductByNameLike, searchProductsBC, findCategoryByName } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const yagyoHelmet = {
+      id: 961, name: "Shoei RF-1400 Yagyo Helmet", sku: "SH-RF1400-YG2",
+      description: "Shoei RF-1400 Yagyo colorway full-face helmet.",
+      price: 649, sale_price: 0, retail_price: 0, calculated_price: 649,
+      inventory_level: 2, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [20], brand_id: 2,
+      custom_url: { url: "/shoei-rf-1400-yagyo/" }, variants: [], images: [],
+    };
+
+    (searchProductsBC as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+    // Simulate the case where window strategies all return empty but
+    // the individual "yagyo" token matches the product name directly.
+    (getProductByNameLike as ReturnType<typeof vi.fn>).mockImplementation(
+      async (q: string) => (q === "yagyo" || q === "rf-1400" ? [yagyoHelmet] : [])
+    );
+
+    const result = await searchProducts("shoei rf-1400 yagyo helmet");
+    expect(result.products.map((p) => p.name)).toContain("Shoei RF-1400 Yagyo Helmet");
+  });
+
+  it("'klim badlands pro adventure jacket' finds Badlands Pro via window or per-token fallback (regression)", async () => {
+    const { getProductByNameLike, searchProductsBC, findCategoryByName } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const badlandsJacket = {
+      id: 962, name: "Klim Badlands Pro Jacket", sku: "KL-BPJ5",
+      description: "Adventure touring jacket.",
+      price: 549, sale_price: 0, retail_price: 0, calculated_price: 549,
+      inventory_level: 3, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [10], brand_id: 5,
+      custom_url: { url: "/klim-badlands-pro-jacket/" }, variants: [], images: [],
+    };
+
+    (searchProductsBC as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+    // 2-token window "badlands pro" or per-token "badlands" / "pro" should catch it.
+    (getProductByNameLike as ReturnType<typeof vi.fn>).mockImplementation(
+      async (q: string) => {
+        if (q.includes("badlands pro") || q === "badlands") return [badlandsJacket];
+        return [];
+      }
+    );
+
+    const result = await searchProducts("klim badlands pro adventure jacket");
+    expect(result.products.map((p) => p.name)).toContain("Klim Badlands Pro Jacket");
+  });
+
+  it("brand-only token 'klim' is excluded from per-token distinctive lookup — does not trigger a getProductByNameLike('klim') call via the per-token pass", async () => {
+    const { getProductByNameLike, searchProductsBC, findCategoryByName } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    (searchProductsBC as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    (getProductByNameLike as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    await searchProducts("klim jacket");
+
+    // "klim" is in KNOWN_BRANDS_SET and "jacket" is in TYPE_TOKEN_SET — neither
+    // should reach the per-token fallback. All getProductByNameLike calls must be
+    // multi-token window attempts, never the bare brand token "klim".
+    const calls = (getProductByNameLike as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c: unknown[]) => c[0] as string
+    );
+    expect(calls).not.toContain("klim");
+  });
+
+  it("per-token queries are capped at 4 even when many distinctive tokens exist", async () => {
+    const { getProductByNameLike, searchProductsBC, findCategoryByName } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    // Return a dummy product from BC keyword search so pool.length > 0, which
+    // prevents the last-ditch retry from firing. This isolates the nameMatches
+    // per-token pass (capped at 4) from the last-ditch retry (separate path).
+    const dummy = {
+      id: 999, name: "Generic Gear", sku: "GEN-001",
+      description: "Generic gear product.", price: 99,
+      sale_price: 0, retail_price: 0, calculated_price: 99,
+      inventory_level: 5, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [1], brand_id: 1,
+      custom_url: { url: "/generic/" }, variants: [], images: [],
+    };
+    (searchProductsBC as ReturnType<typeof vi.fn>).mockResolvedValue([dummy]);
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    // All name-like queries return [] so window strategies exhaust and per-token fires.
+    (getProductByNameLike as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    // 8 distinctive tokens (none are brands or type words) — per-token pass
+    // should fire at most 4 individual getProductByNameLike calls.
+    await searchProducts("yagyo badlands corsair supertech rpha phantera interceptor ventura");
+
+    const perTokenCandidates = ["yagyo", "badlands", "corsair", "supertech", "rpha", "phantera", "interceptor", "ventura"];
+    const singleTokenCalls = (getProductByNameLike as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c: unknown[]) => perTokenCandidates.includes(c[0] as string)
+    );
+    expect(singleTokenCalls.length).toBeLessThanOrEqual(4);
   });
 });
 
