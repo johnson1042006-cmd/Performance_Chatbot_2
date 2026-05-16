@@ -5,6 +5,7 @@ import { describe, it, expect } from "vitest";
 // ---------------------------------------------------------------------------
 
 import { buildCleanupBanner } from "../cleanupBanner";
+import { getHandlerStatus } from "../HistoryTable";
 
 describe("buildCleanupBanner", () => {
   it("returns skipped variant when data.skipped is true", () => {
@@ -55,5 +56,27 @@ describe("buildCleanupBanner", () => {
     );
     expect(result.variant).toBe("error");
     expect(result.message).toBe("Something broke");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getHandlerStatus — handler derivation logic
+// ---------------------------------------------------------------------------
+
+describe("getHandlerStatus", () => {
+  it("returns Human when humanInvolved=true and aiMessageCount=0", () => {
+    expect(getHandlerStatus(0, true)).toBe("Human");
+  });
+
+  it("returns Mixed when humanInvolved=true and aiMessageCount>0", () => {
+    expect(getHandlerStatus(5, true)).toBe("Mixed");
+  });
+
+  it("returns AI when humanInvolved=false and aiMessageCount>0", () => {
+    expect(getHandlerStatus(5, false)).toBe("AI");
+  });
+
+  it("returns AI when humanInvolved=false and aiMessageCount=0", () => {
+    expect(getHandlerStatus(0, false)).toBe("AI");
   });
 });

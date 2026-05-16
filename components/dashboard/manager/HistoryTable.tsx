@@ -34,6 +34,16 @@ interface SessionHistory {
   status: string;
   messageCount: number;
   aiMessageCount: number;
+  humanInvolved: boolean;
+}
+
+export function getHandlerStatus(
+  aiMessageCount: number,
+  humanInvolved: boolean
+): "AI" | "Mixed" | "Human" {
+  if (!humanInvolved) return "AI";
+  if (aiMessageCount > 0) return "Mixed";
+  return "Human";
 }
 
 interface HistoryTableProps {
@@ -238,7 +248,10 @@ export default function HistoryTable({ onSelectSession }: HistoryTableProps) {
                 Messages
               </th>
               <th className="text-left px-6 py-3 font-medium text-text-secondary">
-                AI Ratio
+                Handler
+              </th>
+              <th className="text-left px-6 py-3 font-medium text-text-secondary">
+                AI Replies
               </th>
               <th className="text-left px-6 py-3 font-medium text-text-secondary">
                 Duration
@@ -251,13 +264,13 @@ export default function HistoryTable({ onSelectSession }: HistoryTableProps) {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={7} className="px-6 py-8 text-center text-text-secondary">
+                <td colSpan={8} className="px-6 py-8 text-center text-text-secondary">
                   Loading...
                 </td>
               </tr>
             ) : sessions.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-6 py-8 text-center text-text-secondary">
+                <td colSpan={8} className="px-6 py-8 text-center text-text-secondary">
                   No chat history
                 </td>
               </tr>
@@ -274,6 +287,9 @@ export default function HistoryTable({ onSelectSession }: HistoryTableProps) {
                   s.messageCount > 0
                     ? Math.round((s.aiMessageCount / s.messageCount) * 100)
                     : 0;
+                const handler = getHandlerStatus(s.aiMessageCount, s.humanInvolved);
+                const handlerVariant =
+                  handler === "AI" ? "info" : handler === "Human" ? "success" : "warning";
 
                 return (
                   <tr
@@ -298,6 +314,9 @@ export default function HistoryTable({ onSelectSession }: HistoryTableProps) {
                       </Badge>
                     </td>
                     <td className="px-6 py-3">{s.messageCount}</td>
+                    <td className="px-6 py-3">
+                      <Badge variant={handlerVariant}>{handler}</Badge>
+                    </td>
                     <td className="px-6 py-3">
                       <span
                         className={

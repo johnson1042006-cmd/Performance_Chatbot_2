@@ -44,10 +44,16 @@ export async function GET(req: NextRequest) {
           .from(messages)
           .where(and(eq(messages.sessionId, s.id), eq(messages.role, "ai")));
 
+        const [agentCount] = await db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(messages)
+          .where(and(eq(messages.sessionId, s.id), eq(messages.role, "agent")));
+
         return {
           ...s,
           messageCount: msgCount?.count || 0,
           aiMessageCount: aiCount?.count || 0,
+          humanInvolved: (agentCount?.count || 0) > 0,
         };
       })
     );
