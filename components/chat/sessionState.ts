@@ -1,6 +1,6 @@
 export type SessionState = "idle" | "waiting" | "active_ai" | "active_human" | "closed";
 
-type MessageRole = "customer" | "agent" | "ai";
+type MessageRole = "customer" | "agent" | "ai" | "system";
 
 /**
  * Pure state-transition function for the chat session banner.

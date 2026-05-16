@@ -1,7 +1,7 @@
 import { renderMarkdown } from "@/lib/utils/renderMarkdown";
 
 interface MessageBubbleProps {
-  role: "customer" | "agent" | "ai";
+  role: "customer" | "agent" | "ai" | "system";
   content: string;
   agentName?: string;
   sentAt?: string;
@@ -20,6 +20,16 @@ export default function MessageBubble({
   personaName,
   personaAvatarUrl,
 }: MessageBubbleProps) {
+  if (role === "system") {
+    return (
+      <div className="my-2 text-center" data-testid="message-system">
+        <span className="inline-block px-2 py-0.5 text-xs italic text-text-secondary">
+          {content}
+        </span>
+      </div>
+    );
+  }
+
   const isCustomer = role === "customer";
   const isAI = role === "ai";
 

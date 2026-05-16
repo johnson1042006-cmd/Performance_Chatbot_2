@@ -15,7 +15,7 @@ import { tireCatalogUrlForRidingType } from "@/lib/search/tireCatalog";
 
 interface Message {
   id: string;
-  role: "customer" | "agent" | "ai";
+  role: "customer" | "agent" | "ai" | "system";
   content: string;
   sentAt: string;
   agentName?: string;
@@ -351,14 +351,37 @@ export default function ChatWidget() {
     typingClearRef.current = setTimeout(() => setWaitingForReply(false), 3000);
   }, []);
 
-  const handleClaimed = useCallback((data: { kind?: string }) => {
-    if (data.kind === "human") setSessionState("active_human");
-    else if (data.kind === "ai") setSessionState("active_ai");
+  const handleClaimed = useCallback((data: { kind?: string; agentName?: string }) => {
+    if (data.kind === "human") {
+      setSessionState("active_human");
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `sys-${Date.now()}`,
+          role: "system",
+          content: data.agentName
+            ? `${data.agentName} has joined the chat.`
+            : "An agent has joined the chat.",
+          sentAt: new Date().toISOString(),
+        },
+      ]);
+    } else if (data.kind === "ai") {
+      setSessionState("active_ai");
+    }
     setWaitingForReply(false);
   }, []);
 
   const handleReleased = useCallback(() => {
     setSessionState("waiting");
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `sys-${Date.now()}`,
+        role: "system",
+        content: "The agent stepped away. AI assistant is back.",
+        sentAt: new Date().toISOString(),
+      },
+    ]);
   }, []);
 
   const handleClosed = useCallback(() => {
