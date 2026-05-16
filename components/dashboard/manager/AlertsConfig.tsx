@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import { Plus, Trash2 } from "lucide-react";
+import { KINDS } from "./alertKinds";
 
 interface Threshold {
   id: string;
@@ -16,15 +17,6 @@ interface Threshold {
   lastFiredAt: string | null;
 }
 
-const KINDS = [
-  { value: "queue_depth", label: "Queue depth" },
-  { value: "ai_failure_rate_pct", label: "AI failure rate (%)" },
-  {
-    value: "no_agents_online_during_hours",
-    label: "No agents online during hours",
-  },
-  { value: "ticket_sla_breach", label: "Ticket SLA breach (count)" },
-];
 
 const COMPARATORS = [">", ">=", "<", "<=", "=="];
 

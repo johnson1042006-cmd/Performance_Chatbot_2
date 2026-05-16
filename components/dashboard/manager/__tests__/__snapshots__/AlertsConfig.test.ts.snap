@@ -1,0 +1,18 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`AlertsConfig KINDS > matches snapshot 1`] = `
+[
+  {
+    "label": "Queue depth",
+    "value": "queue_depth",
+  },
+  {
+    "label": "AI failure rate (%)",
+    "value": "ai_failure_rate_pct",
+  },
+  {
+    "label": "No agents online during hours",
+    "value": "no_agents_online_during_hours",
+  },
+]
+`;

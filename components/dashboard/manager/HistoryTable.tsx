@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
@@ -11,7 +12,18 @@ import {
   Trash2,
   Loader2,
   Sparkles,
+  AlertCircle,
+  CheckCircle,
+  Info,
+  AlertTriangle,
+  type LucideIcon,
 } from "lucide-react";
+import {
+  buildCleanupBanner,
+  type CleanupBanner,
+  type CleanupBannerVariant,
+} from "./cleanupBanner";
+export { buildCleanupBanner } from "./cleanupBanner";
 
 interface SessionHistory {
   id: string;
@@ -28,6 +40,24 @@ interface HistoryTableProps {
   onSelectSession?: (sessionId: string) => void;
 }
 
+const BANNER_STYLES: Record<CleanupBannerVariant, string> = {
+  skipped:
+    "bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200 border-yellow-200 dark:border-yellow-800",
+  success:
+    "bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-200 border-green-200 dark:border-green-800",
+  empty:
+    "bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 border-blue-200 dark:border-blue-800",
+  error:
+    "bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-200 border-red-200 dark:border-red-800",
+};
+
+const BANNER_ICONS: Record<CleanupBannerVariant, LucideIcon> = {
+  skipped: AlertCircle,
+  success: CheckCircle,
+  empty: Info,
+  error: AlertTriangle,
+};
+
 export default function HistoryTable({ onSelectSession }: HistoryTableProps) {
   const [sessions, setSessions] = useState<SessionHistory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,7 +65,9 @@ export default function HistoryTable({ onSelectSession }: HistoryTableProps) {
   const [totalPages, setTotalPages] = useState(1);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [cleanupRunning, setCleanupRunning] = useState(false);
-  const [cleanupMessage, setCleanupMessage] = useState<string | null>(null);
+  const [cleanupBanner, setCleanupBanner] = useState<CleanupBanner | null>(
+    null
+  );
 
   const fetchHistory = useCallback(async () => {
     setLoading(true);
@@ -88,6 +120,11 @@ export default function HistoryTable({ onSelectSession }: HistoryTableProps) {
     }
   };
 
+  const showBanner = (banner: CleanupBanner) => {
+    setCleanupBanner(banner);
+    setTimeout(() => setCleanupBanner(null), 10_000);
+  };
+
   const handleRunCleanup = async () => {
     if (cleanupRunning) return;
     if (
@@ -98,27 +135,20 @@ export default function HistoryTable({ onSelectSession }: HistoryTableProps) {
       return;
     }
     setCleanupRunning(true);
-    setCleanupMessage(null);
+    setCleanupBanner(null);
     try {
       const res = await fetch("/api/admin/cleanup", { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
-      if (data.skipped) {
-        setCleanupMessage(
-          "Retention is disabled. Configure it in Configure > Bot Settings."
-        );
-      } else {
-        setCleanupMessage(
-          `Deleted ${data.deletedSessions} session(s) and ${data.deletedMessages} message(s).`
-        );
-      }
+      showBanner(buildCleanupBanner(data));
       await fetchHistory();
     } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : "Cleanup failed. See console for details.";
       console.error("Cleanup failed:", err);
-      setCleanupMessage("Cleanup failed. See console for details.");
+      showBanner(buildCleanupBanner({}, msg));
     } finally {
       setCleanupRunning(false);
-      setTimeout(() => setCleanupMessage(null), 5000);
     }
   };
 
@@ -144,11 +174,6 @@ export default function HistoryTable({ onSelectSession }: HistoryTableProps) {
       <div className="flex items-center justify-between px-6 py-4 border-b border-border gap-3">
         <div className="flex items-center gap-3 min-w-0">
           <h3 className="font-semibold text-text-primary">Chat History</h3>
-          {cleanupMessage && (
-            <span className="text-xs text-text-secondary truncate">
-              {cleanupMessage}
-            </span>
-          )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <Button
@@ -170,6 +195,31 @@ export default function HistoryTable({ onSelectSession }: HistoryTableProps) {
           </Button>
         </div>
       </div>
+
+      {cleanupBanner && (() => {
+        const Icon = BANNER_ICONS[cleanupBanner.variant];
+        return (
+          <div
+            className={`flex items-start gap-2 px-6 py-3 border-b text-sm ${BANNER_STYLES[cleanupBanner.variant]}`}
+          >
+            <Icon size={16} className="mt-0.5 shrink-0" />
+            <span>
+              {cleanupBanner.message}
+              {cleanupBanner.isSkipped && (
+                <>
+                  {" "}
+                  <Link
+                    href="/dashboard/manager/configure"
+                    className="underline font-medium hover:opacity-80"
+                  >
+                    Configure retention period
+                  </Link>
+                </>
+              )}
+            </span>
+          </div>
+        );
+      })()}
 
       <div className="overflow-x-auto">
         <table className="w-full text-sm">

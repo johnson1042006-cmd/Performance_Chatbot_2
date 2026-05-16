@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { Bell, X } from "lucide-react";
+import { FRIENDLY } from "./alertFriendlyNames";
 
 interface AlertEvent {
   id: string;
@@ -12,12 +13,6 @@ interface AlertEvent {
   firedAt: string;
 }
 
-const FRIENDLY: Record<string, string> = {
-  queue_depth: "Queue depth",
-  ai_failure_rate_pct: "AI failure rate",
-  no_agents_online_during_hours: "No agents online",
-  ticket_sla_breach: "Ticket SLA breach",
-};
 
 /**
  * Manager-only bell icon that sits in the Sidebar bottom panel. Shows the

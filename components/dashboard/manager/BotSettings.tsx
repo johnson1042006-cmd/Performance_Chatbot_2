@@ -3,32 +3,8 @@
 import { useState, useEffect, useRef } from "react";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
-import { Save, Bot, Trash2, Ticket } from "lucide-react";
-
-interface SlaWindowsHours {
-  urgent: number;
-  high: number;
-  normal: number;
-  low: number;
-}
-
-interface Settings {
-  aiEnabled: boolean;
-  fallbackTimerSeconds: number;
-  historyRetentionMonths: number;
-  autoOpenOnFirstVisit: boolean;
-  hotkeysEnabled: boolean;
-  autoTicketOnEscalation: boolean;
-  autoTicketEmailEnabled: boolean;
-  slaWindowsHours: SlaWindowsHours;
-}
-
-const DEFAULT_SLA_WINDOWS: SlaWindowsHours = {
-  urgent: 2,
-  high: 4,
-  normal: 24,
-  low: 72,
-};
+import { Save, Bot, Trash2 } from "lucide-react";
+import { DEFAULT_SETTINGS, type BotSettings as Settings } from "./botSettingsDefaults";
 
 const RETENTION_OPTIONS: { value: number; label: string }[] = [
   { value: 0, label: "Disabled (keep forever)" },
@@ -43,16 +19,7 @@ function clampTimer(n: number): number {
 }
 
 export default function BotSettings() {
-  const [settings, setSettings] = useState<Settings>({
-    aiEnabled: true,
-    fallbackTimerSeconds: 60,
-    historyRetentionMonths: 0,
-    autoOpenOnFirstVisit: true,
-    hotkeysEnabled: true,
-    autoTicketOnEscalation: true,
-    autoTicketEmailEnabled: true,
-    slaWindowsHours: { ...DEFAULT_SLA_WINDOWS },
-  });
+  const [settings, setSettings] = useState<Settings>({ ...DEFAULT_SETTINGS });
   // Separate string state so users can type freely without mid-type clamping
   const [fallbackInput, setFallbackInput] = useState("60");
   const [saving, setSaving] = useState(false);
@@ -70,11 +37,18 @@ export default function BotSettings() {
         const focused = document.activeElement === inputRef.current;
         if (!focused && !dirtyRef.current) {
           setSettings({
-            ...data.settings,
-            slaWindowsHours: {
-              ...DEFAULT_SLA_WINDOWS,
-              ...(data.settings.slaWindowsHours || {}),
-            },
+            aiEnabled: data.settings.aiEnabled ?? DEFAULT_SETTINGS.aiEnabled,
+            fallbackTimerSeconds:
+              data.settings.fallbackTimerSeconds ??
+              DEFAULT_SETTINGS.fallbackTimerSeconds,
+            historyRetentionMonths:
+              data.settings.historyRetentionMonths ??
+              DEFAULT_SETTINGS.historyRetentionMonths,
+            autoOpenOnFirstVisit:
+              data.settings.autoOpenOnFirstVisit ??
+              DEFAULT_SETTINGS.autoOpenOnFirstVisit,
+            hotkeysEnabled:
+              data.settings.hotkeysEnabled ?? DEFAULT_SETTINGS.hotkeysEnabled,
           });
           setFallbackInput(String(data.settings.fallbackTimerSeconds ?? 60));
         }
@@ -279,121 +253,6 @@ export default function BotSettings() {
             <Save size={14} className="mr-1.5" />
             {saving ? "Saving..." : "Save Settings"}
           </Button>
-        </div>
-      </Card>
-
-      <Card>
-        <div className="flex items-center gap-2 mb-4">
-          <Ticket size={20} className="text-accent" />
-          <h3 className="font-semibold text-text-primary">Ticketing</h3>
-        </div>
-
-        <div className="space-y-4">
-          <div className="flex items-center justify-between py-3 border-b border-border">
-            <div>
-              <p className="text-sm font-medium text-text-primary">
-                Auto-create tickets on escalation
-              </p>
-              <p className="text-xs text-text-secondary">
-                When a chat closes with negative sentiment, an explicit
-                escalation event, or unresolved tagger output, automatically
-                open a tracked ticket.
-              </p>
-            </div>
-            <button
-              data-testid="auto-ticket-toggle"
-              onClick={() =>
-                setSettings((s) => ({
-                  ...s,
-                  autoTicketOnEscalation: !s.autoTicketOnEscalation,
-                }))
-              }
-              className={`relative w-11 h-6 rounded-full transition-colors ${
-                settings.autoTicketOnEscalation ? "bg-success" : "bg-gray-300"
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform shadow-sm ${
-                  settings.autoTicketOnEscalation ? "translate-x-5" : ""
-                }`}
-              />
-            </button>
-          </div>
-
-          <div className="flex items-center justify-between py-3 border-b border-border">
-            <div>
-              <p className="text-sm font-medium text-text-primary">
-                Email customer when ticket is created
-              </p>
-              <p className="text-xs text-text-secondary">
-                Send a &quot;we got your request&quot; email when a ticket is auto- or
-                manually-created (skipped if no consented email is on file).
-              </p>
-            </div>
-            <button
-              onClick={() =>
-                setSettings((s) => ({
-                  ...s,
-                  autoTicketEmailEnabled: !s.autoTicketEmailEnabled,
-                }))
-              }
-              className={`relative w-11 h-6 rounded-full transition-colors ${
-                settings.autoTicketEmailEnabled ? "bg-success" : "bg-gray-300"
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform shadow-sm ${
-                  settings.autoTicketEmailEnabled ? "translate-x-5" : ""
-                }`}
-              />
-            </button>
-          </div>
-
-          <div className="py-3">
-            <label className="block text-sm font-medium text-text-primary mb-2">
-              SLA windows (hours)
-            </label>
-            <p className="text-xs text-text-secondary mb-3">
-              Tickets become &quot;breached&quot; when due_at is in the past. due_at is
-              computed as ticket created time + this priority&apos;s window.
-            </p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {(
-                [
-                  ["urgent", "Urgent"],
-                  ["high", "High"],
-                  ["normal", "Normal"],
-                  ["low", "Low"],
-                ] as Array<[keyof SlaWindowsHours, string]>
-              ).map(([key, label]) => (
-                <div key={key}>
-                  <label className="block text-xs text-text-secondary mb-1">
-                    {label}
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={720}
-                    value={settings.slaWindowsHours[key] ?? DEFAULT_SLA_WINDOWS[key]}
-                    onChange={(e) => {
-                      const parsed = parseInt(e.target.value, 10);
-                      const clamped = Number.isNaN(parsed)
-                        ? DEFAULT_SLA_WINDOWS[key]
-                        : Math.min(720, Math.max(1, parsed));
-                      setSettings((s) => ({
-                        ...s,
-                        slaWindowsHours: {
-                          ...s.slaWindowsHours,
-                          [key]: clamped,
-                        },
-                      }));
-                    }}
-                    className="w-full px-3 py-2 text-sm border border-border rounded-button focus:outline-none focus:ring-2 focus:ring-accent/20"
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
       </Card>
     </div>
