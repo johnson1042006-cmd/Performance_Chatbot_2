@@ -389,6 +389,27 @@ export async function classifyProductSubcategory(
 }
 
 /**
+ * Like classifyProductSubcategory but also reports whether the result came from
+ * a BC-category match ("bc") or the text fallback ("text"). Used by the pool
+ * filter in productSearch to distinguish strong-signal from weak-signal matches.
+ */
+export async function classifyProductSubcategoryWithSource(
+  product: BCProduct,
+  productType: SupportedProductType
+): Promise<{ value: SubcategoryValue; source: "bc" | "text" }> {
+  if (product.categories && product.categories.length > 0) {
+    const map = await getCategoryMap();
+    for (const catId of product.categories) {
+      const entry = map.get(catId);
+      if (entry && entry.productType === productType) {
+        return { value: entry.subcategory, source: "bc" };
+      }
+    }
+  }
+  return { value: classifyByText(productType, product), source: "text" };
+}
+
+/**
  * Synchronous text-only classification, used in unit tests and when the BC
  * category map isn't available.
  */
@@ -425,12 +446,12 @@ const EXPLICIT_RULES: Record<
 > = {
   helmet: [
     { pattern: /\bsnow(?:mobil(?:e|ing))?\b|\bsled(?:ding)?\b/i, value: "snow" },
+    { pattern: /\bmotocross\b|\bmx\b|\boff[\s-]?road\b|\bdirt\b/i, value: "mx" },
     { pattern: /\brac(?:e|ing)\b|\btrack\b|\bcircuit\b|\bgp\s+helmet\b/i, value: "racing" },
     { pattern: /\bopen[\s-]?face\b|\b3\s*\/\s*4\b|three[\s-]?quarter/i, value: "open_face" },
     { pattern: /\bmodular\b|\bflip[\s-]?up\b/i, value: "modular" },
     { pattern: /\bhalf[\s-]?helmets?\b|\bbeanie\b|\bshorty\b/i, value: "half" },
     { pattern: /\badventure\b|\badv\b|\bdual[\s-]?sport\b/i, value: "adventure" },
-    { pattern: /\bmotocross\b|\bmx\b|\boff[\s-]?road\b|\bdirt\b/i, value: "mx" },
     { pattern: /\bfull[\s-]?face\b/i, value: "full_face" },
   ],
   jacket: [

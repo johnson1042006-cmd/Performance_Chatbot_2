@@ -1205,7 +1205,7 @@ describe("searchProducts", () => {
     expect(result.products.map((p) => p.name)).toContain("Klim Badlands Pro Jacket");
   });
 
-  it("brand-only token 'klim' is excluded from per-token distinctive lookup — does not trigger a getProductByNameLike('klim') call via the per-token pass", async () => {
+  it("brand-only token 'klim' is excluded from per-token distinctive lookup — any getProductByNameLike('klim') call must be the brand-source fallback (limit=30), not the per-token pass (limit=10)", async () => {
     const { getProductByNameLike, searchProductsBC, findCategoryByName } = await import("@/lib/bigcommerce/client");
     const { searchProducts } = await import("../productSearch");
 
@@ -1215,13 +1215,16 @@ describe("searchProducts", () => {
 
     await searchProducts("klim jacket");
 
-    // "klim" is in KNOWN_BRANDS_SET and "jacket" is in TYPE_TOKEN_SET — neither
-    // should reach the per-token fallback. All getProductByNameLike calls must be
-    // multi-token window attempts, never the bare brand token "klim".
-    const calls = (getProductByNameLike as ReturnType<typeof vi.fn>).mock.calls.map(
-      (c: unknown[]) => c[0] as string
+    // "klim" is in KNOWN_BRANDS_SET and "jacket" is in TYPE_TOKEN_SET — "klim"
+    // should not appear in per-token (limit=10) calls. The brand-source fallback
+    // (3b) may legitimately call getProductByNameLike("klim", 30) when klim has
+    // no dedicated BC category shelf. Verify the limit distinguishes the two paths.
+    const klimCalls = (getProductByNameLike as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c: unknown[]) => c[0] === "klim"
     );
-    expect(calls).not.toContain("klim");
+    klimCalls.forEach((c: unknown[]) => {
+      expect(c[1]).toBe(30); // must be the brand-source fallback, never per-token (10)
+    });
   });
 
   it("per-token queries are capped at 4 even when many distinctive tokens exist", async () => {

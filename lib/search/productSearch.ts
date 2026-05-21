@@ -14,7 +14,7 @@ import {
   colorSynonymMap,
 } from "./colorSynonyms";
 import {
-  classifyProductSubcategory,
+  classifyProductSubcategoryWithSource,
   extractSubcategoryRequest,
   isSupportedProductType,
   OFF_STREET_SUBCATEGORIES,
@@ -654,7 +654,7 @@ export async function searchProducts(
 
   // Step 3: Build ONE candidate pool via four parallel strategies.
   // All four run concurrently; results are unioned and deduplicated (≤ 200).
-  const [subCatResults, brandResults, bcKwResults, localMatches, nameMatches] = await Promise.all([
+  const [subCatResults, brandResults, brandTypeNameMatches, bcKwResults, localMatches, nameMatches] = await Promise.all([
 
     // 3a: canonical subcategory/type/broad-type category
     // Try ALL candidate category names in parallel and union results.
@@ -701,23 +701,44 @@ export async function searchProducts(
       return Array.from(seen.values());
     })(),
 
-    // 3b: brand category — paginate 100 (double the old 50 limit)
+    // 3b: brand category — paginate 100. Fall back to name-like search when
+    // the brand has no dedicated BC category shelf (e.g., Arai).
     (async (): Promise<BCProduct[]> => {
       if (!brand) return [];
       try {
         const cat = await findCategoryByName(brand);
-        if (cat) return getProductsByCategory(cat.id, 100);
+        if (cat) {
+          const fromCat = await getProductsByCategory(cat.id, 100);
+          if (fromCat.length > 0) return fromCat;
+        }
+      } catch { /* */ }
+      try {
+        return await getProductByNameLike(brand, 30);
       } catch { /* */ }
       return [];
     })(),
 
-    // 3c: BC keyword search
+    // 3c: brand+type name-like — when both detected, fetch products whose names
+    // contain both the brand and a type-canonical term. Catches valid products
+    // that the brand or subcategory BC pool missed due to the 100-item cap.
+    (async (): Promise<BCProduct[]> => {
+      if (!brand || !productType) return [];
+      const typeTerms = PRODUCT_TYPE_MAP[productType];
+      if (!typeTerms || typeTerms.length === 0) return [];
+      try {
+        return await getProductByNameLike(`${brand} ${typeTerms[0]}`, 30);
+      } catch {
+        return [];
+      }
+    })(),
+
+    // 3d: BC keyword search
     searchProductsBC(kwTokens.slice(0, 6).join(" ")).catch(() => [] as BCProduct[]),
 
-    // 3d: local catalog (enrichment happens after all parallel work completes)
+    // 3e: local catalog (enrichment happens after all parallel work completes)
     searchLocalCatalog(kwTokens.join(" "), 20).catch(() => [] as LocalMatch[]),
 
-    // 3e: multi-strategy name lookup. Tries the full join first, then progressively
+    // 3f: multi-strategy name lookup. Tries the full join first, then progressively
     // shorter sub-strings of consecutive tokens. Each strategy is a name:like substring
     // match against BC's product catalog. Handles both clean name queries ("badlands
     // pro") and context-padded queries ("klim badlands pro adventure jacket") where
@@ -822,6 +843,7 @@ export async function searchProducts(
   addProducts(nameMatches);
   addProducts(subCatResults);
   addProducts(brandResults);
+  addProducts(brandTypeNameMatches);
   addProducts(bcKwResults);
   addProducts(enriched);
 
@@ -859,18 +881,53 @@ export async function searchProducts(
   }
 
   // Step 4: Annotate subcategories for supported product types.
-  // classifyProductSubcategory uses a 5-min TTL in-process cache, so this is
-  // cheap even at pool size 200.
+  // classifyProductSubcategoryWithSource uses a 5-min TTL in-process cache, so
+  // this is cheap even at pool size 200. _bcTypeMatch=true means the product
+  // was found in a matching BC category (strong signal); false = text fallback.
   if (isSupportedProductType(productType)) {
     await Promise.all(
       finalPool.map((p) =>
-        classifyProductSubcategory(p, productType)
-          .then((sub) => {
-            (p as BCProduct & { _subcategory?: SubcategoryValue | null })._subcategory = sub;
+        classifyProductSubcategoryWithSource(p, productType)
+          .then(({ value, source }) => {
+            (p as BCProduct & {
+              _subcategory?: SubcategoryValue | null;
+              _bcTypeMatch?: boolean;
+            })._subcategory = value;
+            (p as BCProduct & { _bcTypeMatch?: boolean })._bcTypeMatch =
+              source === "bc";
           })
           .catch(() => {})
       )
     );
+  }
+
+  const poolSizeBeforeTypeFilter = finalPool.length;
+
+  // ProductType compatibility filter — when productType is detected, drop pool
+  // members that are neither in a matching BC category nor have a type-keyword
+  // in their name. Prevents non-helmet products (grips, oils, etc.) from
+  // polluting helmet searches via the bcKw or per-token nameMatches fallback.
+  if (productType && PRODUCT_TYPE_MAP[productType]) {
+    const typeTerms = PRODUCT_TYPE_MAP[productType];
+    const isSupported = isSupportedProductType(productType);
+    const typeMatched = finalPool.filter((p) => {
+      const nameLower = p.name.toLowerCase();
+      // Brand override: if the customer asked for a specific brand and this
+      // product matches that brand, keep it. Scoring still ranks true type
+      // matches above non-matches via the +60 type and +100 sub bonuses.
+      if (brand && nameLower.includes(brand)) return true;
+      if (typeTerms.some((t) => nameLower.includes(t))) return true;
+      if (isSupported) {
+        const bcMatch = (p as BCProduct & { _bcTypeMatch?: boolean })
+          ._bcTypeMatch;
+        if (bcMatch) return true;
+      }
+      return false;
+    });
+    if (typeMatched.length >= 5) {
+      finalPool.length = 0;
+      finalPool.push(...typeMatched);
+    }
   }
 
   // Expanded color set for the +40 scoring signal
@@ -888,8 +945,9 @@ export async function searchProducts(
     // +100: explicit subcategory match
     if (subRequest && subRequest.explicit && sub === subRequest.value) score += 100;
 
-    // +80: brand token in product name
-    if (brand && nameLower.includes(brand)) score += 80;
+    // +120: brand token in product name (raised from 80 to widen the gap between
+    // brand-matching and incidental keyword matches when brand+type are both detected).
+    if (brand && nameLower.includes(brand)) score += 120;
 
     // +60: product type term in name
     if (productType && PRODUCT_TYPE_MAP[productType]?.some((t) => nameLower.includes(t))) score += 60;
@@ -934,13 +992,23 @@ export async function searchProducts(
       nameMatches: nameMatches.length,
       subCat: subCatResults.length,
       brand: brandResults.length,
+      brandTypeNameMatches: brandTypeNameMatches.length,
       bcKw: bcKwResults.length,
       enriched: enriched.length,
     },
-    poolSize: finalPool.length,
+    poolSizeBeforeTypeFilter,
+    poolSizeAfterTypeFilter: finalPool.length,
     top5Names: finalPool.slice(0, 5).map((p) => p.name),
   });
   finalPool.sort((a, b) => scoreProduct(b) - scoreProduct(a));
+
+  console.log("[searchProducts] diag.scored", {
+    top5NamesScored: finalPool.slice(0, 5).map((p) => p.name),
+    top5Scores: finalPool.slice(0, 5).map((p) => ({
+      name: p.name,
+      score: scoreProduct(p),
+    })),
+  });
 
   // Hard-filter products that exceed a stated budget max so the LLM is never
   // shown items the customer explicitly said they can't afford.
@@ -1178,6 +1246,7 @@ export function extractDiscussedProductSubject(
  */
 export {
   classifyProductSubcategory,
+  classifyProductSubcategoryWithSource,
   extractSubcategoryRequest,
   isSupportedProductType,
   type SubcategoryValue,

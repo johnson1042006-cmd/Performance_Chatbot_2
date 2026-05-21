@@ -240,6 +240,16 @@ describe("extractSubcategoryRequest - explicit asks", () => {
     const r = extractSubcategoryRequest("winter gloves please", "gloves");
     expect(r).toEqual({ explicit: true, value: "winter" });
   });
+
+  it("prefers mx over racing when both tokens are present", () => {
+    const r = extractSubcategoryRequest("alpinestars helmet for mx racing", "helmet");
+    expect(r).toEqual({ explicit: true, value: "mx" });
+  });
+
+  it("still detects pure racing helmet requests", () => {
+    const r = extractSubcategoryRequest("track helmet for sundays", "helmet");
+    expect(r).toEqual({ explicit: true, value: "racing" });
+  });
 });
 
 describe("extractSubcategoryRequest - ambiguous (returns null)", () => {
