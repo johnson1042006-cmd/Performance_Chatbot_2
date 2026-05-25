@@ -5,7 +5,7 @@
   // of a hardcoded production host — otherwise `fetch(PC_CHAT_URL + ...)` hits
   // CORS from localhost. Production: keep using the full script URL in the
   // storefront tag, e.g. `https://your-app.vercel.app/embed.js`.
-  var PC_CHAT_DEFAULT = "https://performance-chatbot2-2.vercel.app";
+  var PC_CHAT_DEFAULT = "https://performance-chatbot-2.vercel.app";
   var PC_CHAT_URL = PC_CHAT_DEFAULT;
   try {
     var cs = document.currentScript;

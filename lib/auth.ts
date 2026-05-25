@@ -2,7 +2,8 @@ import { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { enforce } from "@/lib/rateLimit";
 import bcrypt from "bcryptjs";
 
 declare module "next-auth" {
@@ -71,13 +72,24 @@ export const authOptions: NextAuthOptions = {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, req) {
+        // Rate limit by IP before doing any DB or bcrypt work.
+        // 10 attempts / 60 seconds / IP. Returns null on limit, which NextAuth
+        // surfaces to the user as a generic "Invalid credentials" — we don't
+        // telegraph that they've been rate limited.
+        const ip =
+          (req?.headers?.["x-forwarded-for"] as string | undefined)
+            ?.split(",")[0]
+            ?.trim() || "unknown";
+        const rl = await enforce(`login:${ip}`, 10, 60);
+        if (!rl.ok) return null;
+
         if (!credentials?.email || !credentials?.password) return null;
 
         const [user] = await db
           .select()
           .from(users)
-          .where(eq(users.email, credentials.email))
+          .where(sql`lower(${users.email}) = ${credentials.email.toLowerCase()}`)
           .limit(1);
 
         if (!user || !user.isActive) return null;

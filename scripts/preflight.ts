@@ -39,6 +39,7 @@ const REQUIRED_ENV_VARS = [
   "NEXTAUTH_URL",
   "BIGCOMMERCE_STORE_HASH",
   "BIGCOMMERCE_ACCESS_TOKEN",
+  "USE_AI_TOOLS",
 ];
 
 type Result = { ok: boolean; label: string; detail?: string };
@@ -83,6 +84,20 @@ function checkEnvVars(): Result[] {
     }
   } else if (url) {
     results.push(pass("NEXTAUTH_URL is non-localhost", url));
+  }
+
+  // USE_AI_TOOLS must literally equal "true" — anything else means the
+  // tool catalog isn't attached and the bot can't search the store.
+  const useTools = process.env.USE_AI_TOOLS;
+  if (useTools !== "true") {
+    results.push(
+      fail(
+        "USE_AI_TOOLS must be 'true' in production",
+        `current value: ${useTools ?? "unset"}`
+      )
+    );
+  } else {
+    results.push(pass("USE_AI_TOOLS=true"));
   }
 
   return results;
