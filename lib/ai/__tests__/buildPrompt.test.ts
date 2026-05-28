@@ -447,4 +447,51 @@ describe("buildPrompt", () => {
       expect(result.system).not.toMatch(/^## STORE CATALOG \(current stock\)/m);
     });
   });
+
+  describe("store_hours knowledge base content", () => {
+    beforeEach(async () => {
+      const { entries } = await import("@/lib/knowledge/seedKnowledge");
+      const storeHoursEntry = entries.find((e) => e.topic === "store_hours")!;
+
+      const dbModule = await import("@/lib/db");
+      const db = dbModule.db as any;
+      const selectMock = vi.fn();
+      const fromMock = vi.fn();
+      db.select = selectMock;
+      selectMock.mockReturnValue({ from: fromMock });
+
+      let callCount = 0;
+      fromMock.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            where: vi.fn().mockReturnValue({
+              orderBy: vi.fn().mockReturnValue({
+                limit: vi.fn().mockResolvedValue([]),
+              }),
+            }),
+          };
+        }
+        return Promise.resolve([
+          {
+            id: "uuid-hours",
+            topic: "store_hours",
+            content: storeHoursEntry.content,
+            updatedAt: new Date(),
+            isFaq: false,
+          },
+        ]);
+      });
+    });
+
+    it("renders Sunday as CLOSED and Saturday closing at 6:00 PM", async () => {
+      const { buildPrompt } = await import("../buildPrompt");
+      const result = await buildPrompt("session-1", "what are your hours on Sunday");
+
+      expect(result.system).toContain("CLOSED");
+      expect(result.system).not.toContain("11:00");
+      expect(result.system).not.toContain("3:00 PM");
+      expect(result.system).toContain("Saturday: 9:00 AM - 6:00 PM MST");
+    });
+  });
 });

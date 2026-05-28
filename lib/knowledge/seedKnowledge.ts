@@ -171,6 +171,7 @@ CRITICAL FOR THE AI: When answering Tech-Air questions, you MAY quote the verifi
   },
   {
     topic: "store_hours",
+    forceUpdate: true,
     content: `PERFORMANCE CYCLE STORE INFORMATION (verbatim from contact-us page):
 
 ADDRESS:
@@ -187,8 +188,8 @@ HOURS OF OPERATION (from the official Contact Us page):
 - Wednesday: 9:00 AM - 6:00 PM MST
 - Thursday: 9:00 AM - 6:00 PM MST
 - Friday: 9:00 AM - 6:00 PM MST
-- Saturday: 9:00 AM - 5:00 PM MST
-- Sunday: NOT LISTED on contact page (verify with owner — assume CLOSED until confirmed otherwise)
+- Saturday: 9:00 AM - 6:00 PM MST
+- Sunday: CLOSED
 
 Holiday hours may vary. Customers should check the website for holiday schedule updates.
 
@@ -201,7 +202,7 @@ CONTACT:
 
 Website: performancecycle.com
 
-CRITICAL FOR THE AI: Quote hours and address VERBATIM from above. If asked about Sunday hours, say "I don't have Sunday hours listed — give the store a call at 303-744-2011 or check performancecycle.com to confirm." Do NOT invent Sunday hours or service department hours.`,
+CRITICAL FOR THE AI: Quote hours and address VERBATIM from above. If asked about Sunday hours, say "We're closed on Sundays — give us a call Monday through Saturday at 303-744-2011 or check performancecycle.com." Do NOT invent hours for any day not listed above.`,
   },
   {
     topic: "store_catalog",
@@ -430,8 +431,8 @@ HOW IT WORKS:
 
 STORE HOURS (for pickup):
 - Mon–Fri: 9:00 AM – 6:00 PM MST
-- Saturday: 9:00 AM – 5:00 PM MST
-- Sunday: Contact us to confirm (303-744-2011)
+- Saturday: 9:00 AM – 6:00 PM MST
+- Sunday: CLOSED
 
 WHAT TO SAY when a customer asks about in-store pickup or picking up online orders:
 "Yes! You can pick up online orders at our Centennial store — just select 'Pick Up In Store' at checkout. We'll get it ready for you and send a notification when it's waiting. The store is at 7375 S. Fulton St., Centennial, CO 80112."
