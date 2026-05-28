@@ -2,7 +2,7 @@
 
 import { useRef, useEffect } from "react";
 import Badge from "@/components/ui/Badge";
-import { renderMarkdown } from "@/lib/utils/renderMarkdown";
+import MarkdownMessage from "@/components/chat/MarkdownMessage";
 
 interface Message {
   id: string;
@@ -64,7 +64,7 @@ export default function MessageThread({ messages }: MessageThreadProps) {
                     : "bg-surface border border-border rounded-bl-sm"
                 }`}
               >
-                <span dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                <MarkdownMessage content={msg.content} />
               </div>
               {isCustomer && (
                 <span className="text-[10px] text-text-secondary mt-0.5 block text-right">

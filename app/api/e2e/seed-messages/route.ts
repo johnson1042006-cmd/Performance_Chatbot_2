@@ -7,7 +7,7 @@
  *
  * Only available when E2E_EMAIL_MOCK=1 (the standard e2e mock flag).
  *
- * Body: { sessionId: string; messages: Array<{ content: string }> }
+ * Body: { sessionId: string; role?: "customer" | "ai"; messages: Array<{ content: string }> }
  */
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
@@ -20,6 +20,7 @@ export async function POST(req: Request) {
 
   const body = (await req.json()) as {
     sessionId?: string;
+    role?: "customer" | "ai";
     messages?: Array<{ content: string }>;
   };
 
@@ -27,9 +28,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid body" }, { status: 400 });
   }
 
+  const role = body.role === "ai" ? "ai" : "customer";
+
   const rows = body.messages.map((m) => ({
     sessionId: body.sessionId as string,
-    role: "customer" as const,
+    role: role as "customer" | "ai",
     content: m.content,
     redactionHits: [] as string[],
   }));

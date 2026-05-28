@@ -1,4 +1,4 @@
-import { renderMarkdown } from "@/lib/utils/renderMarkdown";
+import MarkdownMessage from "@/components/chat/MarkdownMessage";
 
 interface MessageBubbleProps {
   role: "customer" | "agent" | "ai" | "system";
@@ -80,7 +80,7 @@ export default function MessageBubble({
               : "bg-white border border-border rounded rounded-bl-sm"
           }`}
         >
-          <span dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }} />
+          <MarkdownMessage content={content} />
         </div>
         {sentAt && (
           <span
