@@ -16,9 +16,13 @@ import {
   Search,
   TrendingUp,
   ListChecks,
+  Bell,
+  BellOff,
 } from "lucide-react";
 import Badge from "./Badge";
 import AlertsBell from "@/components/dashboard/AlertsBell";
+import { notifyEscalation } from "@/components/dashboard/notifyEscalation";
+import { usePushNotifications } from "@/components/dashboard/usePushNotifications";
 
 interface NavItem {
   label: string;
@@ -93,6 +97,7 @@ export default function Sidebar() {
   const role = session?.user?.role;
   const isManager = role === "store_manager";
   const [unclaimedCount, setUnclaimedCount] = useState(0);
+  const push = usePushNotifications();
 
   const filteredItems = navItems.filter(
     (item) => !item.managerOnly || isManager
@@ -118,10 +123,38 @@ export default function Sidebar() {
       .then(({ getPusherClient }) => {
         const pusher = getPusherClient();
         const channel = pusher.subscribe("dashboard");
-        channel.bind("session-update", fetchUnclaimedCount);
+        channel.bind(
+          "session-update",
+          (
+            payload:
+              | {
+                  sessionId?: string;
+                  autoEscalated?: boolean;
+                  reason?: string;
+                  requestedHuman?: boolean;
+                }
+              | undefined
+          ) => {
+            fetchUnclaimedCount();
+            if (payload?.autoEscalated || payload?.requestedHuman) {
+              notifyEscalation({
+                sessionId: payload.sessionId ?? "",
+                reason: payload.reason ?? "explicit_request",
+                urgency: "normal",
+              });
+            }
+          }
+        );
         channel.bind("session-claimed", fetchUnclaimedCount);
         channel.bind("session-released", fetchUnclaimedCount);
         channel.bind("session-closed", fetchUnclaimedCount);
+        channel.bind(
+          "escalation-requested",
+          (payload: { sessionId: string; reason: string; urgency: string }) => {
+            fetchUnclaimedCount();
+            notifyEscalation(payload);
+          }
+        );
         pusherCleanup = () => {
           channel.unbind_all();
           pusher.unsubscribe("dashboard");
@@ -193,6 +226,23 @@ export default function Sidebar() {
           <span className="w-2 h-2 rounded-full bg-success" />
           <span className="text-white/60 text-xs">Online</span>
           <div className="ml-auto flex items-center gap-3">
+            {push.supported && (
+              <button
+                onClick={() => (push.enabled ? push.disable() : push.enable())}
+                disabled={push.busy}
+                title={
+                  push.enabled
+                    ? "Desktop alerts on — click to turn off"
+                    : "Enable desktop alerts (notifies you even with no tab open)"
+                }
+                aria-label={
+                  push.enabled ? "Disable desktop alerts" : "Enable desktop alerts"
+                }
+                className="text-white/40 hover:text-white transition-colors disabled:opacity-50"
+              >
+                {push.enabled ? <Bell size={16} /> : <BellOff size={16} />}
+              </button>
+            )}
             <AlertsBell />
             <button
               onClick={() => {

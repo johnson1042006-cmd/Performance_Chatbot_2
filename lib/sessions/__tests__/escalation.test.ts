@@ -278,6 +278,53 @@ describe("runAiTurn auto-escalation", () => {
       const updateCalls = mockDbUpdate.mock.calls.map((c) => JSON.stringify(c));
       expect(updateCalls.some((c) => c.includes("closed"))).toBe(false);
     });
+
+    // Expanded phrasings — the customer-facing banner literally says
+    // "A team member can take over if needed", so these must all escalate.
+    const explicitPhrases = [
+      "can I talk to a team member",
+      "can i talk to a teammate",
+      "I'd like to speak with someone",
+      "connect me with a rep",
+      "chat with a real person",
+    ];
+    for (const phrase of explicitPhrases) {
+      it(`escalates as explicit_request for: "${phrase}"`, async () => {
+        mockAgentsOnline.mockResolvedValue(false);
+        mockAssessSentiment.mockReturnValue({ score: 0, reasons: [] });
+        mockAssessConfidence.mockReturnValue({ confidence: "high", reasons: [] });
+        mockDbSelect.mockResolvedValueOnce([]); // loadRecentCustomerMessages
+        mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
+
+        const { runAiTurn } = await import("@/lib/ai/runAi");
+        const result = await runAiTurn({
+          sessionId: SESSION_ID,
+          latestMessage: phrase,
+        });
+
+        expect(result.autoEscalated).not.toBeNull();
+        expect(result.autoEscalated?.reason).toBe("explicit_request");
+      });
+    }
+
+    it('does NOT escalate for "do you sell helmets"', async () => {
+      mockAgentsOnline.mockResolvedValue(false);
+      mockAssessSentiment.mockReturnValue({ score: 0, reasons: [] });
+      mockAssessConfidence.mockReturnValue({ confidence: "high", reasons: [] });
+      // No escalation trigger fires, so only loadRecentCustomerMessages runs
+      // (hasAutoEscalated is guarded behind shouldEscalate) — queue exactly one
+      // value so we don't leave a dangling mockResolvedValueOnce that would
+      // poison the next test's select queue.
+      mockDbSelect.mockResolvedValueOnce([{ content: "do you sell helmets" }]);
+
+      const { runAiTurn } = await import("@/lib/ai/runAi");
+      const result = await runAiTurn({
+        sessionId: SESSION_ID,
+        latestMessage: "do you sell helmets",
+      });
+
+      expect(result.autoEscalated).toBeNull();
+    });
   });
 
   // ── 3. Tool-based escalation trigger ────────────────────────────────────

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { sessions, users, messages } from "@/lib/db/schema";
-import { asc, desc, eq, ne, sql, inArray } from "drizzle-orm";
+import { sessions, users, messages, chatEvents } from "@/lib/db/schema";
+import { asc, desc, eq, ne, sql, inArray, and } from "drizzle-orm";
 import { processDueAiClaims, sweepStaleSessions } from "@/lib/sessions/state";
 import { enforce, getClientIp } from "@/lib/rateLimit";
 import { extractGeoFromHeaders } from "@/lib/utils/geo";
@@ -59,6 +59,22 @@ export async function GET() {
       }
     }
 
+    // Sessions that fired auto_escalated but are still AI-claimed are
+    // effectively pending a human — count them toward the queue badge.
+    const escalatedPendingSet = new Set<string>();
+    if (sessionIds.length > 0) {
+      const escalatedRows = await db
+        .select({ sessionId: chatEvents.sessionId })
+        .from(chatEvents)
+        .where(
+          and(
+            inArray(chatEvents.sessionId, sessionIds),
+            eq(chatEvents.type, "auto_escalated")
+          )
+        );
+      for (const r of escalatedRows) escalatedPendingSet.add(r.sessionId);
+    }
+
     const enriched = rows.map(({ session, claimerName, claimerId }) => ({
       ...session,
       claimedBy: claimerId ? { id: claimerId, name: claimerName } : null,
@@ -70,23 +86,27 @@ export async function GET() {
           lowConfidenceLatest: false,
           negativeSentimentEver: false,
         },
+      pendingHuman:
+        escalatedPendingSet.has(session.id) &&
+        session.claimedByKind !== "human" &&
+        session.status !== "closed",
     }));
 
-    // Sort: unclaimed (waiting) oldest first, claimed newest first
+    // Sort: put pendingHuman sessions alongside waiting ones at the top.
     enriched.sort((a, b) => {
-      const aUnclaimed = a.status === "waiting";
-      const bUnclaimed = b.status === "waiting";
-      if (aUnclaimed && !bUnclaimed) return -1;
-      if (!aUnclaimed && bUnclaimed) return 1;
-      if (aUnclaimed && bUnclaimed) {
-        // Both unclaimed — oldest first
+      const aNeedsHuman = a.status === "waiting" || a.pendingHuman;
+      const bNeedsHuman = b.status === "waiting" || b.pendingHuman;
+      if (aNeedsHuman && !bNeedsHuman) return -1;
+      if (!aNeedsHuman && bNeedsHuman) return 1;
+      if (aNeedsHuman && bNeedsHuman) {
         return new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime();
       }
-      // Both claimed — newest first
       return new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime();
     });
 
-    const unclaimedCount = enriched.filter((s) => s.status === "waiting").length;
+    const unclaimedCount = enriched.filter(
+      (s) => s.status === "waiting" || s.pendingHuman
+    ).length;
 
     return NextResponse.json({ sessions: enriched, unclaimedCount });
   } catch (error) {

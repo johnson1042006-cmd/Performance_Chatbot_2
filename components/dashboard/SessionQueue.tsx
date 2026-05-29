@@ -5,7 +5,6 @@ import { useSession } from "next-auth/react";
 import SessionCard from "./SessionCard";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { MessageSquare } from "lucide-react";
-import { notifyEscalation } from "./notifyEscalation";
 
 interface Session {
   id: string;
@@ -21,6 +20,7 @@ interface Session {
   customerCity?: string | null;
   customerRegion?: string | null;
   customerCountry?: string | null;
+  pendingHuman?: boolean;
 }
 
 const FILTERS = [
@@ -148,9 +148,9 @@ export default function SessionQueue({
       channel.bind("session-claimed", () => fetchSessions());
       channel.bind("session-released", () => fetchSessions());
       channel.bind("session-closed", () => fetchSessions());
-      channel.bind("escalation-requested", (payload: { sessionId: string; reason: string; urgency: string }) => {
+      channel.bind("escalation-requested", () => {
         fetchSessions();
-        notifyEscalation(payload);
+        // Chime/notification fires globally from Sidebar.tsx to cover non-Live-Chats pages.
       });
       cleanup = () => {
         channel.unbind_all();

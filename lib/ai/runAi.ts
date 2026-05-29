@@ -208,11 +208,15 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
   // and fire the correct per-session Pusher event so the widget can render
   // EmailCaptureForm or the connecting banner.
   const EXPLICIT_HUMAN_REQUEST_PATTERNS: RegExp[] = [
-    /\breal human\b/i,
-    /\btalk to a human\b/i,
-    /\bspeak to a (human|person)\b/i,
+    /\b(real|actual|live) (human|person)\b/i,
+    /\btalk to (a |an )?(human|person|agent|rep|representative|teammate|team\s*member|staff|employee|associate|someone)\b/i,
+    /\bspeak (to|with) (a |an )?(human|person|agent|rep|representative|manager|teammate|team\s*member|staff|employee|associate|someone)\b/i,
+    /\bchat with (a |an )?(human|person|agent|rep|representative|teammate|team\s*member|staff|someone)\b/i,
+    /\bconnect (me )?(to|with) (a |an )?(human|person|agent|rep|representative|teammate|team\s*member|staff|someone)\b/i,
+    /\bget (me )?(a |an )?(human|person|agent|rep|teammate|team\s*member|manager)\b/i,
     /\blive agent\b/i,
     /\bhuman agent\b/i,
+    /\b(customer )?service rep(resentative)?\b/i,
   ];
   const aiEscalatedViaTool = toolCalls.some(
     (tc) => tc.name === "escalate_to_human" && !tc.isError

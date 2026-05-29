@@ -296,6 +296,32 @@ export const feedback = pgTable(
   })
 );
 
+// Web Push subscriptions per dashboard user. One row per browser/device
+// (keyed by the unique push `endpoint`). Used to deliver escalation alerts
+// to agents even when no dashboard tab is open. Expired endpoints (404/410
+// from the push service) are pruned at send time.
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    endpoint: text("endpoint").notNull().unique(),
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    userIdIdx: index("push_subscriptions_user_id_idx").on(table.userId),
+  })
+);
+
+export type PushSubscription = typeof pushSubscriptions.$inferSelect;
+export type NewPushSubscription = typeof pushSubscriptions.$inferInsert;
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;

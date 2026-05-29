@@ -26,6 +26,7 @@ interface SessionCardProps {
       lowConfidenceLatest: boolean;
       negativeSentimentEver: boolean;
     };
+    pendingHuman?: boolean;
   };
   isActive?: boolean;
   isKeyboardSelected?: boolean;
@@ -50,8 +51,13 @@ export default function SessionCard({
   const isAi = session.claimedByKind === "ai" || session.status === "active_ai";
   const isHuman = session.claimedByKind === "human" || session.status === "active_human";
 
+  const needsHuman =
+    session.pendingHuman === true && session.status === "active_ai";
+
   const statusBadge = isUnclaimed
     ? { label: "In Queue", variant: "warning" as const }
+    : needsHuman
+    ? { label: "Needs human", variant: "warning" as const }
     : isAi
     ? { label: "AI Active", variant: "ai" as const }
     : isHuman

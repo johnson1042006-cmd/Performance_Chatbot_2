@@ -182,6 +182,8 @@ describe("Unauthenticated access to protected routes", () => {
     ["POST /api/sessions/claim", "@/app/api/sessions/claim/route", "http://localhost/api/sessions/claim", { sessionId: "s1" }],
     ["POST /api/sessions/release", "@/app/api/sessions/release/route", "http://localhost/api/sessions/release", { sessionId: "s1" }],
     ["POST /api/sessions/close", "@/app/api/sessions/close/route", "http://localhost/api/sessions/close", { sessionId: "s1" }],
+    ["POST /api/push/subscribe", "@/app/api/push/subscribe/route", "http://localhost/api/push/subscribe", { endpoint: "e", keys: { p256dh: "p", auth: "a" } }],
+    ["POST /api/push/unsubscribe", "@/app/api/push/unsubscribe/route", "http://localhost/api/push/unsubscribe", { endpoint: "e" }],
     ["POST /api/admin/settings", "@/app/api/admin/settings/route", "http://localhost/api/admin/settings", { aiEnabled: true }],
     ["POST /api/admin/users", "@/app/api/admin/users/route", "http://localhost/api/admin/users", { email: "a@b.c", name: "A", password: "p" }],
     ["POST /api/admin/knowledge", "@/app/api/admin/knowledge/route", "http://localhost/api/admin/knowledge", { topic: "t", content: "c" }],

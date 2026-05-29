@@ -24,6 +24,7 @@ import {
   type BCVariant,
 } from "@/lib/bigcommerce/client";
 import { lookupOrder } from "@/lib/orders/lookup";
+import { sendEscalationPush } from "@/lib/push/send";
 import { log, serializeError } from "@/lib/log";
 
 // ---------------------------------------------------------------------------
@@ -231,6 +232,17 @@ export async function escalateToHuman(
     });
   } catch (err) {
     log.warn("ai.tools.escalation_pusher_failed", {
+      sessionId,
+      error: serializeError(err),
+    });
+  }
+
+  // Web Push: reach agents on their device even when no dashboard tab is open.
+  // Best-effort and self-contained — never throws into the escalation flow.
+  try {
+    await sendEscalationPush({ sessionId, reason, urgency });
+  } catch (err) {
+    log.warn("ai.tools.escalation_push_failed", {
       sessionId,
       error: serializeError(err),
     });
