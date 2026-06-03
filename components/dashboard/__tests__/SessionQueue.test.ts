@@ -25,7 +25,7 @@ vi.stubGlobal("Audio", mockAudio);
 // Module under test
 // ---------------------------------------------------------------------------
 
-import { notifyEscalation } from "../notifyEscalation";
+import { notifyEscalation, __resetDedupe } from "../notifyEscalation";
 
 // ---------------------------------------------------------------------------
 // notifyEscalation unit tests
@@ -36,7 +36,10 @@ describe("notifyEscalation", () => {
     mockNotification.mockClear();
     mockAudio.mockClear();
     playMock.mockClear();
+    mockNotification.requestPermission.mockClear();
+    mockNotification.requestPermission.mockResolvedValue("granted");
     mockNotification.permission = "granted";
+    __resetDedupe();
   });
 
   afterEach(() => {
@@ -109,6 +112,28 @@ describe("notifyEscalation", () => {
     mockNotification.permission = "denied";
     notifyEscalation({ sessionId: "s-8", reason: "complex_fitment", urgency: "normal" });
     expect(mockNotification).not.toHaveBeenCalled();
+  });
+
+  it("deduplicates rapid calls for the same sessionId within 5s window", () => {
+    notifyEscalation({ sessionId: "dup-1", reason: "explicit_request", urgency: "normal" });
+    notifyEscalation({ sessionId: "dup-1", reason: "explicit_request", urgency: "normal" });
+
+    expect(mockNotification).toHaveBeenCalledOnce();
+    expect(mockAudio).toHaveBeenCalledOnce();
+  });
+
+  it("fires notification after permission grant when starting from 'default'", async () => {
+    mockNotification.permission = "default";
+    mockNotification.requestPermission.mockResolvedValue("granted");
+
+    notifyEscalation({ sessionId: "grant-1", reason: "explicit_request", urgency: "normal" });
+
+    // Flush the requestPermission().then(...) microtask chain.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockNotification.requestPermission).toHaveBeenCalledOnce();
+    expect(mockNotification).toHaveBeenCalledOnce();
   });
 });
 

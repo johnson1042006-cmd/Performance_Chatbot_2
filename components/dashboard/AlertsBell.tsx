@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { Bell, X } from "lucide-react";
 import { FRIENDLY } from "./alertFriendlyNames";
+import { notifyEscalation } from "./notifyEscalation";
 
 interface AlertEvent {
   id: string;
@@ -98,6 +99,21 @@ export default function AlertsBell() {
               className="text-text-secondary hover:text-text-primary"
             >
               <X size={12} />
+            </button>
+          </div>
+          <div className="px-3 py-2 border-b border-border">
+            <button
+              onClick={() =>
+                notifyEscalation({
+                  sessionId: `test-${crypto.randomUUID()}`,
+                  reason: "explicit_request",
+                  urgency: "normal",
+                })
+              }
+              title="Test notification & chime"
+              className="w-full text-left text-xs font-medium text-accent-solid hover:underline"
+            >
+              Test escalation chime
             </button>
           </div>
           {events.length === 0 ? (
