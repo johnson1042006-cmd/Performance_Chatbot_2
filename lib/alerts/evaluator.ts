@@ -3,8 +3,8 @@
  *
  * Pulls the configured thresholds, computes their current values, and
  * fires any breach whose cooldown has elapsed. Fan-out: insert
- * `alert_events` row, push Pusher event on the "alerts" channel, POST to
- * Slack, and stamp `alert_thresholds.last_fired_at`.
+ * `alert_events` row, push Pusher event on the "alerts" channel, and
+ * stamp `alert_thresholds.last_fired_at`.
  *
  * All side effects are best-effort — errors are logged and never thrown,
  * so a single misbehaving threshold doesn't poison the others.
@@ -14,8 +14,6 @@ import { alertEvents, alertThresholds, sessions, users } from "@/lib/db/schema";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { getPusher } from "@/lib/pusher/server";
 import { log, serializeError } from "@/lib/log";
-import { sendSlackAlert } from "./notify";
-
 export type AlertKind =
   | "queue_depth"
   | "ai_failure_rate_pct"
@@ -214,7 +212,7 @@ export async function evaluateAlertThresholds(): Promise<EvaluationResult[]> {
         }
       }
 
-      // Persist event and stamp last_fired_at first so a Slack/Pusher
+      // Persist event and stamp last_fired_at first so a Pusher
       // failure doesn't cause repeat fires on the next tick.
       let eventId: string | null = null;
       try {
@@ -266,14 +264,6 @@ export async function evaluateAlertThresholds(): Promise<EvaluationResult[]> {
         });
       }
 
-      // Slack fan-out.
-      await sendSlackAlert({
-        kind: t.kind,
-        comparator: t.comparator,
-        threshold: thresholdNum,
-        value,
-        message,
-      });
     } catch (error) {
       log.warn("alerts.evaluator_threshold_failed", {
         thresholdId: t.id,
