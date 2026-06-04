@@ -16,13 +16,10 @@ import {
   Search,
   TrendingUp,
   ListChecks,
-  Bell,
-  BellOff,
 } from "lucide-react";
 import Badge from "./Badge";
 import AlertsBell from "@/components/dashboard/AlertsBell";
 import { notifyEscalation } from "@/components/dashboard/notifyEscalation";
-import { usePushNotifications } from "@/components/dashboard/usePushNotifications";
 
 interface NavItem {
   label: string;
@@ -97,7 +94,6 @@ export default function Sidebar() {
   const role = session?.user?.role;
   const isManager = role === "store_manager";
   const [unclaimedCount, setUnclaimedCount] = useState(0);
-  const push = usePushNotifications();
 
   const filteredItems = navItems.filter(
     (item) => !item.managerOnly || isManager
@@ -171,8 +167,8 @@ export default function Sidebar() {
     <aside className="w-60 h-screen bg-primary flex flex-col shrink-0">
       <div className="px-5 py-6 border-b border-white/10">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 bg-accent-solid rounded-button flex items-center justify-center">
-            <span className="text-white text-sm font-bold">PC</span>
+          <div className="w-8 h-8 bg-white rounded-button flex items-center justify-center overflow-hidden">
+            <img src="/performance-cycle-logo.png" alt="Performance Cycle" className="w-full h-full object-contain p-0.5" />
           </div>
           <span className="text-white font-semibold text-sm">
             Performance Cycle
@@ -226,23 +222,6 @@ export default function Sidebar() {
           <span className="w-2 h-2 rounded-full bg-success" />
           <span className="text-white/60 text-xs">Online</span>
           <div className="ml-auto flex items-center gap-3">
-            {push.supported && (
-              <button
-                onClick={() => (push.enabled ? push.disable() : push.enable())}
-                disabled={push.busy}
-                title={
-                  push.enabled
-                    ? "Desktop alerts on — click to turn off"
-                    : "Enable desktop alerts (notifies you even with no tab open)"
-                }
-                aria-label={
-                  push.enabled ? "Disable desktop alerts" : "Enable desktop alerts"
-                }
-                className="text-white/40 hover:text-white transition-colors disabled:opacity-50"
-              >
-                {push.enabled ? <Bell size={16} /> : <BellOff size={16} />}
-              </button>
-            )}
             <AlertsBell />
             <button
               onClick={() => {

@@ -15,7 +15,6 @@ import { sessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { getPusher } from "@/lib/pusher/server";
 import { searchProducts } from "@/lib/search/productSearch";
-import { findPairings } from "@/lib/search/pairingSearch";
 import {
   getProductBySKU,
   getProductById,
@@ -325,18 +324,6 @@ export const tools: Anthropic.Tool[] = [
     },
   },
   {
-    name: "get_pairings",
-    description:
-      "Look up curated product pairings (matching pants/jacket, common accessories) for a given parent SKU.",
-    input_schema: {
-      type: "object",
-      properties: {
-        sku: { type: "string", description: "Parent product SKU." },
-      },
-      required: ["sku"],
-    },
-  },
-  {
     name: "lookup_order",
     description:
       "Look up an order by customer email + order number. Returns the order status, total, items shipped, and any tracking links.",
@@ -489,22 +476,6 @@ export const toolHandlers: Record<string, ToolHandler> = {
             ),
           }
         : null,
-    };
-  },
-
-  async get_pairings(input) {
-    const sku = asStr(input.sku);
-    if (!sku) return { error: "sku is required" };
-    const pairings = await findPairings(sku);
-    return {
-      count: pairings.length,
-      pairings: pairings
-        .filter((r) => r.product)
-        .slice(0, 8)
-        .map((r) => ({
-          pairingType: r.pairing.pairingType,
-          ...compactProduct(r.product!),
-        })),
     };
   },
 

@@ -63,11 +63,6 @@ vi.mock("@/lib/search/productSearch", () => ({
   extractSKUFromText: mockExtractSKU,
 }));
 
-const mockFindPairings = vi.fn();
-vi.mock("@/lib/search/pairingSearch", () => ({
-  findPairings: mockFindPairings,
-}));
-
 const mockGetProductBySKU = vi.fn();
 const mockGetProductById = vi.fn();
 vi.mock("@/lib/bigcommerce/client", () => ({
@@ -171,26 +166,6 @@ describe("toolHandlers", () => {
       { sessionId: "s1" }
     )) as { found: boolean };
     expect(out.found).toBe(false);
-  });
-
-  it("get_pairings returns compact products", async () => {
-    mockFindPairings.mockResolvedValueOnce([
-      {
-        pairing: {
-          primarySku: "ID:1",
-          pairedSku: "ID:2",
-          pairingType: "matching_pants",
-        },
-        product: SAMPLE_PRODUCT({ id: 2, name: "Pants", sku: "PANTS-1" }),
-      },
-    ]);
-    const { toolHandlers } = await import("@/lib/ai/tools");
-    const out = (await toolHandlers.get_pairings(
-      { sku: "HELM-1" },
-      { sessionId: "s1" }
-    )) as { count: number; pairings: Array<{ pairingType: string }> };
-    expect(out.count).toBe(1);
-    expect(out.pairings[0].pairingType).toBe("matching_pants");
   });
 
   it("lookup_order forwards to the orders helper", async () => {

@@ -6,7 +6,6 @@ import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import { Plus, Trash2 } from "lucide-react";
 import KnowledgeEditor from "@/components/dashboard/manager/KnowledgeEditor";
-import PairingsTable from "@/components/dashboard/manager/PairingsTable";
 import CannedRepliesEditor from "@/components/dashboard/manager/CannedRepliesEditor";
 import { slugify, dedupSlug } from "@/lib/utils/slugify";
 
@@ -18,12 +17,11 @@ interface KnowledgeEntry {
   isFaq: boolean;
 }
 
-type Tab = "policies" | "faqs" | "pairings" | "canned";
+type Tab = "policies" | "faqs" | "canned";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "policies", label: "Policies" },
   { id: "faqs", label: "FAQs" },
-  { id: "pairings", label: "Product Pairings" },
   { id: "canned", label: "Canned Replies" },
 ];
 
@@ -135,9 +133,7 @@ export default function KnowledgeBasePage() {
           ))}
         </div>
 
-        {activeTab === "pairings" ? (
-          <PairingsTable />
-        ) : activeTab === "canned" ? (
+        {activeTab === "canned" ? (
           <CannedRepliesEditor />
         ) : showList ? (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">

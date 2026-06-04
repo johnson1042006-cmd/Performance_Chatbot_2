@@ -90,7 +90,7 @@ export default function AlertsBell() {
         )}
       </button>
       {open && (
-        <div className="absolute bottom-full mb-2 right-0 w-72 max-h-72 overflow-y-auto bg-surface text-text-primary rounded-card shadow-card-md border border-border z-50">
+        <div className="absolute bottom-full mb-2 left-0 w-72 max-w-[calc(100vw-5rem)] max-h-72 overflow-y-auto bg-surface text-text-primary rounded-card shadow-card-md border border-border z-50">
           <div className="flex items-center justify-between px-3 py-2 border-b border-border">
             <span className="text-xs font-semibold">Alerts</span>
             <button

@@ -16,7 +16,6 @@ import {
   type SubcategoryValue,
   type SupportedProductType,
 } from "@/lib/search/productSearch";
-import { findPairings } from "@/lib/search/pairingSearch";
 import { AI_BEHAVIOR_RULES } from "./rules";
 import { PRODUCT_TAXONOMY } from "./taxonomy";
 import type { Message } from "@/lib/db/schema";
@@ -206,7 +205,6 @@ You have a tool catalog you MUST use. The proactive "RELEVANT PRODUCTS FROM CATA
 - \`search_products({ query, productType?, budgetMax?, color?, inStockOnly? })\` — search the catalog. Always call BEFORE naming any product not on the current page or in conversation history.
 - \`get_product_details({ sku })\` — full product info including variants. Always call BEFORE stating stock, price, or variant info.
 - \`get_product_by_variant_sku({ variantSku })\` — resolve a customer-pasted variant SKU (e.g. from an invoice) to its parent product.
-- \`get_pairings({ sku })\` — curated pairings (matching pants/jacket, common accessories) for a parent SKU.
 - \`lookup_order({ email, orderId })\` — order status, tracking, and items shipped. Use whenever the customer asks about an order they placed.
 - \`lookup_helmet_sizing()\` — canonical helmet sizing-guide URL. Use whenever a customer asks how a helmet fits.
 - \`lookup_tire_services()\` — tire and wheel services URL. Use for tire mounting/balancing questions.
@@ -323,36 +321,15 @@ export async function buildPrompt(
     return null;
   }
 
-  async function resolvePairingSku(): Promise<string | null> {
-    if (pageContext?.productSku) return pageContext.productSku;
-    if (accessorySubject.sku) return accessorySubject.sku;
-    if (accessorySubject.productName) {
-      const candidates = await safeFetch(
-        () => getProductByNameLike(accessorySubject.productName!, 3),
-        [] as BCProduct[]
-      );
-      if (candidates.length > 0 && candidates[0].sku) return candidates[0].sku;
-    }
-    return null;
-  }
-
   // Run searches in parallel: the focused query + just the latest message
   // to maximize chances of hitting BigCommerce results, plus pairings for the
   // resolved subject SKU.
-  const [primarySearch, latestSearch, , discussedProduct] =
+  const [primarySearch, latestSearch, discussedProduct] =
     await Promise.all([
       safeFetch(() => searchProducts(searchQuery), emptySearch),
       searchQuery !== effectiveLatest
         ? safeFetch(() => searchProducts(effectiveLatest), emptySearch)
         : Promise.resolve(emptySearch),
-      (async () => {
-        const sku = await resolvePairingSku();
-        if (!sku) return [] as Awaited<ReturnType<typeof findPairings>>;
-        return safeFetch(
-          () => findPairings(sku),
-          [] as Awaited<ReturnType<typeof findPairings>>
-        );
-      })(),
       resolveDiscussedProduct(),
     ]);
 
