@@ -7,7 +7,6 @@ import {
   extractKeywords,
   extractBudget,
   extractProductType,
-  extractAccessorySubject,
   extractDiscussedProductSubject,
   extractSubcategoryRequest,
   isLikelyProductFollowUp,
@@ -293,17 +292,9 @@ export async function buildPrompt(
 
   const emptySearch = { products: [] as BCProduct[], detectedColor: null as string | null };
 
-  // Resolve an accessory subject from the latest message + history. When the
-  // customer asks "what accessories do you have for the Shoei RF-1400" or
-  // "any accessories for that helmet", we want to pull pairings for the
-  // referenced product even when no page context is set. The subject can be
-  // an explicit SKU or a product name from a prior assistant message.
-  const historyContents = history.map((m: Message) => m.content);
   const assistantContents = history
     .filter((m: Message) => m.role === "ai" || m.role === "agent")
     .map((m: Message) => m.content);
-
-  const accessorySubject = extractAccessorySubject(effectiveLatest, historyContents);
 
   async function resolveDiscussedProduct(): Promise<BCProduct | null> {
     const subj = extractDiscussedProductSubject(effectiveLatest, assistantContents);
