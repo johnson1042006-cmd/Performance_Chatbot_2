@@ -726,7 +726,11 @@ export async function searchProducts(
       const typeTerms = PRODUCT_TYPE_MAP[productType];
       if (!typeTerms || typeTerms.length === 0) return [];
       try {
-        return await getProductByNameLike(`${brand} ${typeTerms[0]}`, 30);
+        const byBrand = await getProductByNameLike(brand, 50);
+        return byBrand.filter((p) => {
+          const n = p.name.toLowerCase();
+          return typeTerms.some((t) => n.includes(t));
+        });
       } catch {
         return [];
       }

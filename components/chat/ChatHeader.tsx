@@ -9,7 +9,7 @@ export default function ChatHeader() {
         <img src="/performance-cycle-logo.png" alt="Performance Cycle" className="w-full h-full object-contain p-1" />
       </div>
       <div className="flex-1 min-w-0">
-        <h2 className="text-white text-sm font-heading font-bold uppercase tracking-wide">Performance Cycle</h2>
+        <h2 className="text-white text-sm font-heading font-bold uppercase tracking-wide">Performance Cycle AI Assistant</h2>
         <div className="flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-full bg-success" />
           <span className="text-white/60 text-xs">Usually replies in under a minute</span>

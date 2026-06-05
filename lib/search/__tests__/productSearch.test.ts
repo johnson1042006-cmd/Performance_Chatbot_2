@@ -1223,7 +1223,7 @@ describe("searchProducts", () => {
       (c: unknown[]) => c[0] === "klim"
     );
     klimCalls.forEach((c: unknown[]) => {
-      expect(c[1]).toBe(30); // must be the brand-source fallback, never per-token (10)
+      expect([30, 50]).toContain(c[1]); // 30 = 3b brand fallback, 50 = 3c brand+type fetch, 10 = per-token (disallowed)
     });
   });
 
