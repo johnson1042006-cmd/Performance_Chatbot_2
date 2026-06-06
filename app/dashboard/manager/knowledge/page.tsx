@@ -44,8 +44,9 @@ export default function KnowledgeBasePage() {
     void fetchEntries();
   }, [fetchEntries]);
 
+  const HIDDEN_TOPICS = ["store_catalog", "store_catalog_index"];
   const policies = useMemo(
-    () => entries.filter((e) => !e.isFaq).sort((a, b) => a.topic.localeCompare(b.topic)),
+    () => entries.filter((e) => !e.isFaq && !HIDDEN_TOPICS.includes(e.topic)).sort((a, b) => a.topic.localeCompare(b.topic)),
     [entries]
   );
   const faqs = useMemo(
