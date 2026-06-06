@@ -26,17 +26,13 @@ export default function PresenceHeartbeat() {
     }
 
     function handleVisibilityChange() {
+      // On returning to the tab, refresh presence immediately. Do NOT mark offline
+      // when merely hidden — the agent is still at their desk, just in another
+      // tab/window. The heartbeat keeps running in the background; the server-side
+      // threshold marks them offline only if heartbeats truly stop (tab closed or
+      // machine asleep). beforeunload still handles real tab close.
       if (document.visibilityState === "visible") {
         sendHeartbeat();
-        if (!intervalId) {
-          intervalId = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
-        }
-      } else {
-        if (intervalId) {
-          clearInterval(intervalId);
-          intervalId = null;
-        }
-        sendOffline();
       }
     }
 

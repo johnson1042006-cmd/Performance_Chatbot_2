@@ -7,7 +7,7 @@ import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { and, eq, gt, isNotNull } from "drizzle-orm";
 
-export const ONLINE_THRESHOLD_SECONDS = 60;
+export const ONLINE_THRESHOLD_SECONDS = 120;
 
 export async function recordAgentHeartbeat(userId: string): Promise<void> {
   await db
