@@ -718,22 +718,60 @@ export async function searchProducts(
       return [];
     })(),
 
-    // 3c: brand+type name-like — when both detected, fetch products whose names
-    // contain both the brand and a type-canonical term. Catches valid products
-    // that the brand or subcategory BC pool missed due to the 100-item cap.
+    // 3c: brand+type — surface the brand's products of that type even when the
+    // brand has hundreds of items or they're shelved in an unexpected category.
+    // Two passes, unioned: (a) brand-by-name at a high limit filtered to a type
+    // term, (b) every canonical category for the type, filtered to the brand.
     (async (): Promise<BCProduct[]> => {
       if (!brand || !productType) return [];
       const typeTerms = PRODUCT_TYPE_MAP[productType];
       if (!typeTerms || typeTerms.length === 0) return [];
+
+      const out = new Map<number, BCProduct>();
+
       try {
-        const byBrand = await getProductByNameLike(brand, 50);
-        return byBrand.filter((p) => {
+        // Search by type term first — it appears contiguously in every product
+        // name of that type (e.g. "helmet" in "Alpinestars Supertech R10 Helmet"),
+        // so this reliably catches a brand's products regardless of catalog size.
+        const byTypeTerm = await getProductByNameLike(typeTerms[0], 250);
+        for (const p of byTypeTerm) {
           const n = p.name.toLowerCase();
-          return typeTerms.some((t) => n.includes(t));
-        });
-      } catch {
-        return [];
-      }
+          if (n.includes(brand) && typeTerms.some((t) => n.includes(t)))
+            out.set(p.id, p);
+        }
+      } catch { /* ignore */ }
+      try {
+        // Secondary: brand-name sweep filtered to type, catches anything
+        // the type-term pass missed
+        const byBrand = await getProductByNameLike(brand, 100);
+        for (const p of byBrand) {
+          const n = p.name.toLowerCase();
+          if (typeTerms.some((t) => n.includes(t))) out.set(p.id, p);
+        }
+      } catch { /* ignore */ }
+
+      try {
+        const catNames: string[] = isSupportedProductType(productType)
+          ? Object.values(TYPE_SUBCATEGORY_CATEGORIES[productType] ?? {}).flat()
+          : ((TYPE_DEFAULT_CATEGORIES as Partial<Record<string, string[]>>)[productType] ?? []);
+
+        const perCat = await Promise.all(
+          catNames.map(async (cn: string) => {
+            try {
+              const cat = await findCategoryByName(cn);
+              return cat ? await getProductsByCategory(cat.id, 100) : [];
+            } catch { return []; }
+          })
+        );
+
+        for (const list of perCat) {
+          for (const p of list) {
+            if (p.name.toLowerCase().includes(brand)) out.set(p.id, p);
+          }
+        }
+      } catch { /* ignore */ }
+
+      return Array.from(out.values());
     })(),
 
     // 3d: BC keyword search

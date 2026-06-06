@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { useEffect, useState, useCallback } from "react";
@@ -168,7 +169,7 @@ export default function Sidebar() {
       <div className="px-5 py-6 border-b border-white/10">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 bg-white rounded-button flex items-center justify-center overflow-hidden">
-            <img src="/performance-cycle-logo.png" alt="Performance Cycle" className="w-full h-full object-contain p-0.5" />
+            <Image src="/performance-cycle-logo.png" alt="Performance Cycle" width={32} height={32} className="w-full h-full object-contain p-0.5" />
           </div>
           <span className="text-white font-semibold text-sm">
             Performance Cycle

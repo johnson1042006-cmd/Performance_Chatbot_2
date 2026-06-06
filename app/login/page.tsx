@@ -3,6 +3,7 @@
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import Image from "next/image";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -36,7 +37,7 @@ export default function LoginPage() {
         <div className="bg-surface rounded-card shadow-card p-8">
           <div className="text-center mb-8">
             <div className="inline-flex items-center justify-center w-14 h-14 bg-white rounded-card mb-4 overflow-hidden shadow-sm">
-              <img src="/performance-cycle-logo.png" alt="Performance Cycle" className="w-full h-full object-contain p-1.5" />
+              <Image src="/performance-cycle-logo.png" alt="Performance Cycle" width={56} height={56} className="w-full h-full object-contain p-1.5" />
             </div>
             <h1 className="text-2xl font-semibold text-text-primary">
               Performance Cycle

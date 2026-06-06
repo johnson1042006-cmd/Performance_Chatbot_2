@@ -40,6 +40,10 @@ const REQUIRED_ENV_VARS = [
   "BIGCOMMERCE_STORE_HASH",
   "BIGCOMMERCE_ACCESS_TOKEN",
   "USE_AI_TOOLS",
+  "CRON_SECRET",
+  "RESEND_API_KEY",
+  "RESEND_FROM_EMAIL",
+  "SUPPORT_INBOX",
 ];
 
 type Result = { ok: boolean; label: string; detail?: string };
@@ -98,6 +102,11 @@ function checkEnvVars(): Result[] {
     );
   } else {
     results.push(pass("USE_AI_TOOLS=true"));
+  }
+
+  const fromEmail = process.env.RESEND_FROM_EMAIL ?? "";
+  if (fromEmail.includes("resend.dev")) {
+    results.push(fail("RESEND_FROM_EMAIL uses the resend.dev sandbox", "customers won't receive email — set a verified sending domain"));
   }
 
   return results;
