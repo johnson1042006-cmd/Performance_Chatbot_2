@@ -17,10 +17,13 @@ import {
   Search,
   TrendingUp,
   ListChecks,
+  BellRing,
+  BellOff,
 } from "lucide-react";
 import Badge from "./Badge";
 import AlertsBell from "@/components/dashboard/AlertsBell";
 import { notifyEscalation } from "@/components/dashboard/notifyEscalation";
+import { usePushNotifications } from "@/components/dashboard/usePushNotifications";
 
 interface NavItem {
   label: string;
@@ -94,6 +97,7 @@ export default function Sidebar() {
   const { data: session } = useSession();
   const role = session?.user?.role;
   const isManager = role === "store_manager";
+  const push = usePushNotifications();
   const [unclaimedCount, setUnclaimedCount] = useState(0);
 
   const filteredItems = navItems.filter(
@@ -223,6 +227,18 @@ export default function Sidebar() {
           <span className="w-2 h-2 rounded-full bg-success" />
           <span className="text-white/60 text-xs">Online</span>
           <div className="ml-auto flex items-center gap-3">
+            {push.supported && (
+              <button
+                type="button"
+                onClick={() => (push.enabled ? push.disable() : push.enable())}
+                disabled={push.busy}
+                aria-label={push.enabled ? "Disable desktop notifications" : "Enable desktop notifications"}
+                title={push.enabled ? "Desktop notifications on — click to turn off" : "Enable desktop notifications for new chats & escalations"}
+                className="text-white/60 hover:text-white transition-colors disabled:opacity-40"
+              >
+                {push.enabled ? <BellRing size={16} /> : <BellOff size={16} />}
+              </button>
+            )}
             <AlertsBell />
             <button
               onClick={() => {
