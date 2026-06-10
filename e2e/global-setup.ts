@@ -63,7 +63,12 @@ export default async function globalSetup() {
 
     const body = new URLSearchParams({
       email: AGENT_EMAIL,
-      password: process.env.E2E_AGENT_PASS ?? "agent123",
+      // Seed passwords are now env-driven (FIX-7). Prefer the explicit e2e var,
+      // then the seed var the suite ran db:seed with, then the legacy default.
+      password:
+        process.env.E2E_AGENT_PASS ??
+        process.env.SEED_AGENT_PASSWORD ??
+        "agent123",
       csrfToken,
       json: "true",
     });

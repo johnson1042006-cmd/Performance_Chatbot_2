@@ -17,6 +17,7 @@
     "catalog:refresh": "npx tsx scripts/refresh-catalog-skeleton.ts",
     "db:push": "npx drizzle-kit push",
     "db:seed": "npx tsx scripts/seed-users.ts",
+    "db:rotate-passwords": "npx tsx scripts/rotate-prod-passwords.ts",
     "db:seed:knowledge": "npx tsx scripts/seed-knowledge.ts",
     "db:seed:products": "npx tsx scripts/seed-products.ts",
     "db:seed:catalog": "npx tsx scripts/seed-catalog.ts",

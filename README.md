@@ -38,12 +38,13 @@ npm run db:seed:colorways         # colorway data (optional)
 npm run dev
 ```
 
-Default seeded credentials (change before production):
-
-| Role | Email | Password |
-|------|-------|----------|
-| Manager | `manager@performancecycle.com` | `manager123` |
-| Agent | `agent@performancecycle.com` | `agent123` |
+Seeded accounts (`manager@performancecycle.com`, `agent@performancecycle.com`)
+get their passwords from the `SEED_MANAGER_PASSWORD` / `SEED_AGENT_PASSWORD`
+env vars at seed time. If those vars are unset, `npm run db:seed` generates a
+strong random password and prints it once to stdout. Seeded users are always
+created with `mustResetPassword = true`, so the password must be changed on
+first login. To rotate the seeded accounts later, set the same env vars and run
+`npm run db:rotate-passwords`.
 
 ## Environment variables
 
