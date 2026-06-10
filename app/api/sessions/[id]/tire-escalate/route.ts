@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { sessions, chatEvents } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { enforce, getClientIp } from "@/lib/rateLimit";
+import { verifySessionAccess } from "@/lib/sessions/verifySessionToken";
 import { log, serializeError } from "@/lib/log";
 import { escalateToHuman } from "@/lib/ai/tools";
 
@@ -42,6 +43,10 @@ export async function POST(
           headers: { "Retry-After": String(rl.retryAfter ?? 60) },
         }
       );
+    }
+
+    if (!(await verifySessionAccess(req, sessionId))) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const body = await req.json().catch(() => ({}));

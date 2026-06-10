@@ -4,6 +4,7 @@ import { sessions, customerContacts } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { sendTranscriptEmail } from "@/lib/email/transcript";
 import { enforce, getClientIp } from "@/lib/rateLimit";
+import { verifySessionAccess } from "@/lib/sessions/verifySessionToken";
 import { log, serializeError } from "@/lib/log";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -31,6 +32,10 @@ export async function POST(
           headers: { "Retry-After": String(rl.retryAfter ?? 60) },
         }
       );
+    }
+
+    if (!(await verifySessionAccess(req, sessionId))) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const body = await req.json().catch(() => ({}));

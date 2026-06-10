@@ -5,6 +5,8 @@ import { Loader2, X } from "lucide-react";
 
 interface Props {
   sessionId: string;
+  /** Per-session access token required by the customer session sub-routes. */
+  sessionToken?: string | null;
   /**
    * Called after the contact + notify-support flow succeeds. The widget
    * itself doesn't need to render a confirmation — the notify-support
@@ -21,11 +23,14 @@ interface Props {
  *  2. POST /api/sessions/[id]/notify-support to email SUPPORT_INBOX and
  *     drop a customer-facing AI confirmation.
  */
-export default function EmailCaptureForm({ sessionId, onCaptured, onClose }: Props) {
+export default function EmailCaptureForm({ sessionId, sessionToken, onCaptured, onClose }: Props) {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const authHeaders = (base: Record<string, string> = {}): Record<string, string> =>
+    sessionToken ? { ...base, "x-session-token": sessionToken } : base;
 
   const submit = async () => {
     setError(null);
@@ -38,7 +43,7 @@ export default function EmailCaptureForm({ sessionId, onCaptured, onClose }: Pro
     try {
       const contactRes = await fetch(`/api/sessions/${sessionId}/contact`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           email: trimmedEmail,
           name: name.trim() || undefined,
@@ -54,7 +59,7 @@ export default function EmailCaptureForm({ sessionId, onCaptured, onClose }: Pro
 
       const notifyRes = await fetch(
         `/api/sessions/${sessionId}/notify-support`,
-        { method: "POST" }
+        { method: "POST", headers: authHeaders() }
       );
       if (!notifyRes.ok) {
         const data = await notifyRes.json().catch(() => ({}));

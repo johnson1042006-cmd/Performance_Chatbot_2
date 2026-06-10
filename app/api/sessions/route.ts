@@ -3,13 +3,41 @@ import { db } from "@/lib/db";
 import { sessions, users, messages, chatEvents } from "@/lib/db/schema";
 import { asc, desc, eq, ne, sql, inArray, and } from "drizzle-orm";
 import { maybeLazyTick } from "@/lib/sessions/lazyTick";
+import {
+  generateSessionToken,
+  sessionTokenCookieName,
+  SESSION_TOKEN_MAX_AGE,
+} from "@/lib/sessions/verifySessionToken";
 import { enforce, getClientIp } from "@/lib/rateLimit";
 import { extractGeoFromHeaders } from "@/lib/utils/geo";
+import { requireStaff } from "@/lib/auth/requireStaff";
 import { log, serializeError } from "@/lib/log";
+
+// SameSite=None because the widget runs in an iframe on the storefront domain;
+// Secure is required alongside it (browsers drop SameSite=None without Secure).
+// httpOnly keeps the token out of page JS; the widget also receives the raw
+// token in the JSON body for the x-session-token header / sendBeacon ?st=.
+function setSessionTokenCookie(
+  res: NextResponse,
+  sessionId: string,
+  rawToken: string
+): void {
+  res.cookies.set(sessionTokenCookieName(sessionId), rawToken, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "none",
+    maxAge: SESSION_TOKEN_MAX_AGE,
+    path: "/",
+  });
+}
 
 export async function GET() {
   const requestId = crypto.randomUUID();
   try {
+    // Queue list leaks every active session — staff only.
+    const guard = await requireStaff();
+    if (guard instanceof NextResponse) return guard;
+
     // Lazy tick: expire stale sessions and process AI claims (debounced)
     await maybeLazyTick();
 
@@ -159,13 +187,20 @@ export async function POST(req: NextRequest) {
       // message, causing the chat API to return 410 "This conversation has
       // ended."
       const now = new Date();
+      // Rotate the access token on resume so the widget always receives a
+      // usable token to send via the x-session-token header (the prior raw
+      // token is not recoverable from its hash).
+      const { raw, hash } = generateSessionToken();
       await db
         .update(sessions)
-        .set({ lastCustomerActivityAt: now })
+        .set({ lastCustomerActivityAt: now, tokenHash: hash })
         .where(eq(sessions.id, existing[0].id));
-      return NextResponse.json({
+      const res = NextResponse.json({
         session: { ...existing[0], lastCustomerActivityAt: now },
+        sessionToken: raw,
       });
+      setSessionTokenCookie(res, existing[0].id, raw);
+      return res;
     }
 
     // Phase 4: capture Vercel-derived IP geolocation for agent-only context.
@@ -189,17 +224,21 @@ export async function POST(req: NextRequest) {
       // Swallow — geolocation is best-effort.
     }
 
+    const { raw, hash } = generateSessionToken();
     const [session] = await db
       .insert(sessions)
       .values({
         customerIdentifier: effectiveId,
         pageContext,
         status: "waiting",
+        tokenHash: hash,
         ...geoColumns,
       })
       .returning();
 
-    return NextResponse.json({ session }, { status: 201 });
+    const res = NextResponse.json({ session, sessionToken: raw }, { status: 201 });
+    setSessionTokenCookie(res, session.id, raw);
+    return res;
   } catch (error) {
     log.error("sessions.create_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(

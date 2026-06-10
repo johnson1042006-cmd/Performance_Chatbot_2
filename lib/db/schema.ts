@@ -120,6 +120,11 @@ export const sessions = pgTable("sessions", {
     .notNull()
     .default(sql`'{}'::text[]`),
   resolved: boolean("resolved"),
+  // SHA-256 hash of the per-session customer access token. Minted on session
+  // creation; the raw token is returned to the widget (cookie + JSON) and
+  // required by customer-facing [id]/* routes. Nullable for legacy sessions
+  // created before this column existed (legacy grace — see verifySessionToken).
+  tokenHash: text("token_hash"),
 }, (table) => ({
   aiClaimDueIdx: index("sessions_ai_claim_due_idx").on(table.aiClaimDueAt),
   customerIdentifierIdx: index("sessions_customer_identifier_idx").on(table.customerIdentifier),

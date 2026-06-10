@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { sessions, messages, users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { maybeLazyTick } from "@/lib/sessions/lazyTick";
+import { verifySessionAccess } from "@/lib/sessions/verifySessionToken";
 import { log, serializeError } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +16,10 @@ export async function GET(
 ) {
   const requestId = crypto.randomUUID();
   try {
+    if (!(await verifySessionAccess(req, params.id))) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     // Lazy tick (debounced) — this route is polled while a customer waits.
     await maybeLazyTick();
 

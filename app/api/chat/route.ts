@@ -15,6 +15,10 @@ import {
 import { runAiTurn } from "@/lib/ai/runAi";
 import { redactPII } from "@/lib/utils/redactPII";
 import { enforce, getClientIp } from "@/lib/rateLimit";
+import {
+  verifySessionAccess,
+  sessionTokenCookieName,
+} from "@/lib/sessions/verifySessionToken";
 import { log, serializeError } from "@/lib/log";
 import { createSseStream, SSE_RESPONSE_HEADERS, wantsSse } from "@/lib/ai/sse";
 
@@ -83,6 +87,22 @@ export async function POST(req: NextRequest) {
             headers: { "Retry-After": String(rl.retryAfter ?? 60) },
           }
         );
+      }
+
+      // Soft session-token check during rollout: verify when the widget sends
+      // a token, otherwise just warn. Flip to hard enforcement once the widget
+      // update has shipped so live chats can't break mid-flight.
+      const hasToken = !!(
+        req.cookies.get(sessionTokenCookieName(sessionId))?.value ||
+        req.headers.get("x-session-token") ||
+        req.nextUrl.searchParams.get("st")
+      );
+      if (hasToken) {
+        if (!(await verifySessionAccess(req, sessionId))) {
+          log.warn("chat.session_token_invalid", { requestId, sessionId });
+        }
+      } else {
+        log.warn("chat.session_token_absent", { requestId, sessionId });
       }
     }
 

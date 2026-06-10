@@ -137,6 +137,32 @@ export default function ChatWidget() {
   const dbSessionIdRef = useRef<string | null>(null);
   dbSessionIdRef.current = dbSessionId;
 
+  // Per-session access token returned by POST /api/sessions. Sent as the
+  // x-session-token header on session sub-route fetches (and ?st= on the
+  // sendBeacon /end call, which can't set headers). Held in a ref so the
+  // various effect/callback fetches always read the latest value.
+  const [sessionToken, setSessionToken] = useState<string | null>(null);
+  const sessionTokenRef = useRef<string | null>(null);
+  sessionTokenRef.current = sessionToken;
+
+  const applySessionToken = useCallback(
+    (data: { sessionToken?: unknown } | null | undefined) => {
+      if (data && typeof data.sessionToken === "string" && data.sessionToken) {
+        sessionTokenRef.current = data.sessionToken;
+        setSessionToken(data.sessionToken);
+      }
+    },
+    []
+  );
+
+  const tokenHeaders = useCallback(
+    (base: Record<string, string> = {}): Record<string, string> =>
+      sessionTokenRef.current
+        ? { ...base, "x-session-token": sessionTokenRef.current }
+        : base,
+    []
+  );
+
   // ── Page context from parent frame ─────────────────────────────────────────
   useEffect(() => {
     const handler = (event: MessageEvent) => {
@@ -190,13 +216,16 @@ export default function ChatWidget() {
         const data = await res.json();
         if (data.session?.id) {
           setDbSessionId(data.session.id);
+          applySessionToken(data);
           const status = data.session.status;
           if (status === "active_human") setSessionState("active_human");
           else if (status === "active_ai") setSessionState("active_ai");
           else if (status === "waiting") setSessionState("waiting");
           else if (status === "closed") setSessionState("closed");
 
-          const msgRes = await fetch(`/api/sessions/${data.session.id}/messages`);
+          const msgRes = await fetch(`/api/sessions/${data.session.id}/messages`, {
+            headers: tokenHeaders(),
+          });
           if (msgRes.ok) {
             const msgData = await msgRes.json();
             if (msgData.messages?.length) setMessages(msgData.messages);
@@ -207,7 +236,7 @@ export default function ChatWidget() {
       }
     }
     initSession();
-  }, [customerIdentifier]);
+  }, [customerIdentifier, applySessionToken, tokenHeaders]);
 
   // ── Customer heartbeat ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -217,11 +246,19 @@ export default function ChatWidget() {
     if (sessionState === "closed") return;
 
     const ping = () => {
-      fetch(`/api/sessions/${dbSessionId}/heartbeat`, { method: "POST" }).catch(() => {});
+      fetch(`/api/sessions/${dbSessionId}/heartbeat`, {
+        method: "POST",
+        headers: tokenHeaders(),
+      }).catch(() => {});
     };
 
     const sendEnd = () => {
-      navigator.sendBeacon(`/api/sessions/${dbSessionId}/end`);
+      // sendBeacon can't set headers — pass the token via the ?st= query param.
+      const tok = sessionTokenRef.current;
+      const url = `/api/sessions/${dbSessionId}/end${
+        tok ? `?st=${encodeURIComponent(tok)}` : ""
+      }`;
+      navigator.sendBeacon(url);
     };
 
     // Start heartbeat
@@ -247,7 +284,7 @@ export default function ChatWidget() {
       document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener("beforeunload", sendEnd);
     };
-  }, [dbSessionId, sessionState]);
+  }, [dbSessionId, sessionState, tokenHeaders]);
 
   // ── Polling fallback for missed Pusher events ───────────────────────────────
   useEffect(() => {
@@ -255,7 +292,9 @@ export default function ChatWidget() {
     const POLL_MS = 8_000;
     const poll = async () => {
       try {
-        const res = await fetch(`/api/sessions/${dbSessionId}/messages`);
+        const res = await fetch(`/api/sessions/${dbSessionId}/messages`, {
+          headers: tokenHeaders(),
+        });
         if (!res.ok) return;
         const data = await res.json();
         const fetched: Message[] = data.messages ?? [];
@@ -273,7 +312,7 @@ export default function ChatWidget() {
     };
     const tid = setInterval(poll, POLL_MS);
     return () => clearInterval(tid);
-  }, [dbSessionId]);
+  }, [dbSessionId, tokenHeaders]);
 
   // ── Session-status poll (runs only while waiting for a claim) ───────────────
   useEffect(() => {
@@ -281,7 +320,9 @@ export default function ChatWidget() {
     const poll = async () => {
       if (document.visibilityState !== "visible") return;
       try {
-        const res = await fetch(`/api/sessions/${dbSessionId}`);
+        const res = await fetch(`/api/sessions/${dbSessionId}`, {
+          headers: tokenHeaders(),
+        });
         if (!res.ok) return;
         const data = await res.json();
         const kind = data.session?.claimedByKind as string | null | undefined;
@@ -293,7 +334,7 @@ export default function ChatWidget() {
     };
     const tid = setInterval(poll, 4_000);
     return () => clearInterval(tid);
-  }, [dbSessionId, sessionState]);
+  }, [dbSessionId, sessionState, tokenHeaders]);
 
   // Merge a single real (non-temp) message into the list. Drops it if the
   // ID is already present, otherwise replaces the FIRST matching temp by
@@ -515,10 +556,10 @@ export default function ChatWidget() {
     try {
       res = await fetch("/api/chat", {
         method: "POST",
-        headers: {
+        headers: tokenHeaders({
           "Content-Type": "application/json",
           Accept: "text/event-stream",
-        },
+        }),
         body: JSON.stringify({ message: content, sessionId: sid, pageContext: ctx }),
       });
     } catch {
@@ -670,6 +711,7 @@ export default function ChatWidget() {
           const sData = await sRes.json().catch(() => ({}));
           if (sData.session?.id) {
             setDbSessionId(sData.session.id);
+            applySessionToken(sData);
             return sData.session.id as string;
           }
           return null;
@@ -727,6 +769,7 @@ export default function ChatWidget() {
         if (sData.session?.id) {
           sid = sData.session.id;
           setDbSessionId(sid);
+          applySessionToken(sData);
         }
       }
 
@@ -768,7 +811,7 @@ export default function ChatWidget() {
             "/api/chat",
             {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: tokenHeaders({ "Content-Type": "application/json" }),
               body: JSON.stringify({ message: content, sessionId: sid, pageContext }),
             },
             CHAT_POST_MS
@@ -856,7 +899,10 @@ export default function ChatWidget() {
               SESSION_FETCH_MS
             );
             const sData = await sRes.json().catch(() => ({}));
-            if (sData.session?.id) setDbSessionId(sData.session.id);
+            if (sData.session?.id) {
+              setDbSessionId(sData.session.id);
+              applySessionToken(sData);
+            }
           } catch {
             appendLocalError(
               "We couldn't start your chat session. Please try again."
@@ -873,7 +919,7 @@ export default function ChatWidget() {
         try {
           const res = await fetch(
             `/api/sessions/${dbSessionId}/request-human`,
-            { method: "POST" }
+            { method: "POST", headers: tokenHeaders() }
           );
           const data = await res.json().catch(() => ({}));
           if (data.status === "queued_for_human") {
@@ -916,7 +962,7 @@ export default function ChatWidget() {
       try {
         const res = await fetch(`/api/sessions/${dbSessionIdRef.current}/tire-escalate`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: tokenHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({ tire: tireContext }),
         });
         const data = await res.json().catch(() => ({}));
@@ -934,7 +980,7 @@ export default function ChatWidget() {
         appendLocalError("Network error. Please try again.");
       }
     },
-    [appendLocalError, tireContext]
+    [appendLocalError, tireContext, tokenHeaders]
   );
 
   // ── Status banner for the customer ─────────────────────────────────────────
@@ -1024,6 +1070,7 @@ export default function ChatWidget() {
         {chipForm === "email_capture" && dbSessionId && (
           <EmailCaptureForm
             sessionId={dbSessionId}
+            sessionToken={sessionToken}
             onClose={() => setChipForm("none")}
           />
         )}
@@ -1079,6 +1126,7 @@ export default function ChatWidget() {
         {sessionState === "closed" && dbSessionId ? (
           <EndOfSessionCard
             sessionId={dbSessionId}
+            sessionToken={sessionToken}
             onStartNew={startNewSession}
           />
         ) : (

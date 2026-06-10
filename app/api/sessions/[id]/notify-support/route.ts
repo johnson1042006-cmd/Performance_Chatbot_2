@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { sendSupportNotification } from "@/lib/email/transcript";
 import { getPusher } from "@/lib/pusher/server";
 import { enforce, getClientIp } from "@/lib/rateLimit";
+import { verifySessionAccess } from "@/lib/sessions/verifySessionToken";
 import { log, serializeError } from "@/lib/log";
 
 const UUID_RE =
@@ -37,6 +38,10 @@ export async function POST(
           headers: { "Retry-After": String(rl.retryAfter ?? 60) },
         }
       );
+    }
+
+    if (!(await verifySessionAccess(req, sessionId))) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const [sessionRow] = await db

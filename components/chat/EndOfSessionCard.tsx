@@ -5,6 +5,8 @@ import { ThumbsUp, ThumbsDown, Mail, Loader2, Check } from "lucide-react";
 
 interface Props {
   sessionId: string;
+  /** Per-session access token required by the customer session sub-routes. */
+  sessionToken?: string | null;
   onStartNew: () => void;
 }
 
@@ -20,13 +22,16 @@ type EmailState = "idle" | "form" | "submitting" | "submitted";
  * Each flow has its own success state so the customer can do both, or
  * neither. The "Start a new chat" button is preserved so they can re-engage.
  */
-export default function EndOfSessionCard({ sessionId, onStartNew }: Props) {
+export default function EndOfSessionCard({ sessionId, sessionToken, onStartNew }: Props) {
   const [rating, setRating] = useState<"up" | "down" | null>(null);
   const [comment, setComment] = useState("");
   const [feedbackState, setFeedbackState] = useState<FeedbackState>("pending");
   const [emailState, setEmailState] = useState<EmailState>("idle");
   const [emailValue, setEmailValue] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  const authHeaders = (base: Record<string, string> = {}): Record<string, string> =>
+    sessionToken ? { ...base, "x-session-token": sessionToken } : base;
 
   const submitFeedback = async (chosenRating: "up" | "down") => {
     setRating(chosenRating);
@@ -35,7 +40,7 @@ export default function EndOfSessionCard({ sessionId, onStartNew }: Props) {
     try {
       const res = await fetch(`/api/sessions/${sessionId}/feedback`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           rating: chosenRating,
           comment: comment.trim() || undefined,
@@ -67,7 +72,7 @@ export default function EndOfSessionCard({ sessionId, onStartNew }: Props) {
         `/api/sessions/${sessionId}/transcript-email`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: authHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({ email: trimmed, consent: true }),
         }
       );

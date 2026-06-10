@@ -494,3 +494,83 @@ describe("Public route input validation", () => {
     expect(res.status).toBe(400);
   });
 });
+
+// =======================================================================
+// 5. Customer session-token auth (FIX-6) — messages GET
+// =======================================================================
+describe("Customer session-token auth", () => {
+  const SID = "11111111-1111-4111-8111-111111111111";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetDbMocks();
+  });
+
+  function makeReqWithHeaders(
+    url: string,
+    headers: Record<string, string> = {}
+  ) {
+    const { NextRequest } = require("next/server");
+    return new NextRequest(url, { method: "GET", headers });
+  }
+
+  it("messages GET without a token returns 401", async () => {
+    await mockSession(null);
+    // tokenHash lookup returns a real (non-null) hash → token required.
+    mockDbSelect.mockResolvedValueOnce([{ tokenHash: "deadbeef" }]);
+
+    const { GET } = await import("@/app/api/sessions/[id]/messages/route");
+    const res = await GET(
+      makeReqWithHeaders(`http://localhost/api/sessions/${SID}/messages`),
+      { params: { id: SID } }
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("messages GET with the correct token returns 200", async () => {
+    await mockSession(null);
+    const { generateSessionToken } = await import(
+      "@/lib/sessions/verifySessionToken"
+    );
+    const { raw, hash } = generateSessionToken();
+    // 1st select = tokenHash lookup; later selects default to [] (messages).
+    mockDbSelect.mockResolvedValueOnce([{ tokenHash: hash }]);
+
+    const { GET } = await import("@/app/api/sessions/[id]/messages/route");
+    const res = await GET(
+      makeReqWithHeaders(`http://localhost/api/sessions/${SID}/messages`, {
+        "x-session-token": raw,
+      }),
+      { params: { id: SID } }
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("messages GET with a staff NextAuth session and no token returns 200", async () => {
+    await mockSession("support_agent");
+
+    const { GET } = await import("@/app/api/sessions/[id]/messages/route");
+    const res = await GET(
+      makeReqWithHeaders(`http://localhost/api/sessions/${SID}/messages`),
+      { params: { id: SID } }
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("messages GET for a legacy session (null tokenHash) returns 200 and warns", async () => {
+    await mockSession(null);
+    mockDbSelect.mockResolvedValueOnce([{ tokenHash: null }]);
+
+    const { log } = await import("@/lib/log");
+    const { GET } = await import("@/app/api/sessions/[id]/messages/route");
+    const res = await GET(
+      makeReqWithHeaders(`http://localhost/api/sessions/${SID}/messages`),
+      { params: { id: SID } }
+    );
+    expect(res.status).toBe(200);
+    expect(log.warn).toHaveBeenCalledWith(
+      "session.token_legacy_grace",
+      expect.objectContaining({ sessionId: SID })
+    );
+  });
+});
