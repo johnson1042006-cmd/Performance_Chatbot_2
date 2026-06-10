@@ -51,6 +51,9 @@ const EXPECTED_RULE_IDS = [
   "catalog_confirms_availability",
   "no_invent_colorways",
   "no_search_narration",
+  "explicit_escalation",
+  "no_brand_knowledge_fill",
+  "decline_off_domain",
 ];
 
 describe("AI_BEHAVIOR_RULES", () => {
