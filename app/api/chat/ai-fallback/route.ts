@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { sessions, messages } from "@/lib/db/schema";
 import { and, desc, eq } from "drizzle-orm";
-import { runAiTurn } from "@/lib/ai/runAi";
+import { runAiTurn, isHumanTakeoverError } from "@/lib/ai/runAi";
+import { verifySessionAccess } from "@/lib/sessions/verifySessionToken";
 import { CALL_CLAUDE_ERROR_MESSAGE } from "@/lib/ai/callClaude";
 import { claimByAi } from "@/lib/sessions/state";
 import { enforce, getClientIp } from "@/lib/rateLimit";
@@ -19,7 +20,7 @@ export async function POST(req: NextRequest) {
     // Same class of IP limit as /api/chat — this route triggers a paid Claude
     // turn, so it must not be an unmetered spend vector.
     const ip = getClientIp(req);
-    const rl = await enforce(`ai-fallback:${ip}`, 10, 60);
+    const rl = await enforce(`ai-fallback:${ip}`, 10, 60, { failClosed: true });
     if (!rl.ok) {
       return NextResponse.json(
         { error: "rate_limited" },
@@ -52,6 +53,12 @@ export async function POST(req: NextRequest) {
         { error: "Session not found" },
         { status: 404 }
       );
+    }
+
+    // This route triggers a paid Claude turn on an arbitrary session — the
+    // caller must own the session (token) or be staff.
+    if (!(await verifySessionAccess(req, sessionId))) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     if (session.claimedByKind === "human") {
@@ -130,6 +137,10 @@ export async function POST(req: NextRequest) {
           });
           send({ event: "done", data: {} });
         } catch (err) {
+          if (isHumanTakeoverError(err)) {
+            send({ event: "done", data: {} });
+            return;
+          }
           log.error("chat.ai_fallback.sse_failed", {
             requestId,
             sessionId,
@@ -153,6 +164,12 @@ export async function POST(req: NextRequest) {
       });
       return NextResponse.json({ message: result.message });
     } catch (err) {
+      if (isHumanTakeoverError(err)) {
+        return NextResponse.json({
+          skipped: true,
+          reason: "Session is handled by a human agent",
+        });
+      }
       const isClaudeFailure =
         err && typeof err === "object" && "isCallClaudeFailure" in err;
       log.error("chat.ai_fallback.claude_failed", {

@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { processDueAiClaims, sweepStaleSessions } from "@/lib/sessions/state";
+import {
+  processDueAiClaims,
+  sweepStaleSessions,
+  releaseStrandedHumanClaims,
+} from "@/lib/sessions/state";
 import { evaluateAlertThresholds } from "@/lib/alerts/evaluator";
 import { log, serializeError } from "@/lib/log";
 
@@ -26,6 +30,16 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    // Stranded-claim release runs BEFORE processDueAiClaims so a session
+    // freed with an already-due timer gets an AI reply on this same tick.
+    const strandedReleased = await releaseStrandedHumanClaims().catch((err) => {
+      log.error("cron.stranded_release_failed", {
+        requestId,
+        error: serializeError(err),
+      });
+      return 0;
+    });
+
     const [staleClosed, aiClaimed, alerts] =
       await Promise.allSettled([
         sweepStaleSessions(),
@@ -36,6 +50,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       success: true,
       staleClosed: staleClosed.status === "fulfilled" ? staleClosed.value : 0,
+      strandedReleased,
       aiClaimed: aiClaimed.status === "fulfilled" ? true : false,
       alerts: alerts.status === "fulfilled" ? alerts.value : [],
     });

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
+import { useToast } from "@/components/ui/Toast";
 import { UserPlus } from "lucide-react";
 
 interface User {
@@ -22,6 +23,7 @@ interface TeamTableProps {
 }
 
 export default function TeamTable({ onInvite }: TeamTableProps) {
+  const { addToast } = useToast();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -73,6 +75,10 @@ export default function TeamTable({ onInvite }: TeamTableProps) {
       fetchUsers();
     } catch (error) {
       console.error("Failed to toggle user:", error);
+      addToast(
+        `Failed to ${currentActive ? "deactivate" : "activate"} user. Please try again.`,
+        "error"
+      );
     }
   };
 
@@ -116,6 +122,17 @@ export default function TeamTable({ onInvite }: TeamTableProps) {
               <tr>
                 <td colSpan={7} className="px-6 py-8 text-center text-text-secondary">
                   Loading...
+                </td>
+              </tr>
+            ) : users.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-6 py-10 text-center">
+                  <p className="text-sm font-medium text-text-primary mb-1">
+                    No team members yet
+                  </p>
+                  <p className="text-xs text-text-secondary">
+                    Invite your first agent to start handling chats together.
+                  </p>
                 </td>
               </tr>
             ) : (

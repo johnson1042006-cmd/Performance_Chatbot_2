@@ -2,6 +2,7 @@
 
 import { useRef, useEffect } from "react";
 import Badge from "@/components/ui/Badge";
+import { Skeleton } from "@/components/ui/Skeleton";
 import MarkdownMessage from "@/components/chat/MarkdownMessage";
 
 interface Message {
@@ -14,9 +15,11 @@ interface Message {
 
 interface MessageThreadProps {
   messages: Message[];
+  /** Shows skeleton bubbles while the initial fetch is in flight. */
+  loading?: boolean;
 }
 
-export default function MessageThread({ messages }: MessageThreadProps) {
+export default function MessageThread({ messages, loading = false }: MessageThreadProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -25,6 +28,22 @@ export default function MessageThread({ messages }: MessageThreadProps) {
       behavior: "smooth",
     });
   }, [messages]);
+
+  if (loading && messages.length === 0) {
+    return (
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        <div className="flex justify-end">
+          <Skeleton className="h-10 w-1/2 rounded-xl" />
+        </div>
+        <div className="flex justify-start">
+          <Skeleton className="h-16 w-2/3 rounded-xl" />
+        </div>
+        <div className="flex justify-end">
+          <Skeleton className="h-10 w-2/5 rounded-xl" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">

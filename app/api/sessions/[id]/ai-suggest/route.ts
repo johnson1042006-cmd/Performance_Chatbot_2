@@ -55,7 +55,9 @@ export async function POST(
     }
 
     // Per-agent rate limit: 30 suggestions per hour.
-    const rl = await enforce(`ai-suggest:${auth.user.id}`, 30, 3600);
+    const rl = await enforce(`ai-suggest:${auth.user.id}`, 30, 3600, {
+      failClosed: true,
+    });
     if (!rl.ok) {
       return NextResponse.json(
         { error: "rate_limited", retryAfter: rl.retryAfter ?? 60 },

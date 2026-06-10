@@ -429,7 +429,7 @@ async function setupWidgetWithPusherMock(
   sessionId: string
 ): Promise<(event: string, data: Record<string, unknown>) => void> {
   let wsRoute: WebSocketRoute | null = null;
-  const channelName = `session-${sessionId}`;
+  const channelName = `private-session-${sessionId}`;
 
   // Intercept the Pusher WebSocket before page.goto so it is already in place
   // when the widget subscribes. The handler is called on connection open — no
@@ -461,6 +461,16 @@ async function setupWidgetWithPusherMock(
       }
     });
   });
+
+  // Private-channel auth — return a fake signature so pusher-js proceeds to
+  // send pusher:subscribe over the (mocked) WebSocket.
+  await page.route("**/api/pusher/auth", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ auth: "test-key:test-signature" }),
+    })
+  );
 
   // Session creation (POST /api/sessions is called on widget mount).
   await page.route("**/api/sessions", async (route) => {

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { X } from "lucide-react";
 import TranscriptList from "./TranscriptList";
 
@@ -19,11 +20,22 @@ export default function TranscriptModal({
   title = "Transcript",
   onClose,
 }: TranscriptModalProps) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
     <div
       className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
       onClick={onClose}
       data-testid="transcript-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
     >
       <div
         className="bg-surface rounded-card shadow-card-md max-w-3xl w-full max-h-[80vh] flex flex-col"

@@ -8,6 +8,7 @@ import { releaseToQueue } from "@/lib/sessions/state";
 import { anyAgentsOnline } from "@/lib/presence";
 import { knowledgeBase } from "@/lib/db/schema";
 import { getPusher } from "@/lib/pusher/server";
+import { sessionChannel, DASHBOARD_CHANNEL } from "@/lib/pusher/channels";
 import { log, serializeError } from "@/lib/log";
 
 const DEFAULT_FALLBACK_SECONDS = 60;
@@ -89,10 +90,10 @@ export async function POST(req: NextRequest) {
 
     try {
       const pusher = getPusher();
-      await pusher.trigger(`session-${sessionId}`, "session-released", {
+      await pusher.trigger(sessionChannel(sessionId), "session-released", {
         agentId: session.user.id,
       });
-      await pusher.trigger("dashboard", "session-released", { sessionId });
+      await pusher.trigger(DASHBOARD_CHANNEL, "session-released", { sessionId });
     } catch (pusherError) {
       log.warn("sessions.release.pusher_failed", {
         requestId,

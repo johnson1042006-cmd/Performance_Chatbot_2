@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Wrench, AlertTriangle } from "lucide-react";
+import { sessionChannel as sessionChannelName } from "@/lib/pusher/channels";
 
 interface TraceEvent {
   id: string;
@@ -40,7 +41,7 @@ export default function AITrace({ sessionId }: AITraceProps) {
   const [events, setEvents] = useState<TraceEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const channelRef = useRef<{ unbind?: () => void; unsubscribe?: () => void } | null>(null);
+  const channelRef = useRef<{ unbind?: () => void } | null>(null);
 
   const fetchEvents = useCallback(async () => {
     setLoading(true);
@@ -66,29 +67,33 @@ export default function AITrace({ sessionId }: AITraceProps) {
 
   // Re-fetch when a new AI message arrives (so newly persisted tool_call /
   // auto_escalated rows appear without a manual refresh).
+  //
+  // The `session-${sessionId}` channel is SHARED with ChatPanel. Cleanup must
+  // therefore unbind only this component's own handler (passing the handler
+  // reference to unbind) and must NOT unsubscribe the channel — a bare
+  // unbind("new-message") or unsubscribe() here would silently kill the agent
+  // chat thread's live updates.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let pusherInstance: any = null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let channel: any = null;
+    const handler = () => fetchEvents();
 
-    import("@/lib/pusher/client").then(({ getPusherClient }) => {
+    import("@/lib/pusher/client").then(({ acquireChannel, releaseChannel }) => {
       if (cancelled) return;
-      pusherInstance = getPusherClient();
-      channel = pusherInstance.subscribe(`session-${sessionId}`);
-      channel.bind("new-message", () => fetchEvents());
+      const channelName = sessionChannelName(sessionId);
+      const channel = acquireChannel(channelName);
+      channel.bind("new-message", handler);
       channelRef.current = {
-        unbind: () => channel?.unbind("new-message"),
-        unsubscribe: () => pusherInstance?.unsubscribe(`session-${sessionId}`),
+        unbind: () => {
+          channel.unbind("new-message", handler);
+          releaseChannel(channelName);
+        },
       };
     });
 
     return () => {
       cancelled = true;
       channelRef.current?.unbind?.();
-      channelRef.current?.unsubscribe?.();
       channelRef.current = null;
     };
   }, [open, sessionId, fetchEvents]);

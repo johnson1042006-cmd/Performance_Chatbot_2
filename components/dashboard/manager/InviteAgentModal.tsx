@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Button from "@/components/ui/Button";
 import { X } from "lucide-react";
 
@@ -23,6 +23,15 @@ export default function InviteAgentModal({
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
 
   if (!open) return null;
 
@@ -55,7 +64,12 @@ export default function InviteAgentModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Invite Team Member"
+    >
       <div
         className="absolute inset-0 bg-black/30"
         onClick={onClose}
@@ -67,6 +81,7 @@ export default function InviteAgentModal({
           </h2>
           <button
             onClick={onClose}
+            aria-label="Close dialog"
             className="text-text-secondary hover:text-text-primary transition-colors"
           >
             <X size={18} />
@@ -107,18 +122,22 @@ export default function InviteAgentModal({
           </div>
           <div>
             <label className="block text-sm font-medium text-text-primary mb-1">
-              Password
+              Temporary password
             </label>
             <input
               type="password"
               required
-              minLength={6}
+              minLength={12}
               value={form.password}
               onChange={(e) =>
                 setForm((f) => ({ ...f, password: e.target.value }))
               }
               className="w-full px-3 py-2 text-sm border border-border rounded-button focus:outline-none focus:ring-2 focus:ring-accent/20"
             />
+            <p className="mt-1 text-xs text-text-secondary">
+              At least 12 characters with a letter and a number. They&apos;ll
+              be asked to set their own password on first sign-in.
+            </p>
           </div>
           <div>
             <label className="block text-sm font-medium text-text-primary mb-1">

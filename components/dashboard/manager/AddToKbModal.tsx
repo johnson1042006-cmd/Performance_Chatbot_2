@@ -52,6 +52,14 @@ export default function AddToKbModal({
     [title, existing]
   );
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   const handleSave = async () => {
     if (saving) return;
     setSaving(true);
@@ -77,6 +85,9 @@ export default function AddToKbModal({
       className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
       onClick={onClose}
       data-testid="add-to-kb-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Add to knowledge base"
     >
       <div
         className="bg-surface rounded-card shadow-card-md max-w-2xl w-full max-h-[90vh] flex flex-col"

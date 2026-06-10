@@ -6,6 +6,7 @@ import { sessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { claimByHuman } from "@/lib/sessions/state";
 import { getPusher } from "@/lib/pusher/server";
+import { sessionChannel, DASHBOARD_CHANNEL } from "@/lib/pusher/channels";
 import { log, serializeError } from "@/lib/log";
 
 export async function POST(req: NextRequest) {
@@ -58,12 +59,12 @@ export async function POST(req: NextRequest) {
 
     try {
       const pusher = getPusher();
-      await pusher.trigger(`session-${sessionId}`, "session-claimed", {
+      await pusher.trigger(sessionChannel(sessionId), "session-claimed", {
         agentId: session.user.id,
         agentName: session.user.name,
         kind: "human",
       });
-      await pusher.trigger("dashboard", "session-claimed", {
+      await pusher.trigger(DASHBOARD_CHANNEL, "session-claimed", {
         sessionId,
         agentId: session.user.id,
         agentName: session.user.name,

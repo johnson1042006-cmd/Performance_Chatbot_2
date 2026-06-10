@@ -395,7 +395,10 @@ describe("Business logic security", () => {
   });
 
   it("POST /api/chat allows role:customer without auth (public widget)", async () => {
-    mockDbSelect.mockResolvedValueOnce([{ id: "s1", status: "waiting" }]);
+    // 1st select: verifySessionAccess tokenHash lookup → legacy (null) grace.
+    mockDbSelect
+      .mockResolvedValueOnce([{ tokenHash: null }])
+      .mockResolvedValueOnce([{ id: "s1", status: "waiting" }]);
     mockDbInsert.mockResolvedValueOnce([{
       id: "msg-1", sessionId: "s1", role: "customer",
       content: "hello", sentAt: new Date(),
@@ -432,7 +435,12 @@ describe("Public route input validation", () => {
     expect(res.status).toBe(400);
   });
 
-  it("POST /api/chat returns 404 for non-existent session", async () => {
+  it("POST /api/chat returns 404 for non-existent session (staff caller)", async () => {
+    // Staff NextAuth session passes verifySessionAccess without a db select,
+    // so the 1st select is the route's own session lookup. Anonymous callers
+    // hitting an unknown session get 401 from the token check instead — see
+    // the "Customer session-token auth" suite.
+    await mockSession("support_agent");
     mockDbSelect.mockResolvedValueOnce([]);
     const { POST } = await import("@/app/api/chat/route");
     const res = await POST(makeReq("http://localhost/api/chat", "POST", { message: "hi", sessionId: "nope" }));
@@ -555,6 +563,38 @@ describe("Customer session-token auth", () => {
       { params: { id: SID } }
     );
     expect(res.status).toBe(200);
+  });
+
+  it("POST /api/chat without a token on a tokened session returns 401", async () => {
+    await mockSession(null);
+    // verifySessionAccess tokenHash lookup → real hash, no token provided.
+    mockDbSelect.mockResolvedValueOnce([{ tokenHash: "deadbeef" }]);
+
+    const { POST } = await import("@/app/api/chat/route");
+    const res = await POST(
+      makeReq("http://localhost/api/chat", "POST", {
+        message: "hi",
+        sessionId: SID,
+      })
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /api/chat/ai-fallback without a token on a tokened session returns 401", async () => {
+    await mockSession(null);
+    mockDbSelect
+      // 1st select: route's session lookup
+      .mockResolvedValueOnce([{ id: SID, status: "waiting", claimedByKind: null }])
+      // 2nd select: verifySessionAccess tokenHash lookup
+      .mockResolvedValueOnce([{ tokenHash: "deadbeef" }]);
+
+    const { POST } = await import("@/app/api/chat/ai-fallback/route");
+    const res = await POST(
+      makeReq("http://localhost/api/chat/ai-fallback", "POST", {
+        sessionId: SID,
+      })
+    );
+    expect(res.status).toBe(401);
   });
 
   it("messages GET for a legacy session (null tokenHash) returns 200 and warns", async () => {

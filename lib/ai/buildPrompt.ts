@@ -11,10 +11,13 @@ import {
   extractSubcategoryRequest,
   isLikelyProductFollowUp,
   isSupportedProductType,
+  productHasColor,
+  getMatchingColorLabels,
   type BudgetInfo,
   type SubcategoryValue,
   type SupportedProductType,
 } from "@/lib/search/productSearch";
+import { expandColorQuery } from "@/lib/search/colorSynonyms";
 import { AI_BEHAVIOR_RULES } from "./rules";
 import { PRODUCT_TAXONOMY } from "./taxonomy";
 import type { Message } from "@/lib/db/schema";
@@ -219,7 +222,8 @@ Always call search_products before naming any product not on the current page or
 - SPECIFIC PRODUCT NAME QUERIES: When the customer asks about a particular product/variant/colorway by name (e.g. 'do you have the Yagyo colorway', 'is the Badlands Pro in stock', 'show me the Corsair X'), call search_products with ONLY the distinctive name tokens — do NOT include brand, product type, or context words from earlier turns. Examples: (1) Customer asks 'do you have the yagyo' after discussing Shoei RF-1400 → call search_products({ query: 'yagyo' }). NOT 'Shoei RF-1400 Yagyo' or 'Yagyo colorway helmet'. (2) Customer asks 'is the badlands pro available' after discussing Klim adventure jackets → call search_products({ query: 'badlands pro' }). NOT 'Klim Badlands Pro adventure jacket'. (3) Customer asks 'show me the M10 Deegan' after browsing helmets → call search_products({ query: 'M10 Deegan' }). NOT 'Alpinestars Supertech M10 Deegan helmet'. If the first search returns no results, retry once with even shorter tokens (just the model name, no brand). The catalog has fuzzy substring matching — shorter queries usually work better for specific products.
 - WHEN A CUSTOMER NAMES A SPECIFIC PRODUCT: always call search_products first. Never say "I'm not finding X" or "we don't carry X" or "that's not showing up" based on prior turns or memory. You MUST run a fresh search_products call with the product name as the query before making any claim about availability. If search_products returns it: present it with price, stock, and a link. If search_products genuinely returns nothing matching: say "I searched and couldn't find that exact model — here's what we have that's close:" and show the top results. NEVER skip the search call when a customer names a product. Example: customer says "you dont have the m10 deegan helmet?" — call search_products({query: "m10 deegan helmet"}) BEFORE responding. If the result contains "Alpinestars Supertech M10 Deegan Monster Helmet", present that product. Do not say "I'm not finding it" when search returned it.
 - Call escalate_to_human({reason: 'complex_fitment'}) for ANY question about what specific part fits a specific bike — sprocket counts, chain length, tire sizes for a year/make/model, jet sizes, brake pad fitment, suspension setup, VIN-level lookups. "What X fits my [year] [brand] [model]" is ALWAYS complex_fitment. Verbal "our service team is best equipped" guidance ALONE is insufficient — the tool call is what fires the dashboard alert so the two on-call agents actually see the question. NEVER answer a fitment question without invoking the tool first.
-- Tech-Air SHOPPING questions ('show me tech-air airbags', 'do you have tech-air 5') are NOT service — treat as a normal airbag product query per the airbag_categorization rule. Tech-Air SERVICE questions (recharging, deployed unit, recertification, warranty repair): always include the link https://performancecycle.com/tech-air-service/ in your response — do NOT omit it or reconstruct it.\n`;
+- Tech-Air SHOPPING questions ('show me tech-air airbags', 'do you have tech-air 5') are NOT service — treat as a normal airbag product query per the airbag_categorization rule. Tech-Air SERVICE questions (recharging, deployed unit, recertification, warranty repair): always include the link https://performancecycle.com/tech-air-service/ in your response — do NOT omit it or reconstruct it.
+- WHEN SEARCH RETURNS ZERO RESULTS: after the one retry with shorter tokens, if you still have nothing, you MUST NOT name, describe, or link any product from memory — your training data is not our catalog. Say honestly: "I searched and couldn't find that exact item in our catalog right now." Then do ONE of: (a) run a broader search_products call for the parent category and present what we DO carry, (b) point to the category browse page if the STORE CATALOG section confirms we carry that brand/category, or (c) if neither works, offer the in-chat handoff ("a teammate can dig deeper — want me to flag them?") and call escalate_to_human if they say yes. Zero results NEVER justifies inventing a product, price, or availability claim.\n`;
 
 async function safeFetch<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
   try {
@@ -352,6 +356,15 @@ export async function buildPrompt(
   // "around $400", "$200-$500"). Null when no budget signal is present.
   const budget = extractBudget(effectiveLatest);
 
+  // Color the customer asked for (if any) — used to tag products in the
+  // RELEVANT PRODUCTS section as [COLOR MATCH: ...] / [OTHER COLORS ONLY] so
+  // the color_strict_recommendations rule has real tags to act on.
+  const detectedColor =
+    primarySearch.detectedColor ?? latestSearch.detectedColor;
+  const expandedColorSet = detectedColor
+    ? new Set(expandColorQuery(detectedColor).map((c) => c.toLowerCase()))
+    : null;
+
   // Detect feature keywords (MIPS, waterproof, Bluetooth, etc.) and re-rank so
   // products whose name OR description mention the feature come first. This
   // surfaces feature-matched products whose titles don't contain the feature
@@ -441,6 +454,14 @@ ${AI_BEHAVIOR_RULES.map((r, i) => `${i + 1}. ${r.rule}`).join("\n\n")}
 - If NO products in the list carry the ${featList} tag, say so honestly ("I don't see anything with ${featList} in that category right now — want me to pull up [closest alternative]?").\n`;
   }
 
+  if (detectedColor && !aiToolsEnabled()) {
+    system += `\n## COLOR REQUEST DETECTED\n`;
+    system += `The customer asked for **${detectedColor}**. In the RELEVANT PRODUCTS section below:
+- \`[COLOR MATCH: ...]\` tags list the matching colorway variant names confirmed in that product's data — these are SAFE to recommend for the color request; mention the specific variant name.
+- \`[OTHER COLORS ONLY]\` means the product exists but no ${detectedColor} variant was found — only mention these if there are zero color matches, and say clearly which colors they DO come in (from their Variants list).
+- NEVER claim a product comes in ${detectedColor} unless it carries a [COLOR MATCH] tag or its Variants list explicitly shows that color.\n`;
+  }
+
   if (subcategoryProductType) {
     const TYPE_LABEL: Record<SupportedProductType, string> = {
       helmet: "helmet",
@@ -508,6 +529,18 @@ ${AI_BEHAVIOR_RULES.map((r, i) => `${i + 1}. ${r.rule}`).join("\n\n")}
         if (productMentionsFeature(p, f)) {
           tags.push(`[${f.toUpperCase()} MATCH]`);
         }
+      }
+    }
+    if (expandedColorSet) {
+      if (productHasColor(p, expandedColorSet)) {
+        const labels = getMatchingColorLabels(p, expandedColorSet);
+        tags.push(
+          labels.length > 0
+            ? `[COLOR MATCH: ${labels.join(", ")}]`
+            : `[COLOR MATCH]`
+        );
+      } else {
+        tags.push(`[OTHER COLORS ONLY]`);
       }
     }
     if (p.availability === "disabled") {

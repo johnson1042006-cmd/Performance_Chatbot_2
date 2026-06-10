@@ -315,6 +315,8 @@ describe("buildPrompt", () => {
     extractDiscussedProductSubject: vi.fn().mockReturnValue(null),
     extractSubcategoryRequest: vi.fn().mockReturnValue(null),
     isSupportedProductType: vi.fn().mockReturnValue(false),
+    productHasColor: vi.fn().mockReturnValue(false),
+    getMatchingColorLabels: vi.fn().mockReturnValue([]),
   }));
 
   vi.mock("@/lib/search/pairingSearch", () => ({
@@ -365,6 +367,37 @@ describe("buildPrompt", () => {
       role: "user",
       content: "hello",
     });
+  });
+
+  it("tags products with [COLOR MATCH]/[OTHER COLORS ONLY] when a color is detected", async () => {
+    const makeProduct = (id: number, name: string) => ({
+      id, name, sku: `P-${id}`, description: "",
+      price: 100, sale_price: 0, retail_price: 0, calculated_price: 100,
+      inventory_level: 5, inventory_tracking: "product",
+      availability: "available", is_visible: true, categories: [],
+      brand_id: 1, custom_url: { url: `/p-${id}/` }, variants: [], images: [],
+    });
+    const blueHelmet = makeProduct(1, "Blue Helmet");
+    const redHelmet = makeProduct(2, "Red Helmet");
+
+    const search = await import("@/lib/search/productSearch");
+    (search.searchProducts as any).mockResolvedValue({
+      products: [blueHelmet, redHelmet],
+      detectedColor: "blue",
+    });
+    (search.productHasColor as any).mockImplementation(
+      (p: { id: number }) => p.id === 1
+    );
+    (search.getMatchingColorLabels as any).mockImplementation(
+      (p: { id: number }) => (p.id === 1 ? ["Cobalt Blue"] : [])
+    );
+
+    const { buildPrompt } = await import("../buildPrompt");
+    const result = await buildPrompt("session-1", "show me a blue helmet");
+
+    expect(result.system).toContain("## COLOR REQUEST DETECTED");
+    expect(result.system).toContain("[COLOR MATCH: Cobalt Blue]");
+    expect(result.system).toContain("[OTHER COLORS ONLY]");
   });
 
   it("includes all AI behavior rules in numbered format", async () => {

@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import Card from "@/components/ui/Card";
 import Link from "next/link";
-import { ThumbsDown, ThumbsUp } from "lucide-react";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { ThumbsDown, ThumbsUp, AlertTriangle } from "lucide-react";
 import {
   ResponsiveContainer,
   LineChart,
@@ -32,13 +33,46 @@ interface CsatResponse {
 
 export default function CsatCard() {
   const [data, setData] = useState<CsatResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     fetch("/api/admin/csat?days=30", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => (r.ok ? r.json() : Promise.reject(r)))
       .then((d) => setData(d))
-      .catch(() => setData(null));
+      .catch(() => {
+        setData(null);
+        setLoadError(true);
+      })
+      .finally(() => setLoading(false));
   }, []);
+
+  if (loading) {
+    return (
+      <Card className="h-full">
+        <div className="space-y-3">
+          <Skeleton className="h-4 w-1/3" />
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-3 w-2/3" />
+        </div>
+      </Card>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <Card className="h-full">
+        <h3 className="font-semibold text-text-primary text-sm mb-2">
+          CSAT (30 days)
+        </h3>
+        <div className="flex items-center gap-2 text-sm text-text-secondary">
+          <AlertTriangle size={14} className="text-amber-500 shrink-0" />
+          Couldn&apos;t load CSAT data. Refresh to try again.
+        </div>
+      </Card>
+    );
+  }
 
   const csatPct = data?.csat_pct ?? 0;
   const total = data?.total_responses ?? 0;

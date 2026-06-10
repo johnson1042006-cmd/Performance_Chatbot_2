@@ -5,6 +5,8 @@ import Link from "next/link";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import { useToast } from "@/components/ui/Toast";
 import {
   ChevronLeft,
   ChevronRight,
@@ -69,11 +71,14 @@ const BANNER_ICONS: Record<CleanupBannerVariant, LucideIcon> = {
 };
 
 export default function HistoryTable({ onSelectSession }: HistoryTableProps) {
+  const { addToast } = useToast();
   const [sessions, setSessions] = useState<SessionHistory[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmCleanup, setConfirmCleanup] = useState(false);
   const [cleanupRunning, setCleanupRunning] = useState(false);
   const [cleanupBanner, setCleanupBanner] = useState<CleanupBanner | null>(
     null
@@ -102,19 +107,9 @@ export default function HistoryTable({ onSelectSession }: HistoryTableProps) {
     fetchHistory();
   }, [fetchHistory]);
 
-  const handleDelete = async (
-    e: React.MouseEvent,
-    sessionId: string
-  ) => {
-    e.stopPropagation();
+  const handleDelete = async (sessionId: string) => {
+    setConfirmDeleteId(null);
     if (deletingId) return;
-    if (
-      !window.confirm(
-        "Delete this chat session and all its messages? This cannot be undone."
-      )
-    ) {
-      return;
-    }
     setDeletingId(sessionId);
     try {
       const res = await fetch(`/api/sessions/${sessionId}`, {
@@ -122,9 +117,10 @@ export default function HistoryTable({ onSelectSession }: HistoryTableProps) {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      addToast("Chat deleted", "success");
     } catch (err) {
       console.error("Delete session failed:", err);
-      alert("Failed to delete chat. Please try again.");
+      addToast("Failed to delete chat. Please try again.", "error");
     } finally {
       setDeletingId(null);
     }
@@ -136,14 +132,8 @@ export default function HistoryTable({ onSelectSession }: HistoryTableProps) {
   };
 
   const handleRunCleanup = async () => {
+    setConfirmCleanup(false);
     if (cleanupRunning) return;
-    if (
-      !window.confirm(
-        "Run cleanup now? This will permanently delete sessions older than the configured retention period."
-      )
-    ) {
-      return;
-    }
     setCleanupRunning(true);
     setCleanupBanner(null);
     try {
@@ -189,7 +179,7 @@ export default function HistoryTable({ onSelectSession }: HistoryTableProps) {
           <Button
             variant="secondary"
             size="sm"
-            onClick={handleRunCleanup}
+            onClick={() => setConfirmCleanup(true)}
             disabled={cleanupRunning}
           >
             {cleanupRunning ? (
@@ -334,9 +324,13 @@ export default function HistoryTable({ onSelectSession }: HistoryTableProps) {
                     <td className="px-6 py-3 text-right">
                       <button
                         type="button"
-                        onClick={(e) => handleDelete(e, s.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConfirmDeleteId(s.id);
+                        }}
                         disabled={deletingId === s.id}
                         title="Delete chat"
+                        aria-label="Delete chat"
                         className="inline-flex items-center justify-center w-8 h-8 rounded-button text-text-secondary hover:text-error hover:bg-error/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {deletingId === s.id ? (
@@ -365,6 +359,7 @@ export default function HistoryTable({ onSelectSession }: HistoryTableProps) {
               size="sm"
               disabled={page <= 1}
               onClick={() => setPage((p) => p - 1)}
+              aria-label="Previous page"
             >
               <ChevronLeft size={14} />
             </Button>
@@ -373,12 +368,33 @@ export default function HistoryTable({ onSelectSession }: HistoryTableProps) {
               size="sm"
               disabled={page >= totalPages}
               onClick={() => setPage((p) => p + 1)}
+              aria-label="Next page"
             >
               <ChevronRight size={14} />
             </Button>
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!confirmDeleteId}
+        title="Delete chat"
+        message="Delete this chat session and all its messages? This cannot be undone."
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => confirmDeleteId && void handleDelete(confirmDeleteId)}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
+
+      <ConfirmDialog
+        open={confirmCleanup}
+        title="Run cleanup"
+        message="Run cleanup now? This will permanently delete sessions older than the configured retention period."
+        confirmLabel="Run Cleanup"
+        destructive
+        onConfirm={() => void handleRunCleanup()}
+        onCancel={() => setConfirmCleanup(false)}
+      />
     </Card>
   );
 }

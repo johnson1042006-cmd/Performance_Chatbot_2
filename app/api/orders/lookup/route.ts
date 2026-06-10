@@ -5,6 +5,8 @@ import { eq } from "drizzle-orm";
 import { BC_ORDER_STATUS } from "@/lib/bigcommerce/client";
 import { lookupOrder, buildTrackingUrl } from "@/lib/orders/lookup";
 import { getPusher } from "@/lib/pusher/server";
+import { sessionChannel, DASHBOARD_CHANNEL } from "@/lib/pusher/channels";
+import { verifySessionAccess } from "@/lib/sessions/verifySessionToken";
 import { enforce, getClientIp } from "@/lib/rateLimit";
 import { log, serializeError } from "@/lib/log";
 
@@ -67,6 +69,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
+    // Order lookups return customer PII (order status, shipping) and write
+    // into the session transcript — require the caller to actually own the
+    // session (matching token) or be staff.
+    if (!(await verifySessionAccess(req, sessionId))) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const result = await lookupOrder(email, orderId);
     if (!result.found || !result.order) {
       return NextResponse.json({ found: false });
@@ -87,13 +96,13 @@ export async function POST(req: NextRequest) {
 
     try {
       const pusher = getPusher();
-      await pusher.trigger(`session-${sessionId}`, "new-message", {
+      await pusher.trigger(sessionChannel(sessionId), "new-message", {
         id: savedMessage.id,
         role: "ai",
         content: savedMessage.content,
         sentAt: savedMessage.sentAt,
       });
-      await pusher.trigger("dashboard", "session-update", {
+      await pusher.trigger(DASHBOARD_CHANNEL, "session-update", {
         sessionId,
         lastMessage: savedMessage.content,
         role: "ai",

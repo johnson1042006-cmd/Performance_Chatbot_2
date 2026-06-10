@@ -87,6 +87,13 @@ vi.mock("next-auth", () => ({
   getServerSession: vi.fn(),
 }));
 
+// Session-token enforcement is exercised directly in security.test.ts. Here
+// we always allow so the positional mockDbSelect queues stay aligned with the
+// routes' own selects.
+vi.mock("@/lib/sessions/verifySessionToken", () => ({
+  verifySessionAccess: vi.fn().mockResolvedValue(true),
+}));
+
 vi.mock("@/lib/auth", () => ({
   authOptions: {},
 }));

@@ -6,7 +6,8 @@ import TopBar from "@/components/ui/TopBar";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import MetricCard from "@/components/dashboard/manager/MetricCard";
-import { ThumbsUp, ThumbsDown } from "lucide-react";
+import { SkeletonCard } from "@/components/ui/Skeleton";
+import { ThumbsUp, ThumbsDown, AlertTriangle } from "lucide-react";
 
 interface FeedbackRow {
   id: string;
@@ -33,13 +34,18 @@ export default function ManagerFeedbackPage() {
   const [data, setData] = useState<FeedbackData | null>(null);
   const [days, setDays] = useState<number>(30);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     setLoading(true);
+    setLoadError(false);
     fetch(`/api/admin/feedback?days=${days}`)
       .then((res) => (res.ok ? res.json() : Promise.reject(res)))
       .then((d) => setData(d))
-      .catch(console.error)
+      .catch((err) => {
+        console.error(err);
+        setLoadError(true);
+      })
       .finally(() => setLoading(false));
   }, [days]);
 
@@ -64,6 +70,21 @@ export default function ManagerFeedbackPage() {
           ))}
         </div>
 
+        {loadError && (
+          <div className="flex items-center gap-2 mb-4 px-4 py-3 rounded-card border border-red-200 bg-red-50 text-sm text-red-800">
+            <AlertTriangle size={16} className="shrink-0" />
+            Couldn&apos;t load feedback data. Refresh to try again.
+          </div>
+        )}
+
+        {loading && !data ? (
+          <div className="grid grid-cols-4 gap-4 mb-6">
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+          </div>
+        ) : (
         <div className="grid grid-cols-4 gap-4 mb-6">
           <MetricCard
             title="Total Ratings"
@@ -94,6 +115,7 @@ export default function ManagerFeedbackPage() {
             )}
           />
         </div>
+        )}
 
         <Card>
           <div className="flex items-center justify-between mb-3">

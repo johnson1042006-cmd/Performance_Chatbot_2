@@ -13,6 +13,7 @@ import { db } from "@/lib/db";
 import { alertEvents, alertThresholds, sessions, users } from "@/lib/db/schema";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { getPusher } from "@/lib/pusher/server";
+import { ALERTS_CHANNEL } from "@/lib/pusher/channels";
 import { log, serializeError } from "@/lib/log";
 export type AlertKind =
   | "queue_depth"
@@ -248,7 +249,7 @@ export async function evaluateAlertThresholds(): Promise<EvaluationResult[]> {
       // Pusher fan-out.
       try {
         const pusher = getPusher();
-        await pusher.trigger("alerts", "alert-fired", {
+        await pusher.trigger(ALERTS_CHANNEL, "alert-fired", {
           id: eventId,
           kind: t.kind,
           value,

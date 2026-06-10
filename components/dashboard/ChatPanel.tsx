@@ -10,7 +10,9 @@ import HistoryPanel from "./HistoryPanel";
 import LocationBadge from "./LocationBadge";
 import CannedReplyPopover from "./CannedReplyPopover";
 import Button from "@/components/ui/Button";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
+import { sessionChannel as sessionChannelName } from "@/lib/pusher/channels";
 import {
   Send,
   UserCheck,
@@ -90,6 +92,7 @@ export default function ChatPanel({
   const { data: authSession } = useSession();
   const { addToast } = useToast();
   const [messages, setMessages] = useState<Message[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(true);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [claimedByBanner, setClaimedByBanner] = useState<string | null>(null);
@@ -102,6 +105,7 @@ export default function ChatPanel({
   const [showSlashPopover, setShowSlashPopover] = useState(false);
   const [aiEnabled, setAiEnabled] = useState(true);
   const [suggesting, setSuggesting] = useState(false);
+  const [showSuggestConfirm, setShowSuggestConfirm] = useState(false);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const sendInFlightRef = useRef(false);
@@ -133,10 +137,13 @@ export default function ChatPanel({
       if (data.messages) setMessages(data.messages);
     } catch (error) {
       console.error("Failed to fetch messages:", error);
+    } finally {
+      setMessagesLoading(false);
     }
   }, [sessionId]);
 
   useEffect(() => {
+    setMessagesLoading(true);
     fetchMessages();
   }, [fetchMessages]);
 
@@ -163,62 +170,69 @@ export default function ChatPanel({
       .catch(() => {});
   }, []);
 
+  // `session-${sessionId}` is shared with AITrace — use the ref-counted
+  // acquire/release helpers and unbind only our own handler references so
+  // cleanup can't tear down another component's bindings.
   useEffect(() => {
     let cancelled = false;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let channel: any = null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let pusherInstance: any = null;
+    let cleanup = () => {};
 
-    import("@/lib/pusher/client").then(({ getPusherClient }) => {
+    const onNewMessage = (data: Message) => {
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === data.id)) return prev;
+        return [...prev, data];
+      });
+    };
+    const onClaimed = (data: {
+      agentId?: string;
+      agentName?: string;
+      kind?: string;
+      reassigned?: boolean;
+    }) => {
+      if (data.agentId && data.agentId !== myId) {
+        setClaimedByBanner(
+          data.reassigned
+            ? `This chat was reassigned to ${data.agentName ?? "another agent"}`
+            : `This chat was claimed by ${data.agentName ?? "another agent"}`
+        );
+      }
+      onSessionUpdate?.();
+    };
+    const onReleased = () => {
+      setJustClaimed(false);
+      setClaimedByBanner(null);
+      onSessionUpdate?.();
+    };
+    const onClosed = () => {
+      setClosedLocal(true);
+      setJustClaimed(false);
+      setClaimedByBanner(null);
+      setShowReassign(false);
+      onSessionUpdate?.();
+    };
+
+    import("@/lib/pusher/client").then(({ acquireChannel, releaseChannel }) => {
       if (cancelled) return;
-      pusherInstance = getPusherClient();
-      channel = pusherInstance.subscribe(`session-${sessionId}`);
-      channel.unbind("new-message");
-      channel.unbind("session-claimed");
-      channel.unbind("session-released");
-      channel.unbind("session-closed");
+      const channelName = sessionChannelName(sessionId);
+      const channel = acquireChannel(channelName);
 
-      channel.bind("new-message", (data: Message) => {
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === data.id)) return prev;
-          return [...prev, data];
-        });
-      });
+      channel.bind("new-message", onNewMessage);
+      channel.bind("session-claimed", onClaimed);
+      channel.bind("session-released", onReleased);
+      channel.bind("session-closed", onClosed);
 
-      channel.bind(
-        "session-claimed",
-        (data: { agentId?: string; agentName?: string; kind?: string; reassigned?: boolean }) => {
-          if (data.agentId && data.agentId !== myId) {
-            setClaimedByBanner(
-              data.reassigned
-                ? `This chat was reassigned to ${data.agentName ?? "another agent"}`
-                : `This chat was claimed by ${data.agentName ?? "another agent"}`
-            );
-          }
-          onSessionUpdate?.();
-        }
-      );
-
-      channel.bind("session-released", () => {
-        setJustClaimed(false);
-        setClaimedByBanner(null);
-        onSessionUpdate?.();
-      });
-
-      channel.bind("session-closed", () => {
-        setClosedLocal(true);
-        setJustClaimed(false);
-        setClaimedByBanner(null);
-        setShowReassign(false);
-        onSessionUpdate?.();
-      });
+      cleanup = () => {
+        channel.unbind("new-message", onNewMessage);
+        channel.unbind("session-claimed", onClaimed);
+        channel.unbind("session-released", onReleased);
+        channel.unbind("session-closed", onClosed);
+        releaseChannel(channelName);
+      };
     }).catch(() => {});
 
     return () => {
       cancelled = true;
-      channel?.unbind_all();
-      pusherInstance?.unsubscribe(`session-${sessionId}`);
+      cleanup();
     };
   }, [sessionId, myId, onSessionUpdate]);
 
@@ -322,7 +336,7 @@ export default function ChatPanel({
     }
 
     try {
-      await fetch("/api/chat", {
+      const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -332,14 +346,23 @@ export default function ChatPanel({
           agentName: authSession?.user?.name,
         }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await fetchMessages();
     } catch (error) {
       console.error("Failed to send:", error);
+      // Restore the draft so the agent doesn't lose what they typed.
+      setInput(content);
+      try {
+        sessionStorage.setItem(draftKey(sessionId), content);
+      } catch {
+        // ignore
+      }
+      addToast("Message failed to send — your draft was restored.", "error");
     } finally {
       sendInFlightRef.current = false;
       setSending(false);
     }
-  }, [input, sending, sessionId, authSession, fetchMessages]);
+  }, [input, sending, sessionId, authSession, fetchMessages, addToast]);
 
   // Expose send + focusReply to the parent (chats page) for hotkeys.
   useEffect(() => {
@@ -391,13 +414,11 @@ export default function ChatPanel({
     });
   };
 
-  const handleAiSuggest = async () => {
+  const handleAiSuggest = async (confirmedOverwrite = false) => {
     if (!aiEnabled || suggesting) return;
-    if (input.trim().length > 0) {
-      const ok = window.confirm(
-        "Replace your current draft with the AI suggestion?"
-      );
-      if (!ok) return;
+    if (input.trim().length > 0 && !confirmedOverwrite) {
+      setShowSuggestConfirm(true);
+      return;
     }
     setSuggesting(true);
     try {
@@ -601,7 +622,7 @@ export default function ChatPanel({
         />
       </div>
 
-      <MessageThread messages={messages} />
+      <MessageThread messages={messages} loading={messagesLoading} />
 
       {showAgentTabs && (
         <div
@@ -661,7 +682,7 @@ export default function ChatPanel({
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={handleAiSuggest}
+                onClick={() => void handleAiSuggest()}
                 disabled={!aiEnabled || suggesting}
                 title={
                   aiEnabled
@@ -677,6 +698,7 @@ export default function ChatPanel({
                 onClick={sendAgentMessage}
                 disabled={!input.trim() || sending}
                 data-testid="chat-send-btn"
+                aria-label="Send message"
               >
                 <Send size={14} />
               </Button>
@@ -711,6 +733,17 @@ export default function ChatPanel({
         </div>
       )}
 
+      <ConfirmDialog
+        open={showSuggestConfirm}
+        title="Replace draft?"
+        message="Replace your current draft with the AI suggestion?"
+        confirmLabel="Replace"
+        onConfirm={() => {
+          setShowSuggestConfirm(false);
+          void handleAiSuggest(true);
+        }}
+        onCancel={() => setShowSuggestConfirm(false)}
+      />
     </div>
   );
 }

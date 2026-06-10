@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { Plus, Pencil, Trash2, Save, X } from "lucide-react";
 
 interface CannedReply {
@@ -43,6 +44,7 @@ export default function CannedRepliesEditor() {
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const fetchReplies = useCallback(async () => {
     try {
@@ -112,7 +114,7 @@ export default function CannedRepliesEditor() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm("Delete this canned reply?")) return;
+    setConfirmDeleteId(null);
     try {
       const res = await fetch(`/api/admin/canned?id=${encodeURIComponent(id)}`, {
         method: "DELETE",
@@ -268,8 +270,8 @@ export default function CannedRepliesEditor() {
                         </button>
                         <button
                           type="button"
-                          aria-label="Delete"
-                          onClick={() => handleDelete(r.id)}
+                          aria-label="Delete canned reply"
+                          onClick={() => setConfirmDeleteId(r.id)}
                           className="p-1 text-text-secondary hover:text-red-600"
                         >
                           <Trash2 size={12} />
@@ -283,6 +285,16 @@ export default function CannedRepliesEditor() {
           ))}
         </div>
       </Card>
+
+      <ConfirmDialog
+        open={!!confirmDeleteId}
+        title="Delete canned reply"
+        message="Delete this canned reply? This cannot be undone."
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => confirmDeleteId && void handleDelete(confirmDeleteId)}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
     </div>
   );
 }

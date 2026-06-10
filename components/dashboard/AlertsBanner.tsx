@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { AlertTriangle, X } from "lucide-react";
+import { ALERTS_CHANNEL } from "@/lib/pusher/channels";
 
 interface AlertEvent {
   id: string;
@@ -49,13 +50,13 @@ export default function AlertsBanner() {
     if (!isManager) return;
     let cleanup = () => {};
     import("@/lib/pusher/client")
-      .then(({ getPusherClient }) => {
-        const pusher = getPusherClient();
-        const channel = pusher.subscribe("alerts");
-        channel.bind("alert-fired", () => void fetchEvents());
+      .then(({ acquireChannel, releaseChannel }) => {
+        const channel = acquireChannel(ALERTS_CHANNEL);
+        const onAlertFired = () => void fetchEvents();
+        channel.bind("alert-fired", onAlertFired);
         cleanup = () => {
-          channel.unbind_all();
-          pusher.unsubscribe("alerts");
+          channel.unbind("alert-fired", onAlertFired);
+          releaseChannel(ALERTS_CHANNEL);
         };
       })
       .catch(() => {});

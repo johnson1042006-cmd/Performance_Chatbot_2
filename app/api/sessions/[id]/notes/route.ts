@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { chatEvents, users, sessions } from "@/lib/db/schema";
 import { and, desc, eq } from "drizzle-orm";
 import { getPusher } from "@/lib/pusher/server";
+import { DASHBOARD_CHANNEL } from "@/lib/pusher/channels";
 import { log, serializeError } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
@@ -111,7 +112,7 @@ export async function POST(
     // surface the internal note to the customer.
     try {
       const pusher = getPusher();
-      await pusher.trigger("dashboard", "note-added", {
+      await pusher.trigger(DASHBOARD_CHANNEL, "note-added", {
         sessionId: params.id,
         noteId: row.id,
       });

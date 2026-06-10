@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { messages, sessions, knowledgeBase } from "@/lib/db/schema";
 import { and, eq, gt, sql } from "drizzle-orm";
 import { getPusher } from "@/lib/pusher/server";
+import { sessionChannel, DASHBOARD_CHANNEL } from "@/lib/pusher/channels";
 import { getProductBySKU, getProductByName } from "@/lib/bigcommerce/client";
 import { extractSKUFromText } from "@/lib/search/productSearch";
 import { anyAgentsOnline } from "@/lib/presence";
@@ -12,15 +13,20 @@ import {
   recordCustomerActivity,
   claimByAi,
 } from "@/lib/sessions/state";
-import { runAiTurn } from "@/lib/ai/runAi";
+import {
+  runAiTurn,
+  persistFallbackAiMessage,
+  isHumanTakeoverError,
+} from "@/lib/ai/runAi";
 import { redactPII } from "@/lib/utils/redactPII";
 import { enforce, getClientIp } from "@/lib/rateLimit";
-import {
-  verifySessionAccess,
-  sessionTokenCookieName,
-} from "@/lib/sessions/verifySessionToken";
+import { verifySessionAccess } from "@/lib/sessions/verifySessionToken";
 import { log, serializeError } from "@/lib/log";
 import { createSseStream, SSE_RESPONSE_HEADERS, wantsSse } from "@/lib/ai/sse";
+
+// Tool loops can run several Claude iterations plus BigCommerce calls; the
+// platform default can kill the stream mid-reply. Match ai-fallback's budget.
+export const maxDuration = 60;
 
 const DEFAULT_FALLBACK_SECONDS = 60;
 
@@ -68,17 +74,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    let agentUser: { id: string; role: string } | null = null;
     if (role === "agent") {
       const authSession = await getServerSession(authOptions);
       if (!authSession?.user) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
       }
+      agentUser = { id: authSession.user.id, role: authSession.user.role };
     } else {
       // IP rate limit on customer-originating chat traffic. 20 messages /
       // 60s per IP. Agents skip this — their per-message cost is bounded by
       // session staffing, not abuse.
       const ip = getClientIp(req);
-      const rl = await enforce(`chat:${ip}`, 20, 60);
+      const rl = await enforce(`chat:${ip}`, 20, 60, { failClosed: true });
       if (!rl.ok) {
         return NextResponse.json(
           { error: "rate_limited" },
@@ -89,20 +97,17 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Soft session-token check during rollout: verify when the widget sends
-      // a token, otherwise just warn. Flip to hard enforcement once the widget
-      // update has shipped so live chats can't break mid-flight.
-      const hasToken = !!(
-        req.cookies.get(sessionTokenCookieName(sessionId))?.value ||
-        req.headers.get("x-session-token") ||
-        req.nextUrl.searchParams.get("st")
-      );
-      if (hasToken) {
-        if (!(await verifySessionAccess(req, sessionId))) {
-          log.warn("chat.session_token_invalid", { requestId, sessionId });
-        }
-      } else {
-        log.warn("chat.session_token_absent", { requestId, sessionId });
+      // Hard session-token enforcement: the caller must present the matching
+      // session token (cookie / header / ?st=) or be staff. Without this,
+      // anyone who learns a session UUID can post into — and trigger AI turns
+      // on — someone else's conversation. verifySessionAccess grants legacy
+      // grace only to pre-token sessions (null token hash).
+      if (!(await verifySessionAccess(req, sessionId))) {
+        log.warn("chat.session_token_rejected", { requestId, sessionId });
+        return NextResponse.json(
+          { error: "Unauthorized" },
+          { status: 401 }
+        );
       }
     }
 
@@ -138,6 +143,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: "Session not found" },
         { status: 404 }
+      );
+    }
+
+    // ── Ownership check on agent messages ────────────────────────────
+    // Only the claiming agent (or a manager) may speak into a session.
+    // Without this, any logged-in agent could post into any conversation.
+    if (
+      agentUser &&
+      agentUser.role !== "store_manager" &&
+      session.claimedByUserId !== agentUser.id
+    ) {
+      return NextResponse.json(
+        { error: "You have not claimed this session" },
+        { status: 403 }
       );
     }
 
@@ -249,7 +268,7 @@ export async function POST(req: NextRequest) {
 
     try {
       const pusher = getPusher();
-      await pusher.trigger(`session-${sessionId}`, "new-message", {
+      await pusher.trigger(sessionChannel(sessionId), "new-message", {
         id: savedMessage.id,
         role: savedMessage.role,
         content: savedMessage.content,
@@ -259,7 +278,7 @@ export async function POST(req: NextRequest) {
         productMention,
       });
 
-      await pusher.trigger("dashboard", "session-update", {
+      await pusher.trigger(DASHBOARD_CHANNEL, "session-update", {
         sessionId,
         lastMessage: savedMessage.content,
         role: savedMessage.role,
@@ -321,17 +340,29 @@ export async function POST(req: NextRequest) {
           productMention,
         });
       } catch (err) {
+        if (isHumanTakeoverError(err)) {
+          return NextResponse.json({
+            message: savedMessage,
+            sessionStatus: "active_human",
+            productMention,
+          });
+        }
         log.error("chat.inline_ai_followup_failed", {
           requestId,
           sessionId,
           error: serializeError(err),
         });
+        // Never leave the customer with dead air: persist a visible fallback
+        // reply and return it so the widget renders it immediately.
+        const fallback = await persistFallbackAiMessage(sessionId, requestId);
+        return NextResponse.json({
+          message: savedMessage,
+          aiMessage: fallback ?? undefined,
+          aiError: true,
+          sessionStatus: "active_ai",
+          productMention,
+        });
       }
-      return NextResponse.json({
-        message: savedMessage,
-        sessionStatus: "active_ai",
-        productMention,
-      });
     }
 
     // Session is unclaimed — decide what to do
@@ -374,16 +405,39 @@ export async function POST(req: NextRequest) {
             productMention,
           });
         } catch (err) {
+          if (isHumanTakeoverError(err)) {
+            return NextResponse.json({
+              message: savedMessage,
+              sessionStatus: "active_human",
+              productMention,
+            });
+          }
           log.error("chat.inline_ai_response_failed", {
             requestId,
             sessionId,
             error: serializeError(err),
           });
+          const fallback = await persistFallbackAiMessage(sessionId, requestId);
+          return NextResponse.json({
+            message: savedMessage,
+            aiMessage: fallback ?? undefined,
+            aiError: true,
+            sessionStatus: "active_ai",
+            productMention,
+          });
         }
       }
+      // Lost the claim race — someone (almost certainly a human) got there
+      // first. Report the session's actual state instead of assuming AI.
+      const [current] = await db
+        .select({ claimedByKind: sessions.claimedByKind })
+        .from(sessions)
+        .where(eq(sessions.id, sessionId))
+        .limit(1);
       return NextResponse.json({
         message: savedMessage,
-        sessionStatus: "active_ai",
+        sessionStatus:
+          current?.claimedByKind === "human" ? "active_human" : "active_ai",
         productMention,
       });
     }
@@ -414,10 +468,10 @@ export async function POST(req: NextRequest) {
 async function fireSessionClaimedEvents(sessionId: string, requestId: string): Promise<void> {
   try {
     const pusher = getPusher();
-    await pusher.trigger(`session-${sessionId}`, "session-claimed", {
+    await pusher.trigger(sessionChannel(sessionId), "session-claimed", {
       kind: "ai",
     });
-    await pusher.trigger("dashboard", "session-claimed", {
+    await pusher.trigger(DASHBOARD_CHANNEL, "session-claimed", {
       sessionId,
       kind: "ai",
     });
@@ -476,15 +530,36 @@ function sseAiResponse(
       });
       send({ event: "done", data: {} });
     } catch (err) {
+      if (isHumanTakeoverError(err)) {
+        // A human claimed mid-turn — the agent will reply. End the stream
+        // cleanly; the widget's session-claimed handler flips the banner.
+        send({ event: "done", data: {} });
+        return;
+      }
       log.error("chat.sse_ai_failed", {
         requestId: ctx.requestId,
         sessionId: ctx.sessionId,
         error: serializeError(err),
       });
-      send({
-        event: "error",
-        data: { message: "AI response failed" },
-      });
+      // Persist a visible fallback reply and stream it so the customer sees
+      // one consistent message (and the transcript matches the screen).
+      const fallback = await persistFallbackAiMessage(
+        ctx.sessionId,
+        ctx.requestId
+      );
+      if (fallback) {
+        send({ event: "token", data: { text: fallback.content } });
+        send({
+          event: "message",
+          data: { id: fallback.id, sentAt: fallback.sentAt },
+        });
+        send({ event: "done", data: {} });
+      } else {
+        send({
+          event: "error",
+          data: { message: "AI response failed" },
+        });
+      }
     }
   });
   return new Response(stream, { headers: SSE_RESPONSE_HEADERS });

@@ -20,6 +20,7 @@
  */
 
 import { test, expect, Page } from "@playwright/test";
+import { waitForEmbedReady } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // ask() helper — minimal copy (not exported from bot-quality.spec.ts)
@@ -175,7 +176,7 @@ test.describe("Catalog coverage @catalog", () => {
 
       const sessionId = `catalog-clean-${entry.category.replace(/\s+/g, "-").toLowerCase()}-${Date.now()}`;
       await page.goto(`/embed?sessionId=${sessionId}`);
-      await page.waitForLoadState("networkidle");
+      await waitForEmbedReady(page);
 
       const reply = await ask(page, entry.clean);
 
@@ -188,7 +189,7 @@ test.describe("Catalog coverage @catalog", () => {
 
       const sessionId = `catalog-brand-${entry.category.replace(/\s+/g, "-").toLowerCase()}-${Date.now()}`;
       await page.goto(`/embed?sessionId=${sessionId}`);
-      await page.waitForLoadState("networkidle");
+      await waitForEmbedReady(page);
 
       const reply = await ask(page, entry.brand);
 

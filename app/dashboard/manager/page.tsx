@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import TopBar from "@/components/ui/TopBar";
+import { SkeletonCard } from "@/components/ui/Skeleton";
+import { AlertTriangle } from "lucide-react";
 import MetricCard from "@/components/dashboard/manager/MetricCard";
 import RecentConversations from "@/components/dashboard/manager/RecentConversations";
 import WeeklyMixChart from "@/components/dashboard/manager/WeeklyMixChart";
@@ -31,6 +33,8 @@ interface Analytics {
 
 export default function ManagerDashboard() {
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     fetch("/api/analytics", { cache: "no-store" })
@@ -39,15 +43,32 @@ export default function ManagerDashboard() {
         return res.json();
       })
       .then((data) => setAnalytics(data))
-      .catch(console.error);
+      .catch((err) => {
+        console.error(err);
+        setLoadError(true);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   return (
     <>
       <TopBar title="Hub" />
       <div className="flex-1 overflow-y-auto p-6">
+        {loadError && (
+          <div className="flex items-center gap-2 mb-4 px-4 py-3 rounded-card border border-red-200 bg-red-50 text-sm text-red-800">
+            <AlertTriangle size={16} className="shrink-0" />
+            Couldn&apos;t load dashboard metrics. Refresh to try again.
+          </div>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
           {/* Row 1 — today metrics (5 tiles, sub-grid for mobile collapse) */}
+          {loading ? (
+            <div className="col-span-12 grid grid-cols-1 sm:grid-cols-5 gap-4">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <SkeletonCard key={i} />
+              ))}
+            </div>
+          ) : (
           <div className="col-span-12 grid grid-cols-1 sm:grid-cols-5 gap-4">
             <MetricCard
               title="Chats Today"
@@ -77,6 +98,7 @@ export default function ManagerDashboard() {
               accent={Boolean(analytics?.unclaimedCount)}
             />
           </div>
+          )}
 
           {/* Row 2 — alerts banner is rendered globally in app/dashboard/layout */}
 

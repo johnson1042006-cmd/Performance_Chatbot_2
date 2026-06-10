@@ -213,7 +213,7 @@ describe("toolHandlers", () => {
     // mockDbUpdate is the terminal in our chain; called by db.update().set().where()
     expect(mockDbUpdate).toHaveBeenCalled();
     expect(mockTrigger).toHaveBeenCalledWith(
-      "dashboard",
+      "private-dashboard",
       "escalation-requested",
       expect.objectContaining({ sessionId: "s1", reason: "frustrated_customer", urgency: "high" })
     );

@@ -18,6 +18,7 @@
  */
 
 import { test, expect, Page } from "@playwright/test";
+import { waitForEmbedReady } from "./helpers";
 
 interface QA {
   area: string;
@@ -488,7 +489,7 @@ test.describe("Bot quality — 50 questions across the catalog @slow", () => {
       const qa = QUESTIONS[i];
       const sessionId = `qa-${Date.now()}-${i}`;
       await page.goto(`/embed?sessionId=${sessionId}`);
-      await page.waitForLoadState("networkidle");
+      await waitForEmbedReady(page);
 
       let reply = "";
       try {
@@ -546,7 +547,7 @@ test.describe("Hallucination guard — gloves follow-up", () => {
   test("does not fabricate product names on follow-up refinement", async ({ page }) => {
     const sessionId = `hallucination-gloves-${Date.now()}`;
     await page.goto(`/embed?sessionId=${sessionId}`);
-    await page.waitForLoadState("networkidle");
+    await waitForEmbedReady(page);
 
     // Turn 1 — establish glove context
     await ask(page, "i need street riding gloves good for summer weather");
@@ -589,7 +590,7 @@ test.describe("Search refinement — brand context preserved across narrowing", 
   test("preserves Alpinestars brand on motocross refinement", async ({ page }) => {
     const sessionId = `refine-alpinestars-mx-${Date.now()}`;
     await page.goto(`/embed?sessionId=${sessionId}`);
-    await page.waitForLoadState("networkidle");
+    await waitForEmbedReady(page);
 
     await ask(page, "show me alpinestars helmets");
     const reply2 = await ask(page, "show me ones motocross");

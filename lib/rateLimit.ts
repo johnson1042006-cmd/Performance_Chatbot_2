@@ -8,8 +8,9 @@
  * a separate sweep removes them — that's fine because lookups are scoped
  * to the current window.
  *
- * Fail-open on DB errors: a transient Neon hiccup must not 500 the API.
- * Logged at warn level so it's visible without alarming.
+ * DB-error behavior is per-call: the default is fail-open (a transient Neon
+ * hiccup must not 500 cheap reads), but routes that trigger paid AI calls
+ * pass `failClosed: true` so a limiter outage can't become unmetered spend.
  */
 import { db } from "@/lib/db";
 import { rateLimitBuckets } from "@/lib/db/schema";
@@ -21,10 +22,20 @@ export interface EnforceResult {
   retryAfter?: number;
 }
 
+export interface EnforceOptions {
+  /**
+   * When true, a limiter DB error rejects the request (with a short
+   * Retry-After) instead of letting it through. Use on routes that trigger
+   * paid AI calls.
+   */
+  failClosed?: boolean;
+}
+
 export async function enforce(
   key: string,
   max: number,
-  windowSeconds: number
+  windowSeconds: number,
+  opts?: EnforceOptions
 ): Promise<EnforceResult> {
   // Dev-only bypass for traffic that originates from localhost. The Playwright
   // dev server has no upstream proxy, so browser-driven requests come in as
@@ -64,6 +75,15 @@ export async function enforce(
     }
     return { ok: true };
   } catch (err) {
+    if (opts?.failClosed) {
+      log.error("rate_limit.enforce_failed_closed", {
+        key,
+        max,
+        windowSeconds,
+        error: serializeError(err),
+      });
+      return { ok: false, retryAfter: 10 };
+    }
     log.warn("rate_limit.enforce_failed", {
       key,
       max,

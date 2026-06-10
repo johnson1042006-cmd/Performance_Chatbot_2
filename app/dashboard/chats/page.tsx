@@ -174,6 +174,8 @@ export default function LiveChatsPage() {
 
   const handleReleaseSession = useCallback(
     async (sessionId: string) => {
+      // Only unpin/clear when the server confirms the release. Otherwise the
+      // agent believes they released while the server still has them claimed.
       try {
         const res = await fetch("/api/sessions/release", {
           method: "POST",
@@ -183,30 +185,35 @@ export default function LiveChatsPage() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
       } catch (error) {
         console.error("Failed to release:", error);
+        addToast("Failed to release chat. Please try again.", "error");
+        return;
       }
       setPinnedTabs((prev) => prev.filter((t) => t.id !== sessionId));
       setActiveSessionId((id) => (id === sessionId ? null : id));
       setQueueRefetchKey((n) => n + 1);
     },
-    []
+    [addToast]
   );
 
   const handleCloseSession = useCallback(
     async (sessionId: string) => {
       try {
-        await fetch("/api/sessions/close", {
+        const res = await fetch("/api/sessions/close", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sessionId }),
         });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
       } catch (error) {
         console.error("Failed to close:", error);
+        addToast("Failed to close chat. Please try again.", "error");
+        return;
       }
       setPinnedTabs((prev) => prev.filter((t) => t.id !== sessionId));
       setActiveSessionId((id) => (id === sessionId ? null : id));
       setQueueRefetchKey((n) => n + 1);
     },
-    []
+    [addToast]
   );
 
   const handleSessionUpdate = useCallback(async () => {

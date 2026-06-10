@@ -3,6 +3,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import HistoryTable from "../HistoryTable";
+import { ToastProvider } from "@/components/ui/Toast";
+
+function renderTable() {
+  return render(
+    <ToastProvider>
+      <HistoryTable />
+    </ToastProvider>
+  );
+}
 
 function makeSession(overrides: Partial<{
   aiMessageCount: number;
@@ -41,7 +50,7 @@ beforeEach(() => {
 describe("HistoryTable — Handler badge rendering", () => {
   it("shows 'AI' badge when humanInvolved=false", async () => {
     mockFetch(makeSession({ aiMessageCount: 5, humanInvolved: false }));
-    render(<HistoryTable />);
+    renderTable();
     await waitFor(() => expect(screen.getByText("AI")).toBeInTheDocument());
     expect(screen.queryByText("Mixed")).not.toBeInTheDocument();
     expect(screen.queryByText("Human")).not.toBeInTheDocument();
@@ -49,7 +58,7 @@ describe("HistoryTable — Handler badge rendering", () => {
 
   it("shows 'Mixed' badge when humanInvolved=true and aiMessageCount>0", async () => {
     mockFetch(makeSession({ aiMessageCount: 3, humanInvolved: true }));
-    render(<HistoryTable />);
+    renderTable();
     await waitFor(() => expect(screen.getByText("Mixed")).toBeInTheDocument());
     expect(screen.queryByText("AI")).not.toBeInTheDocument();
     expect(screen.queryByText("Human")).not.toBeInTheDocument();
@@ -57,7 +66,7 @@ describe("HistoryTable — Handler badge rendering", () => {
 
   it("shows 'Human' badge when humanInvolved=true and aiMessageCount=0", async () => {
     mockFetch(makeSession({ aiMessageCount: 0, humanInvolved: true }));
-    render(<HistoryTable />);
+    renderTable();
     await waitFor(() => expect(screen.getByText("Human")).toBeInTheDocument());
     expect(screen.queryByText("AI")).not.toBeInTheDocument();
     expect(screen.queryByText("Mixed")).not.toBeInTheDocument();

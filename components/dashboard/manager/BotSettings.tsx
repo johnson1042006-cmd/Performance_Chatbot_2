@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
+import { useToast } from "@/components/ui/Toast";
 import { Save, Bot, Trash2 } from "lucide-react";
 import { DEFAULT_SETTINGS, type BotSettings as Settings } from "./botSettingsDefaults";
 
@@ -19,6 +20,7 @@ function clampTimer(n: number): number {
 }
 
 export default function BotSettings() {
+  const { addToast } = useToast();
   const [settings, setSettings] = useState<Settings>({ ...DEFAULT_SETTINGS });
   // Separate string state so users can type freely without mid-type clamping
   const [fallbackInput, setFallbackInput] = useState("60");
@@ -92,7 +94,7 @@ export default function BotSettings() {
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {
       console.error("Settings save error:", err);
-      alert("Failed to save settings. Please try again.");
+      addToast("Failed to save settings. Please try again.", "error");
     } finally {
       setSaving(false);
     }

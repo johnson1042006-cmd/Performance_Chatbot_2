@@ -14,6 +14,7 @@ import { db } from "@/lib/db";
 import { sessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { getPusher } from "@/lib/pusher/server";
+import { DASHBOARD_CHANNEL } from "@/lib/pusher/channels";
 import { searchProducts } from "@/lib/search/productSearch";
 import {
   getProductBySKU,
@@ -224,7 +225,7 @@ export async function escalateToHuman(
     .where(eq(sessions.id, sessionId));
 
   try {
-    await getPusher().trigger("dashboard", "escalation-requested", {
+    await getPusher().trigger(DASHBOARD_CHANNEL, "escalation-requested", {
       sessionId,
       reason,
       urgency,

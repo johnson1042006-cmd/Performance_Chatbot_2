@@ -4,6 +4,7 @@ import { sessions, messages } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { sendSupportNotification } from "@/lib/email/transcript";
 import { getPusher } from "@/lib/pusher/server";
+import { sessionChannel, DASHBOARD_CHANNEL } from "@/lib/pusher/channels";
 import { enforce, getClientIp } from "@/lib/rateLimit";
 import { verifySessionAccess } from "@/lib/sessions/verifySessionToken";
 import { log, serializeError } from "@/lib/log";
@@ -89,13 +90,13 @@ export async function POST(
 
     try {
       const pusher = getPusher();
-      await pusher.trigger(`session-${sessionId}`, "new-message", {
+      await pusher.trigger(sessionChannel(sessionId), "new-message", {
         id: savedMessage.id,
         role: "ai",
         content: savedMessage.content,
         sentAt: savedMessage.sentAt,
       });
-      await pusher.trigger("dashboard", "session-update", {
+      await pusher.trigger(DASHBOARD_CHANNEL, "session-update", {
         sessionId,
         lastMessage: savedMessage.content,
         role: "ai",

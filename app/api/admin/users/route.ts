@@ -7,6 +7,16 @@ import { eq } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { log, serializeError } from "@/lib/log";
 
+const TEMP_PASSWORD_MIN_LEN = 12;
+
+/** Postgres unique-constraint violation (duplicate email). */
+function isUniqueViolation(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = (error as { code?: string }).code;
+  const cause = (error as { cause?: { code?: string } }).cause;
+  return code === "23505" || cause?.code === "23505";
+}
+
 export async function GET() {
   const requestId = crypto.randomUUID();
   try {
@@ -54,11 +64,34 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (role !== "support_agent" && role !== "store_manager") {
+      return NextResponse.json({ error: "Invalid role" }, { status: 400 });
+    }
+
+    // Same policy as /api/auth/reset-password so the temp password the
+    // manager picks is held to the same bar as the one the agent sets later.
+    if (
+      typeof password !== "string" ||
+      password.length < TEMP_PASSWORD_MIN_LEN ||
+      !/\d/.test(password) ||
+      !/[A-Za-z]/.test(password)
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Password must be at least 12 characters and include both a letter and a number.",
+        },
+        { status: 400 }
+      );
+    }
+
     const passwordHash = await bcrypt.hash(password, 12);
 
+    // mustResetPassword: the invited teammate signs in with the temp password
+    // the manager chose, then is forced to set their own on first login.
     const [user] = await db
       .insert(users)
-      .values({ email, name, passwordHash, role })
+      .values({ email, name, passwordHash, role, mustResetPassword: true })
       .returning({
         id: users.id,
         email: users.email,
@@ -70,6 +103,12 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ user }, { status: 201 });
   } catch (error) {
+    if (isUniqueViolation(error)) {
+      return NextResponse.json(
+        { error: "A user with that email already exists." },
+        { status: 409 }
+      );
+    }
     log.error("admin.users_post_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "Failed to create user" },

@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { reassign } from "@/lib/sessions/state";
 import { getPusher } from "@/lib/pusher/server";
+import { sessionChannel, DASHBOARD_CHANNEL } from "@/lib/pusher/channels";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -55,13 +56,13 @@ export async function POST(req: NextRequest) {
 
     try {
       const pusher = getPusher();
-      await pusher.trigger(`session-${sessionId}`, "session-claimed", {
+      await pusher.trigger(sessionChannel(sessionId), "session-claimed", {
         agentId: targetUserId,
         agentName: targetUser.name,
         kind: "human",
         reassigned: true,
       });
-      await pusher.trigger("dashboard", "session-claimed", {
+      await pusher.trigger(DASHBOARD_CHANNEL, "session-claimed", {
         sessionId,
         agentId: targetUserId,
         agentName: targetUser.name,

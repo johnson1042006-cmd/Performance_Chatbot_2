@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { Plus, Trash2 } from "lucide-react";
 
 interface Pairing {
@@ -19,6 +20,7 @@ export default function PairingsTable() {
   const [pairings, setPairings] = useState<Pairing[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [form, setForm] = useState({
     primarySku: "",
     pairedSku: "",
@@ -59,7 +61,7 @@ export default function PairingsTable() {
   };
 
   const deletePairing = async (id: string) => {
-    if (!confirm("Delete this pairing?")) return;
+    setConfirmDeleteId(null);
     try {
       const res = await fetch(`/api/admin/pairings?id=${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -184,7 +186,8 @@ export default function PairingsTable() {
                   </td>
                   <td className="px-6 py-3 text-right">
                     <button
-                      onClick={() => deletePairing(p.id)}
+                      onClick={() => setConfirmDeleteId(p.id)}
+                      aria-label="Delete pairing"
                       className="text-text-secondary hover:text-accent transition-colors"
                     >
                       <Trash2 size={14} />
@@ -196,6 +199,16 @@ export default function PairingsTable() {
           </tbody>
         </table>
       </div>
+
+      <ConfirmDialog
+        open={!!confirmDeleteId}
+        title="Delete pairing"
+        message="Delete this pairing? This cannot be undone."
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => confirmDeleteId && void deletePairing(confirmDeleteId)}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
     </Card>
   );
 }

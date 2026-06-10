@@ -89,6 +89,8 @@ vi.mock("@/lib/ai/buildPrompt", () => ({
 const mockCallClaude = vi.fn();
 vi.mock("@/lib/ai/callClaude", () => ({
   callClaude: mockCallClaude,
+  CALL_CLAUDE_ERROR_MESSAGE:
+    "I'm having trouble connecting right now. A human agent will be with you shortly, or please try sending your message again.",
 }));
 
 const mockEscalateToHuman = vi.fn().mockResolvedValue("Connecting you now.");
@@ -156,6 +158,7 @@ describe("runAiTurn auto-escalation", () => {
       mockAgentsOnline.mockResolvedValue(false);
       mockAssessSentiment.mockReturnValue({ score: -1, reasons: ["phrase: this is ridiculous"] });
       // First select → loadRecentCustomerMessages; second → hasAutoEscalated (empty)
+      mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
       mockDbSelect.mockResolvedValueOnce([{ content: "this is ridiculous" }, { content: "useless" }]);
       mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
 
@@ -170,6 +173,7 @@ describe("runAiTurn auto-escalation", () => {
     it("fires request-contact Pusher event when no agents online", async () => {
       mockAgentsOnline.mockResolvedValue(false);
       mockAssessSentiment.mockReturnValue({ score: -1, reasons: ["phrase: this is ridiculous"] });
+      mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
       mockDbSelect.mockResolvedValueOnce([{ content: "this is ridiculous" }, { content: "useless" }]);
       mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
 
@@ -178,7 +182,7 @@ describe("runAiTurn auto-escalation", () => {
 
       const requestContact = mockTrigger.mock.calls.find(
         ([channel, event]) =>
-          channel === `session-${SESSION_ID}` && event === "request-contact"
+          channel === `private-session-${SESSION_ID}` && event === "request-contact"
       );
       expect(requestContact).toBeDefined();
       expect(requestContact![2]).toMatchObject({ reason: "frustrated_customer" });
@@ -187,6 +191,7 @@ describe("runAiTurn auto-escalation", () => {
     it("fires session-update on dashboard when agents are online", async () => {
       mockAgentsOnline.mockResolvedValue(true);
       mockAssessSentiment.mockReturnValue({ score: -1, reasons: [] });
+      mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
       mockDbSelect.mockResolvedValueOnce([{ content: "speak to a manager" }, { content: "ridiculous" }]);
       mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
 
@@ -199,7 +204,7 @@ describe("runAiTurn auto-escalation", () => {
       // We want the escalation one specifically.
       const escalationUpdate = mockTrigger.mock.calls.find(
         ([channel, event, payload]) =>
-          channel === "dashboard" &&
+          channel === "private-dashboard" &&
           event === "session-update" &&
           payload?.autoEscalated === true
       );
@@ -210,6 +215,7 @@ describe("runAiTurn auto-escalation", () => {
     it("returns autoEscalated metadata for SSE caller", async () => {
       mockAgentsOnline.mockResolvedValue(false);
       mockAssessSentiment.mockReturnValue({ score: -1, reasons: [] });
+      mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
       mockDbSelect.mockResolvedValueOnce([{ content: "this is ridiculous" }, { content: "where is my order" }]);
       mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
 
@@ -229,6 +235,7 @@ describe("runAiTurn auto-escalation", () => {
       mockAgentsOnline.mockResolvedValue(false);
       // Sentiment stays 0 — single message, normal score
       mockAssessSentiment.mockReturnValue({ score: 0, reasons: [] });
+      mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
       mockDbSelect.mockResolvedValueOnce([]); // loadRecentCustomerMessages: empty prior history
       mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
 
@@ -243,7 +250,7 @@ describe("runAiTurn auto-escalation", () => {
 
       const requestContact = mockTrigger.mock.calls.find(
         ([channel, event]) =>
-          channel === `session-${SESSION_ID}` && event === "request-contact"
+          channel === `private-session-${SESSION_ID}` && event === "request-contact"
       );
       expect(requestContact).toBeDefined();
     });
@@ -251,6 +258,7 @@ describe("runAiTurn auto-escalation", () => {
     it("fires request-contact for 'talk to a human'", async () => {
       mockAgentsOnline.mockResolvedValue(false);
       mockAssessSentiment.mockReturnValue({ score: 0, reasons: [] });
+      mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
       mockDbSelect.mockResolvedValueOnce([]);
       mockDbSelect.mockResolvedValueOnce([]);
 
@@ -266,6 +274,7 @@ describe("runAiTurn auto-escalation", () => {
     it("does NOT close the session for an explicit human request", async () => {
       mockAgentsOnline.mockResolvedValue(false);
       mockAssessSentiment.mockReturnValue({ score: 0, reasons: [] });
+      mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
       mockDbSelect.mockResolvedValueOnce([]);
       mockDbSelect.mockResolvedValueOnce([]);
 
@@ -293,6 +302,7 @@ describe("runAiTurn auto-escalation", () => {
         mockAgentsOnline.mockResolvedValue(false);
         mockAssessSentiment.mockReturnValue({ score: 0, reasons: [] });
         mockAssessConfidence.mockReturnValue({ confidence: "high", reasons: [] });
+        mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
         mockDbSelect.mockResolvedValueOnce([]); // loadRecentCustomerMessages
         mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
 
@@ -311,10 +321,11 @@ describe("runAiTurn auto-escalation", () => {
       mockAgentsOnline.mockResolvedValue(false);
       mockAssessSentiment.mockReturnValue({ score: 0, reasons: [] });
       mockAssessConfidence.mockReturnValue({ confidence: "high", reasons: [] });
-      // No escalation trigger fires, so only loadRecentCustomerMessages runs
-      // (hasAutoEscalated is guarded behind shouldEscalate) — queue exactly one
-      // value so we don't leave a dangling mockResolvedValueOnce that would
-      // poison the next test's select queue.
+      // No escalation trigger fires, so only humanOwnsSession +
+      // loadRecentCustomerMessages run (hasAutoEscalated is guarded behind
+      // shouldEscalate) — queue exactly two values so we don't leave a
+      // dangling mockResolvedValueOnce that would poison the next test.
+      mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
       mockDbSelect.mockResolvedValueOnce([{ content: "do you sell helmets" }]);
 
       const { runAiTurn } = await import("@/lib/ai/runAi");
@@ -362,6 +373,7 @@ describe("runAiTurn auto-escalation", () => {
           return "I'm connecting you now.";
         }
       );
+      mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
       mockDbSelect.mockResolvedValueOnce([]);
       mockDbSelect.mockResolvedValueOnce([]);
 
@@ -380,7 +392,7 @@ describe("runAiTurn auto-escalation", () => {
       // escalateToHuman call
       const requestContact = mockTrigger.mock.calls.find(
         ([channel, event]) =>
-          channel === `session-${SESSION_ID}` && event === "request-contact"
+          channel === `private-session-${SESSION_ID}` && event === "request-contact"
       );
       expect(requestContact).toBeDefined();
 
@@ -407,6 +419,7 @@ describe("runAiTurn auto-escalation", () => {
           return "Connecting you.";
         }
       );
+      mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
       mockDbSelect.mockResolvedValueOnce([]);
       mockDbSelect.mockResolvedValueOnce([]);
 
@@ -418,7 +431,7 @@ describe("runAiTurn auto-escalation", () => {
 
       const contactEvents = mockTrigger.mock.calls.filter(
         ([channel, event]) =>
-          channel === `session-${SESSION_ID}` && event === "request-contact"
+          channel === `private-session-${SESSION_ID}` && event === "request-contact"
       );
       // hasAutoEscalated guard ensures exactly one event per session
       expect(contactEvents).toHaveLength(1);
@@ -432,6 +445,7 @@ describe("runAiTurn auto-escalation", () => {
       mockAgentsOnline.mockResolvedValue(false);
       mockAssessSentiment.mockReturnValue({ score: -1, reasons: [] });
       // First select → loadRecentCustomerMessages; second → hasAutoEscalated returns existing row
+      mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
       mockDbSelect.mockResolvedValueOnce([{ content: "this is ridiculous" }, { content: "useless" }]);
       mockDbSelect.mockResolvedValueOnce([{ id: "evt-existing" }]); // already escalated
 
@@ -447,7 +461,7 @@ describe("runAiTurn auto-escalation", () => {
       // No request-contact
       const requestContact = mockTrigger.mock.calls.find(
         ([channel, event]) =>
-          channel === `session-${SESSION_ID}` && event === "request-contact"
+          channel === `private-session-${SESSION_ID}` && event === "request-contact"
       );
       expect(requestContact).toBeUndefined();
     });
@@ -455,6 +469,7 @@ describe("runAiTurn auto-escalation", () => {
     it("returns autoEscalated: null when already escalated", async () => {
       mockAgentsOnline.mockResolvedValue(false);
       mockAssessSentiment.mockReturnValue({ score: -1, reasons: [] });
+      mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
       mockDbSelect.mockResolvedValueOnce([{ content: "still angry" }]);
       mockDbSelect.mockResolvedValueOnce([{ id: "evt-existing" }]);
 
@@ -471,6 +486,7 @@ describe("runAiTurn auto-escalation", () => {
     mockAgentsOnline.mockResolvedValue(false);
     mockAssessSentiment.mockReturnValue({ score: 0, reasons: [] });
     mockAssessConfidence.mockReturnValue({ confidence: "high", reasons: [] });
+    mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
     mockDbSelect.mockResolvedValueOnce([{ content: "do you sell helmets?" }]);
     mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated not reached
 
@@ -483,7 +499,7 @@ describe("runAiTurn auto-escalation", () => {
     expect(result.autoEscalated).toBeNull();
     const requestContact = mockTrigger.mock.calls.find(
       ([channel, event]) =>
-        channel === `session-${SESSION_ID}` && event === "request-contact"
+        channel === `private-session-${SESSION_ID}` && event === "request-contact"
     );
     expect(requestContact).toBeUndefined();
   });

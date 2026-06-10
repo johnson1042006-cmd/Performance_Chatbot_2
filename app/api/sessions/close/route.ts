@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { sessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { getPusher } from "@/lib/pusher/server";
+import { sessionChannel, DASHBOARD_CHANNEL } from "@/lib/pusher/channels";
 import { log, serializeError } from "@/lib/log";
 import { enqueueTag } from "@/lib/ai/tagger";
 
@@ -37,8 +38,8 @@ export async function POST(req: NextRequest) {
 
     try {
       const pusher = getPusher();
-      await pusher.trigger("dashboard", "session-closed", { sessionId });
-      await pusher.trigger(`session-${sessionId}`, "session-closed", {});
+      await pusher.trigger(DASHBOARD_CHANNEL, "session-closed", { sessionId });
+      await pusher.trigger(sessionChannel(sessionId), "session-closed", {});
     } catch (pusherError) {
       log.warn("sessions.close.pusher_failed", {
         requestId,

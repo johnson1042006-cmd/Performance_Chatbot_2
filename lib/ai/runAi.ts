@@ -19,11 +19,16 @@
  */
 
 import { db } from "@/lib/db";
-import { messages, chatEvents } from "@/lib/db/schema";
+import { messages, chatEvents, sessions } from "@/lib/db/schema";
 import { and, eq, desc } from "drizzle-orm";
 import { getPusher } from "@/lib/pusher/server";
+import { sessionChannel, DASHBOARD_CHANNEL } from "@/lib/pusher/channels";
 import { buildPrompt } from "./buildPrompt";
-import { callClaude, type ToolCallEvent } from "./callClaude";
+import {
+  callClaude,
+  CALL_CLAUDE_ERROR_MESSAGE,
+  type ToolCallEvent,
+} from "./callClaude";
 import { tools as toolCatalog, toolHandlers, escalateToHuman } from "./tools";
 import { assessConfidence, assessSentiment } from "./quality";
 import { anyAgentsOnline } from "@/lib/presence";
@@ -52,6 +57,27 @@ interface RunAiResult {
 
 function aiToolsEnabled(): boolean {
   return process.env.USE_AI_TOOLS === "true";
+}
+
+/**
+ * Typed error thrown when an AI turn is aborted because a human agent claimed
+ * the session mid-turn. Callers should treat this as a clean no-op (the human
+ * will reply), NOT as an AI failure that warrants a fallback message.
+ */
+export function makeHumanTakeoverError(): Error & { isHumanTakeover: true } {
+  const err = new Error("AI turn aborted: human agent took over") as Error & {
+    isHumanTakeover: true;
+  };
+  err.isHumanTakeover = true;
+  return err;
+}
+
+export function isHumanTakeoverError(err: unknown): boolean {
+  return (
+    !!err &&
+    typeof err === "object" &&
+    (err as { isHumanTakeover?: boolean }).isHumanTakeover === true
+  );
 }
 
 async function loadRecentCustomerMessages(sessionId: string): Promise<string[]> {
@@ -90,6 +116,21 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
     stream,
   } = opts;
 
+  // Track whether any tokens actually reached the SSE client. Used by the
+  // post-generation takeover check: if nothing streamed, we can abort
+  // cleanly; if the customer already saw text, persist it so the transcript
+  // matches what was shown.
+  let tokensEmitted = false;
+  const guardedStream = stream
+    ? {
+        onToken: (text: string) => {
+          tokensEmitted = true;
+          stream.onToken(text);
+        },
+        onToolUse: stream.onToolUse,
+      }
+    : undefined;
+
   // Look up agent presence ONCE per turn so buildPrompt can tell the model
   // whether it's safe to promise human follow-up. Same value is reused below
   // for the auto-escalation branch — saves a duplicate query and guarantees
@@ -119,7 +160,7 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
           ctx: { sessionId, requestId },
         }
       : {}),
-    ...(stream ? { stream } : {}),
+    ...(guardedStream ? { stream: guardedStream } : {}),
     onToolCall: useTools
       ? async (e) => {
           toolCalls.push(e);
@@ -153,6 +194,15 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
       : undefined,
   });
 
+  // Post-generation takeover check: a human may have claimed mid-stream.
+  // If nothing was shown to the customer yet, abort without persisting so
+  // the AI never barges into a human-owned conversation. If tokens already
+  // streamed, persist so the transcript matches what the customer saw.
+  if (!tokensEmitted && (await humanOwnsSession(sessionId))) {
+    log.info("ai.run.aborted_human_takeover", { requestId, sessionId });
+    throw makeHumanTakeoverError();
+  }
+
   const confidence = assessConfidence(aiResponse);
   const recentCustomer = await loadRecentCustomerMessages(sessionId);
   const sentiment = assessSentiment(recentCustomer);
@@ -170,13 +220,13 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
 
   try {
     const pusher = getPusher();
-    await pusher.trigger(`session-${sessionId}`, "new-message", {
+    await pusher.trigger(sessionChannel(sessionId), "new-message", {
       id: savedMessage.id,
       role: "ai",
       content: savedMessage.content,
       sentAt: savedMessage.sentAt,
     });
-    await pusher.trigger("dashboard", "session-update", {
+    await pusher.trigger(DASHBOARD_CHANNEL, "session-update", {
       sessionId,
       lastMessage: savedMessage.content,
       role: "ai",
@@ -284,7 +334,7 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
         if (agentsOnline) {
           // aiClaimDueAt was already cleared by escalateToHuman; nudge the
           // dashboard list to refresh so this session bubbles up.
-          await pusher.trigger("dashboard", "session-update", {
+          await pusher.trigger(DASHBOARD_CHANNEL, "session-update", {
             sessionId,
             autoEscalated: true,
             reason,
@@ -292,7 +342,7 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
         } else {
           // No teammates available — ask the widget to render the
           // email-capture form.
-          await pusher.trigger(`session-${sessionId}`, "request-contact", {
+          await pusher.trigger(sessionChannel(sessionId), "request-contact", {
             reason,
           });
         }
@@ -318,12 +368,73 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
 }
 
 /**
- * Persist a final AI message that was already streamed (so callers don't
- * end up double-calling Claude). Used by the SSE branch when the response
- * was streamed token-by-token via runAiTurn's `stream` option.
- *
- * In the current implementation, runAiTurn already persists+notifies
- * after the stream completes, so this is effectively a no-op pass-through
- * exposed to make the SSE generator easier to reason about.
+ * Last-resort recovery when runAiTurn throws: persist a visible fallback AI
+ * message and fan it out over Pusher so the customer never sees dead air.
+ * Returns the saved message, or null if even the fallback insert failed
+ * (callers should then surface an explicit error in the HTTP response).
  */
+export async function persistFallbackAiMessage(
+  sessionId: string,
+  requestId?: string
+): Promise<typeof messages.$inferSelect | null> {
+  let saved: typeof messages.$inferSelect;
+  try {
+    const [row] = await db
+      .insert(messages)
+      .values({
+        sessionId,
+        role: "ai",
+        content: CALL_CLAUDE_ERROR_MESSAGE,
+        confidence: "low",
+      })
+      .returning();
+    saved = row;
+  } catch (err) {
+    log.error("ai.fallback_message_persist_failed", {
+      requestId,
+      sessionId,
+      error: serializeError(err),
+    });
+    return null;
+  }
+
+  try {
+    const pusher = getPusher();
+    await pusher.trigger(sessionChannel(sessionId), "new-message", {
+      id: saved.id,
+      role: "ai",
+      content: saved.content,
+      sentAt: saved.sentAt,
+    });
+    await pusher.trigger(DASHBOARD_CHANNEL, "session-update", {
+      sessionId,
+      lastMessage: saved.content,
+      role: "ai",
+      confidence: "low",
+    });
+  } catch (err) {
+    log.warn("ai.fallback_message_pusher_failed", {
+      requestId,
+      sessionId,
+      error: serializeError(err),
+    });
+  }
+
+  return saved;
+}
+
+/**
+ * True when a human agent currently owns the session. Checked by runAiTurn
+ * before calling Claude and again before persisting so an in-flight AI turn
+ * can't barge into a chat a human just took over.
+ */
+async function humanOwnsSession(sessionId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ claimedByKind: sessions.claimedByKind })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId))
+    .limit(1);
+  return row?.claimedByKind === "human";
+}
+
 export type { RunAiResult };

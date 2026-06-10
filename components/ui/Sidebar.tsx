@@ -21,6 +21,7 @@ import {
   BellOff,
 } from "lucide-react";
 import Badge from "./Badge";
+import { DASHBOARD_CHANNEL } from "@/lib/pusher/channels";
 import AlertsBell from "@/components/dashboard/AlertsBell";
 import { notifyEscalation } from "@/components/dashboard/notifyEscalation";
 import { usePushNotifications } from "@/components/dashboard/usePushNotifications";
@@ -118,47 +119,52 @@ export default function Sidebar() {
   useEffect(() => {
     fetchUnclaimedCount();
 
-    // Listen for Pusher dashboard events
+    // Listen for Pusher dashboard events. The "dashboard" channel is shared
+    // with SessionQueue and other widgets — only unbind our own handler
+    // references and release via the ref-counted helper.
     let pusherCleanup = () => {};
     import("@/lib/pusher/client")
-      .then(({ getPusherClient }) => {
-        const pusher = getPusherClient();
-        const channel = pusher.subscribe("dashboard");
-        channel.bind(
-          "session-update",
-          (
-            payload:
-              | {
-                  sessionId?: string;
-                  autoEscalated?: boolean;
-                  reason?: string;
-                  requestedHuman?: boolean;
-                }
-              | undefined
-          ) => {
-            fetchUnclaimedCount();
-            if (payload?.autoEscalated || payload?.requestedHuman) {
-              notifyEscalation({
-                sessionId: payload.sessionId ?? "",
-                reason: payload.reason ?? "explicit_request",
-                urgency: "normal",
-              });
-            }
+      .then(({ acquireChannel, releaseChannel }) => {
+        const channel = acquireChannel(DASHBOARD_CHANNEL);
+        const onSessionUpdate = (
+          payload:
+            | {
+                sessionId?: string;
+                autoEscalated?: boolean;
+                reason?: string;
+                requestedHuman?: boolean;
+              }
+            | undefined
+        ) => {
+          fetchUnclaimedCount();
+          if (payload?.autoEscalated || payload?.requestedHuman) {
+            notifyEscalation({
+              sessionId: payload.sessionId ?? "",
+              reason: payload.reason ?? "explicit_request",
+              urgency: "normal",
+            });
           }
-        );
+        };
+        const onEscalationRequested = (payload: {
+          sessionId: string;
+          reason: string;
+          urgency: string;
+        }) => {
+          fetchUnclaimedCount();
+          notifyEscalation(payload);
+        };
+        channel.bind("session-update", onSessionUpdate);
         channel.bind("session-claimed", fetchUnclaimedCount);
         channel.bind("session-released", fetchUnclaimedCount);
         channel.bind("session-closed", fetchUnclaimedCount);
-        channel.bind(
-          "escalation-requested",
-          (payload: { sessionId: string; reason: string; urgency: string }) => {
-            fetchUnclaimedCount();
-            notifyEscalation(payload);
-          }
-        );
+        channel.bind("escalation-requested", onEscalationRequested);
         pusherCleanup = () => {
-          channel.unbind_all();
-          pusher.unsubscribe("dashboard");
+          channel.unbind("session-update", onSessionUpdate);
+          channel.unbind("session-claimed", fetchUnclaimedCount);
+          channel.unbind("session-released", fetchUnclaimedCount);
+          channel.unbind("session-closed", fetchUnclaimedCount);
+          channel.unbind("escalation-requested", onEscalationRequested);
+          releaseChannel(DASHBOARD_CHANNEL);
         };
       })
       .catch(() => {});

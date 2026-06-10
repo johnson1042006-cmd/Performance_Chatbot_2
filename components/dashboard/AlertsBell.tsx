@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { Bell, X } from "lucide-react";
 import { FRIENDLY } from "./alertFriendlyNames";
-import { notifyEscalation } from "./notifyEscalation";
+import { ALERTS_CHANNEL } from "@/lib/pusher/channels";
 
 interface AlertEvent {
   id: string;
@@ -47,13 +47,13 @@ export default function AlertsBell() {
     const id = setInterval(fetchEvents, 30_000);
     let cleanup = () => {};
     import("@/lib/pusher/client")
-      .then(({ getPusherClient }) => {
-        const pusher = getPusherClient();
-        const channel = pusher.subscribe("alerts");
-        channel.bind("alert-fired", () => void fetchEvents());
+      .then(({ acquireChannel, releaseChannel }) => {
+        const channel = acquireChannel(ALERTS_CHANNEL);
+        const onAlertFired = () => void fetchEvents();
+        channel.bind("alert-fired", onAlertFired);
         cleanup = () => {
-          channel.unbind_all();
-          pusher.unsubscribe("alerts");
+          channel.unbind("alert-fired", onAlertFired);
+          releaseChannel(ALERTS_CHANNEL);
         };
       })
       .catch(() => {});
@@ -99,21 +99,6 @@ export default function AlertsBell() {
               className="text-text-secondary hover:text-text-primary"
             >
               <X size={12} />
-            </button>
-          </div>
-          <div className="px-3 py-2 border-b border-border">
-            <button
-              onClick={() =>
-                notifyEscalation({
-                  sessionId: `test-${crypto.randomUUID()}`,
-                  reason: "explicit_request",
-                  urgency: "normal",
-                })
-              }
-              title="Test notification & chime"
-              className="w-full text-left text-xs font-medium text-accent-solid hover:underline"
-            >
-              Test escalation chime
             </button>
           </div>
           {events.length === 0 ? (

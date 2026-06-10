@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import TopBar from "@/components/ui/TopBar";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import { useToast } from "@/components/ui/Toast";
 import { Plus, Trash2 } from "lucide-react";
 import KnowledgeEditor from "@/components/dashboard/manager/KnowledgeEditor";
 import CannedRepliesEditor from "@/components/dashboard/manager/CannedRepliesEditor";
@@ -25,10 +27,18 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "canned", label: "Canned Replies" },
 ];
 
+const HIDDEN_TOPICS = ["store_catalog", "store_catalog_index"];
+
 export default function KnowledgeBasePage() {
+  const { addToast } = useToast();
   const [entries, setEntries] = useState<KnowledgeEntry[]>([]);
   const [activeTab, setActiveTab] = useState<Tab>("policies");
   const [activeTopic, setActiveTopic] = useState<string | null>(null);
+  const [newFaqOpen, setNewFaqOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{
+    id: string;
+    topic: string;
+  } | null>(null);
 
   const fetchEntries = useCallback(async () => {
     try {
@@ -44,7 +54,6 @@ export default function KnowledgeBasePage() {
     void fetchEntries();
   }, [fetchEntries]);
 
-  const HIDDEN_TOPICS = ["store_catalog", "store_catalog_index"];
   const policies = useMemo(
     () => entries.filter((e) => !e.isFaq && !HIDDEN_TOPICS.includes(e.topic)).sort((a, b) => a.topic.localeCompare(b.topic)),
     [entries]
@@ -69,40 +78,62 @@ export default function KnowledgeBasePage() {
   }, [activeTab, policies, faqs, activeTopic]);
 
   const handleSave = async (topic: string, content: string) => {
-    await fetch("/api/admin/knowledge", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic, content }),
-    });
+    try {
+      const res = await fetch("/api/admin/knowledge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic, content }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      addToast("Saved", "success");
+    } catch (error) {
+      console.error("Failed to save knowledge entry:", error);
+      addToast("Failed to save. Please try again.", "error");
+      return;
+    }
     await fetchEntries();
   };
 
-  const handleNewFaq = async () => {
-    const title = window.prompt(
-      "FAQ title (will be slugified into the topic id):"
-    );
+  const handleNewFaq = async (title?: string) => {
+    setNewFaqOpen(false);
     if (!title) return;
     const taken = new Set(entries.map((e) => e.topic));
     const topic = dedupSlug(slugify(title), taken);
-    await fetch("/api/admin/knowledge", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        topic,
-        content: `Q: ${title}\n\nA: `,
-        isFaq: true,
-      }),
-    });
+    try {
+      const res = await fetch("/api/admin/knowledge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topic,
+          content: `Q: ${title}\n\nA: `,
+          isFaq: true,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (error) {
+      console.error("Failed to create FAQ:", error);
+      addToast("Failed to create FAQ. Please try again.", "error");
+      return;
+    }
     await fetchEntries();
     setActiveTab("faqs");
     setActiveTopic(topic);
   };
 
-  const handleDelete = async (id: string, topic: string) => {
-    if (!window.confirm(`Delete the "${topic}" entry?`)) return;
-    await fetch(`/api/admin/knowledge?id=${encodeURIComponent(id)}`, {
-      method: "DELETE",
-    });
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    const { id } = deleteTarget;
+    setDeleteTarget(null);
+    try {
+      const res = await fetch(`/api/admin/knowledge?id=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (error) {
+      console.error("Failed to delete knowledge entry:", error);
+      addToast("Failed to delete. Please try again.", "error");
+      return;
+    }
     await fetchEntries();
     setActiveTopic(null);
   };
@@ -144,7 +175,11 @@ export default function KnowledgeBasePage() {
                   {activeTab === "policies" ? "Policies" : "FAQs"}
                 </h3>
                 {activeTab === "faqs" && (
-                  <Button size="sm" variant="secondary" onClick={handleNewFaq}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setNewFaqOpen(true)}
+                  >
                     <Plus size={12} className="mr-1" /> New
                   </Button>
                 )}
@@ -192,7 +227,12 @@ export default function KnowledgeBasePage() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleDelete(selected.id, selected.topic)}
+                        onClick={() =>
+                          setDeleteTarget({
+                            id: selected.id,
+                            topic: selected.topic,
+                          })
+                        }
                       >
                         <Trash2 size={12} className="mr-1" />
                         Delete FAQ
@@ -213,6 +253,30 @@ export default function KnowledgeBasePage() {
           </div>
         ) : null}
       </div>
+
+      <ConfirmDialog
+        open={newFaqOpen}
+        title="New FAQ"
+        confirmLabel="Create"
+        inputLabel="FAQ title"
+        inputPlaceholder="e.g. Do you ship internationally?"
+        onConfirm={(title) => void handleNewFaq(title)}
+        onCancel={() => setNewFaqOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete entry"
+        message={
+          deleteTarget
+            ? `Delete the "${deleteTarget.topic}" entry? This cannot be undone.`
+            : undefined
+        }
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => void handleDelete()}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </>
   );
 }

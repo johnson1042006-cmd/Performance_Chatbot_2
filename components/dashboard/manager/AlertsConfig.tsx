@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { Plus, Trash2 } from "lucide-react";
 import { KINDS } from "./alertKinds";
 
@@ -24,6 +25,7 @@ export default function AlertsConfig() {
   const [rows, setRows] = useState<Threshold[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -73,7 +75,7 @@ export default function AlertsConfig() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm("Delete this alert threshold?")) return;
+    setConfirmDeleteId(null);
     await fetch(`/api/admin/alert-thresholds?id=${encodeURIComponent(id)}`, {
       method: "DELETE",
     });
@@ -227,9 +229,9 @@ export default function AlertsConfig() {
                     </td>
                     <td className="px-4 py-2 text-right">
                       <button
-                        onClick={() => handleDelete(t.id)}
+                        onClick={() => setConfirmDeleteId(t.id)}
                         className="text-text-secondary hover:text-error"
-                        aria-label="Delete"
+                        aria-label="Delete alert threshold"
                       >
                         <Trash2 size={14} />
                       </button>
@@ -241,6 +243,16 @@ export default function AlertsConfig() {
           </tbody>
         </table>
       </div>
+
+      <ConfirmDialog
+        open={!!confirmDeleteId}
+        title="Delete threshold"
+        message="Delete this alert threshold? This cannot be undone."
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => confirmDeleteId && void handleDelete(confirmDeleteId)}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
     </Card>
   );
 }

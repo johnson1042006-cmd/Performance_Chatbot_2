@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getPusher } from "@/lib/pusher/server";
+import { sessionChannel } from "@/lib/pusher/channels";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,7 @@ export async function POST(
   }
   try {
     const pusher = getPusher();
-    await pusher.trigger(`session-${params.id}`, "typing", {
+    await pusher.trigger(sessionChannel(params.id), "typing", {
       agentName: authSession.user.name,
     });
     return NextResponse.json({ ok: true });

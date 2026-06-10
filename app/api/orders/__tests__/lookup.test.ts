@@ -67,6 +67,12 @@ vi.mock("@/lib/log", () => ({
       : { message: String(err) },
 }));
 
+// Token enforcement is covered in security.test.ts; allow everything here so
+// the route's own selects line up with the positional mock queues.
+vi.mock("@/lib/sessions/verifySessionToken", () => ({
+  verifySessionAccess: vi.fn().mockResolvedValue(true),
+}));
+
 const mockGetOrder = vi.fn();
 const mockGetShipments = vi.fn();
 vi.mock("@/lib/bigcommerce/client", () => ({

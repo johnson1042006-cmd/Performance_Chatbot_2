@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSession } from "next-auth/react";
 import SessionCard from "./SessionCard";
+import { DASHBOARD_CHANNEL } from "@/lib/pusher/channels";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { MessageSquare } from "lucide-react";
 
@@ -139,22 +140,28 @@ export default function SessionQueue({
     fetchSessions();
   }, [refetchKey, fetchSessions]);
 
+  // The "dashboard" channel is SHARED across the app (Sidebar, AlertsBell,
+  // analytics widgets). Cleanup must only unbind this component's own handler
+  // references — unbind_all()/unsubscribe() here would silently disconnect
+  // every other listener on the channel.
   useEffect(() => {
     let cleanup = () => {};
-    import("@/lib/pusher/client").then(({ getPusherClient }) => {
-      const pusher = getPusherClient();
-      const channel = pusher.subscribe("dashboard");
-      channel.bind("session-update", () => fetchSessions());
-      channel.bind("session-claimed", () => fetchSessions());
-      channel.bind("session-released", () => fetchSessions());
-      channel.bind("session-closed", () => fetchSessions());
-      channel.bind("escalation-requested", () => {
-        fetchSessions();
-        // Chime/notification fires globally from Sidebar.tsx to cover non-Live-Chats pages.
-      });
+    import("@/lib/pusher/client").then(({ acquireChannel, releaseChannel }) => {
+      const channel = acquireChannel(DASHBOARD_CHANNEL);
+      const refetch = () => fetchSessions();
+      const events = [
+        "session-update",
+        "session-claimed",
+        "session-released",
+        "session-closed",
+        // Chime/notification fires globally from Sidebar.tsx to cover
+        // non-Live-Chats pages — here we only refresh the queue.
+        "escalation-requested",
+      ];
+      for (const event of events) channel.bind(event, refetch);
       cleanup = () => {
-        channel.unbind_all();
-        pusher.unsubscribe("dashboard");
+        for (const event of events) channel.unbind(event, refetch);
+        releaseChannel(DASHBOARD_CHANNEL);
       };
     }).catch(() => {});
     return () => cleanup();

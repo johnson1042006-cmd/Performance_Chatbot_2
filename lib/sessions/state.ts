@@ -4,10 +4,15 @@
  * `sessions.status` is always kept in sync by syncStatus() — never set directly.
  */
 import { db } from "@/lib/db";
-import { sessions, users, chatEvents } from "@/lib/db/schema";
+import { sessions, users, chatEvents, knowledgeBase } from "@/lib/db/schema";
 import { eq, isNull, lt, and, or, ne } from "drizzle-orm";
 import { getPusher } from "@/lib/pusher/server";
-import { runAiTurn } from "@/lib/ai/runAi";
+import { sessionChannel, DASHBOARD_CHANNEL } from "@/lib/pusher/channels";
+import {
+  runAiTurn,
+  persistFallbackAiMessage,
+  isHumanTakeoverError,
+} from "@/lib/ai/runAi";
 import { sql } from "drizzle-orm";
 import { log, serializeError } from "@/lib/log";
 import { enqueueTag } from "@/lib/ai/tagger";
@@ -251,10 +256,10 @@ export async function processDueAiClaims(): Promise<void> {
 
       try {
         const pusher = getPusher();
-        await pusher.trigger(`session-${session.id}`, "session-claimed", {
+        await pusher.trigger(sessionChannel(session.id), "session-claimed", {
           kind: "ai",
         });
-        await pusher.trigger("dashboard", "session-claimed", {
+        await pusher.trigger(DASHBOARD_CHANNEL, "session-claimed", {
           sessionId: session.id,
           kind: "ai",
         });
@@ -265,12 +270,111 @@ export async function processDueAiClaims(): Promise<void> {
         });
       }
     } catch (err) {
+      if (isHumanTakeoverError(err)) {
+        continue; // human grabbed it mid-turn — they'll reply
+      }
       log.error("sessions.ai_fallback_failed", {
         sessionId: session.id,
         error: serializeError(err),
       });
+      // The session is now claimed by AI but has no reply — without this the
+      // customer waits forever. Persist a visible fallback so they get an
+      // answer, and the next customer message retries a real AI turn via the
+      // inline claimed-by-ai path.
+      await persistFallbackAiMessage(session.id);
     }
   }
+}
+
+// ─── Release stranded human claims ──────────────────────────────────────────
+
+/**
+ * How long an agent's presence heartbeat may be stale before their claimed
+ * sessions are considered stranded. Heartbeats fire every ~30s while a
+ * dashboard tab is open, so 5 minutes tolerates transient drops/refreshes
+ * while still freeing customers within one demo-able window.
+ */
+export const STRANDED_CLAIM_SECONDS = 300;
+
+async function getAiReclaimDueAt(): Promise<Date | null> {
+  try {
+    const [entry] = await db
+      .select()
+      .from(knowledgeBase)
+      .where(eq(knowledgeBase.topic, "bot_settings"))
+      .limit(1);
+    if (!entry) return new Date(Date.now() + 60 * 1000);
+    const p = JSON.parse(entry.content);
+    if (p.aiEnabled === false) return null;
+    const seconds = Math.min(300, Math.max(10, Number(p.fallbackTimerSeconds) || 60));
+    return new Date(Date.now() + seconds * 1000);
+  } catch {
+    return new Date(Date.now() + 60 * 1000);
+  }
+}
+
+/**
+ * Cron sweep: releases `active_human` sessions whose owning agent's presence
+ * heartbeat has gone stale (crashed tab, closed laptop). Without this, the
+ * customer sees "connected with our team" forever while nobody is there.
+ * Released sessions go back to the queue with an AI-claim timer (when the AI
+ * is enabled) so processDueAiClaims picks them up if no other agent does.
+ */
+export async function releaseStrandedHumanClaims(): Promise<number> {
+  const cutoff = new Date(Date.now() - STRANDED_CLAIM_SECONDS * 1000);
+
+  const stranded = await db
+    .select({ sessionId: sessions.id, agentId: users.id })
+    .from(sessions)
+    .innerJoin(users, eq(sessions.claimedByUserId, users.id))
+    .where(
+      and(
+        eq(sessions.claimedByKind, "human"),
+        ne(sessions.status, "closed"),
+        // Grace for fresh claims: a heartbeat can lag right after claiming.
+        lt(sessions.claimedAt, cutoff),
+        or(isNull(users.lastHeartbeatAt), lt(users.lastHeartbeatAt, cutoff))
+      )
+    )
+    .limit(20);
+
+  if (stranded.length === 0) return 0;
+
+  const aiClaimDueAt = await getAiReclaimDueAt();
+  let released = 0;
+
+  for (const { sessionId, agentId } of stranded) {
+    try {
+      const updated = await releaseToQueue({
+        sessionId,
+        actorUserId: agentId,
+        aiClaimDueAt,
+      });
+      if (!updated) continue;
+      released++;
+      log.warn("sessions.stranded_claim_released", { sessionId, agentId });
+      try {
+        const pusher = getPusher();
+        await pusher.trigger(sessionChannel(sessionId), "session-released", {
+          agentId,
+          reason: "agent_offline",
+        });
+        await pusher.trigger(DASHBOARD_CHANNEL, "session-released", { sessionId });
+      } catch (pusherErr) {
+        log.warn("sessions.stranded_release_pusher_failed", {
+          sessionId,
+          error: serializeError(pusherErr),
+        });
+      }
+    } catch (err) {
+      log.error("sessions.stranded_release_failed", {
+        sessionId,
+        error: serializeError(err),
+      });
+    }
+  }
+
+  return released;
 }
 
 // ─── Sweep stale sessions ────────────────────────────────────────────────────
@@ -318,14 +422,14 @@ export async function sweepStaleSessions(): Promise<number> {
     }
     try {
       const pusher = getPusher();
-      await pusher.trigger("dashboard", "session-update", {
+      await pusher.trigger(DASHBOARD_CHANNEL, "session-update", {
         staleClosedIds: stale.map((s) => s.id),
       });
       // Fan out session-closed on each per-session channel so the dashboard
       // right pane and the customer embed can react in real time. Pusher's
       // multi-channel trigger accepts up to 100 channels per call; chunk to
       // be safe.
-      const sessionChannels = stale.map((s) => `session-${s.id}`);
+      const sessionChannels = stale.map((s) => sessionChannel(s.id));
       const CHUNK = 100;
       for (let i = 0; i < sessionChannels.length; i += CHUNK) {
         await pusher.trigger(

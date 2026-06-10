@@ -460,10 +460,14 @@ export default function ChatWidget() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let pusherInstance: any = null;
 
-    import("@/lib/pusher/client").then(({ getPusherClient }) => {
+    import("@/lib/pusher/client").then(
+      ({ getPusherClient, setPusherSessionToken }) => {
       if (cancelled) return;
+      // Private-channel auth: the /api/pusher/auth endpoint validates this
+      // token (or the pc_st_* cookie) before authorizing the subscription.
+      setPusherSessionToken(sessionTokenRef.current);
       pusherInstance = getPusherClient();
-      channel = pusherInstance.subscribe(`session-${dbSessionId}`);
+      channel = pusherInstance.subscribe(`private-session-${dbSessionId}`);
       // Unbind before binding — guards against Pusher reusing a channel object
       // that still holds handlers from a previous subscription cycle (the server-side
       // unsubscribe acknowledgment is async, so the channel can be handed back with
@@ -485,17 +489,12 @@ export default function ChatWidget() {
       channel.bind("request-contact", () => {
         setChipForm("email_capture");
       });
-      console.log(
-        "[Pusher] new-message handler count after bind:",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (channel as any).callbacks?._callbacks?.["new-message"]?.length ?? "unknown"
-      );
     });
 
     return () => {
       cancelled = true;
       channel?.unbind_all();
-      pusherInstance?.unsubscribe(`session-${dbSessionId}`);
+      pusherInstance?.unsubscribe(`private-session-${dbSessionId}`);
     };
   }, [dbSessionId, handleNewMessage, handleTyping, handleClaimed, handleReleased, handleClosed]);
 
@@ -553,6 +552,11 @@ export default function ChatWidget() {
     ctx: PageContext | null
   ): Promise<SseOutcome> => {
     let res: Response;
+    // Abort if the server never sends response headers (hung connection).
+    // The timer is cleared as soon as headers arrive so a healthy long
+    // stream is never cut off mid-reply.
+    const headerCtrl = new AbortController();
+    const headerTid = setTimeout(() => headerCtrl.abort(), CHAT_POST_MS);
     try {
       res = await fetch("/api/chat", {
         method: "POST",
@@ -561,9 +565,12 @@ export default function ChatWidget() {
           Accept: "text/event-stream",
         }),
         body: JSON.stringify({ message: content, sessionId: sid, pageContext: ctx }),
+        signal: headerCtrl.signal,
       });
     } catch {
       return { kind: "transport" };
+    } finally {
+      clearTimeout(headerTid);
     }
     const ct = res.headers.get("content-type") || "";
     if (!ct.includes("text/event-stream") || !res.body) {
@@ -640,9 +647,29 @@ export default function ChatWidget() {
       }
     };
 
+    // Idle guard: if no bytes arrive for this long mid-stream, treat the
+    // stream as dead instead of spinning forever.
+    const SSE_IDLE_MS = 45_000;
+    const readWithIdleTimeout = async (): Promise<
+      ReadableStreamReadResult<Uint8Array>
+    > => {
+      let idleTid: ReturnType<typeof setTimeout> | undefined;
+      const idle = new Promise<never>((_, reject) => {
+        idleTid = setTimeout(
+          () => reject(new Error("sse_idle_timeout")),
+          SSE_IDLE_MS
+        );
+      });
+      try {
+        return await Promise.race([reader.read(), idle]);
+      } finally {
+        clearTimeout(idleTid);
+      }
+    };
+
     try {
       while (true) {
-        const { value, done } = await reader.read();
+        const { value, done } = await readWithIdleTimeout();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         let nlIdx: number;
@@ -666,6 +693,8 @@ export default function ChatWidget() {
       if (bubbleAdded) {
         setMessages((prev) => prev.filter((m) => m.id !== streamingId));
       }
+      reader.cancel().catch(() => {});
+      setWaitingForReply(false);
       return { kind: "sse_error", error: err instanceof Error ? err.message : undefined };
     }
 
@@ -676,6 +705,10 @@ export default function ChatWidget() {
     if (bubbleAdded && assembled.length === 0) {
       setMessages((prev) => prev.filter((m) => m.id !== streamingId));
     }
+
+    // The stream is over — never leave the typing indicator running. If no
+    // tokens arrived, the persisted reply (if any) lands via Pusher/poll.
+    setWaitingForReply(false);
 
     return { kind: "sse_done" };
   };
@@ -850,6 +883,15 @@ export default function ChatWidget() {
 
       if (data.message) {
         setMessages((prev) => mergeRealMessage(prev, data.message as Message));
+      }
+
+      // JSON AI branches return the AI reply inline. Render it directly so
+      // the customer isn't waiting on Pusher delivery or the 8s poll.
+      if (data.aiMessage) {
+        setMessages((prev) =>
+          mergeRealMessage(prev, data.aiMessage as Message)
+        );
+        setWaitingForReply(false);
       }
 
       // Update session state from server response

@@ -10,8 +10,11 @@ describe("resolveSessionState", () => {
     expect(resolveSessionState("waiting", "ai")).toBe("active_ai");
   });
 
-  it("transitions active_human → active_ai on an AI message (R5 re-claim path)", () => {
-    expect(resolveSessionState("active_human", "ai")).toBe("active_ai");
+  it("never downgrades active_human on an AI message (late in-flight AI reply)", () => {
+    // A human owns the session; a straggling AI message must not flip the
+    // banner back to "AI Assistant". Legit AI re-claims go through the
+    // session-released event (→ waiting) first.
+    expect(resolveSessionState("active_human", "ai")).toBe("active_human");
   });
 
   it("leaves active_ai unchanged on a subsequent AI message", () => {
