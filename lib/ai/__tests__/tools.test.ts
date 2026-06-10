@@ -242,19 +242,42 @@ describe("toolHandlers", () => {
 //   - the returned text equals the final assistant text
 
 const mockAnthropicCreate = vi.fn();
+const mockAnthropicStream = vi.fn(() => {
+  throw new Error("stream() not exercised in this test");
+});
 
 vi.mock("@anthropic-ai/sdk", () => {
   return {
     default: class {
       messages = {
         create: (...args: any[]) => mockAnthropicCreate(...args),
-        stream: () => {
-          throw new Error("stream() not exercised in this test");
-        },
+        stream: (...args: any[]) => mockAnthropicStream(...args),
       };
     },
   };
 });
+
+/**
+ * Builds a fake Anthropic streaming handle. `textDeltas` are emitted on the
+ * "text" event; `final` is returned from finalMessage().
+ */
+function makeFakeStream(
+  textDeltas: string[],
+  final: { stop_reason: string; content: any[] }
+) {
+  const listeners: Record<string, (arg: any) => void> = {};
+  return {
+    on(event: string, cb: (arg: any) => void) {
+      listeners[event] = cb;
+      return this;
+    },
+    async finalMessage() {
+      for (const d of textDeltas) listeners["text"]?.(d);
+      for (const block of final.content) listeners["contentBlock"]?.(block);
+      return final;
+    },
+  };
+}
 
 describe("callClaude tool loop", () => {
   beforeEach(() => {
@@ -428,5 +451,37 @@ describe("callClaude tool loop", () => {
     );
 
     expect(out).toBe("Here are the options");
+  });
+
+  it("streams the fallback text when the final iteration produces no text", async () => {
+    // Streaming path: the final turn ends with no text blocks (e.g. only a
+    // stray tool_use / empty content). Without FIX-1 the SSE client would see
+    // a blank bubble while the DB persisted the fallback apology.
+    mockAnthropicStream.mockReturnValueOnce(
+      makeFakeStream([], { stop_reason: "end_turn", content: [] }) as any
+    );
+
+    const { callClaude } = await import("@/lib/ai/callClaude");
+    const emitted: string[] = [];
+    const out = await callClaude(
+      "system",
+      [{ role: "user", content: "do you carry tire fitment?" }],
+      {
+        tools: [
+          { name: "search_products", description: "", input_schema: { type: "object", properties: {} } },
+        ] as any,
+        toolHandlers: { search_products: async () => ({ ok: true }) } as any,
+        ctx: { sessionId: "s1" },
+        stream: {
+          onToken: (t: string) => emitted.push(t),
+          onToolUse: () => {},
+        },
+      }
+    );
+
+    // onToken fired exactly once, with the exact string that was returned.
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]).toBe(out);
+    expect(out).toContain("flagged this for our team");
   });
 });

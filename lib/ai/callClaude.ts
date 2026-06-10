@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { ToolHandler, ToolCtx } from "./tools";
+import { log } from "@/lib/log";
 
 let _client: Anthropic | null = null;
 
@@ -16,7 +17,7 @@ const MODEL = "claude-haiku-4-5";
 const MAX_TOKENS = 2048;
 
 const NO_TEXT_FALLBACK =
-  "I apologize, I was unable to generate a response. Please try again.";
+  "I've flagged this for our team — a teammate will follow up here shortly. In the meantime, you can browse our full catalog at https://performancecycle.com/ or ask me anything else about gear, parts, or services.";
 
 const ERROR_FALLBACK =
   "I'm having trouble connecting right now. A human agent will be with you shortly, or please try sending your message again.";
@@ -203,6 +204,24 @@ async function callClaudeWithTools(
 
   const history: AnyMsg[] = [...initialMessages];
   let collectedText = "";
+  // Tracks whether any text has actually been pushed to the SSE client. If a
+  // return point is reached without having emitted, we emit the exact return
+  // value so streamed output always equals the persisted output.
+  let tokensEmittedToClient = false;
+
+  const finalize = (value: string): string => {
+    if (value === NO_TEXT_FALLBACK) {
+      log.warn("ai.empty_final_text", {
+        sessionId: ctx.sessionId || undefined,
+        requestId: ctx.requestId,
+      });
+    }
+    if (stream && !tokensEmittedToClient) {
+      stream.onToken(value);
+      tokensEmittedToClient = true;
+    }
+    return value;
+  };
 
   for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
     let assistantBlocks: Anthropic.ContentBlock[];
@@ -236,6 +255,7 @@ async function callClaudeWithTools(
         // this iteration is the final turn (not a mid-loop tool call).
         if (stopReason !== "tool_use" && pendingDeltas.length > 0) {
           stream.onToken(pendingDeltas.join(""));
+          tokensEmittedToClient = true;
         }
       } else {
         const response = await client.messages.create({
@@ -269,14 +289,14 @@ async function callClaudeWithTools(
     history.push({ role: "assistant", content: assistantBlocks });
 
     if (stopReason !== "tool_use") {
-      return collectedText || NO_TEXT_FALLBACK;
+      return finalize(collectedText || NO_TEXT_FALLBACK);
     }
 
     const toolUses = assistantBlocks.filter(
       (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
     );
     if (toolUses.length === 0) {
-      return collectedText || NO_TEXT_FALLBACK;
+      return finalize(collectedText || NO_TEXT_FALLBACK);
     }
 
     const toolResults: ToolResultMsg["content"] = [];
@@ -330,11 +350,14 @@ async function callClaudeWithTools(
       .filter((b): b is Anthropic.TextBlock => b.type === "text")
       .map((b) => b.text)
       .join("");
-    if (stream && finalText) stream.onToken(finalText);
-    return finalText || collectedText || NO_TEXT_FALLBACK;
+    if (stream && finalText) {
+      stream.onToken(finalText);
+      tokensEmittedToClient = true;
+    }
+    return finalize(finalText || collectedText || NO_TEXT_FALLBACK);
   } catch (error) {
     console.error("callClaude final tool-cap call failed:", error);
-    return collectedText || NO_TEXT_FALLBACK;
+    return finalize(collectedText || NO_TEXT_FALLBACK);
   }
 }
 
