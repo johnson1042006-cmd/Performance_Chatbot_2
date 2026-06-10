@@ -23,7 +23,8 @@ describe("callClaude edge cases", () => {
 
     const { callClaude } = await import("@/lib/ai/callClaude");
     const result = await callClaude("system", [{ role: "user", content: "hi" }]);
-    expect(result).toContain("unable to generate");
+    // FIX-1 upgraded the no-text fallback copy.
+    expect(result).toContain("flagged this for our team");
   });
 
   it("returns graceful fallback when API key is invalid (simulated)", async () => {

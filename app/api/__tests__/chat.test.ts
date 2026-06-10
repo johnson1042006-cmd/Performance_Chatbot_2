@@ -268,7 +268,12 @@ describe("POST /api/chat/ai-fallback", () => {
   });
 
   it("sets status to active_ai for waiting sessions", async () => {
-    mockDbSelect.mockResolvedValueOnce([{ id: "sess-1", status: "waiting" }]);
+    mockDbSelect
+      .mockResolvedValueOnce([{ id: "sess-1", status: "waiting" }]) // session lookup
+      // FIX-5 freshness guard: newest message (not an AI reply) + a recent
+      // customer message so the route proceeds to run the AI turn.
+      .mockResolvedValueOnce([{ role: "customer", sentAt: new Date() }])
+      .mockResolvedValueOnce([{ sentAt: new Date() }]);
     // claimByAi does `update(...).returning()` and destructures the first
     // row — must be an array containing the won session.
     mockDbUpdate.mockResolvedValueOnce([
