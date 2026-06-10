@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSession } from "next-auth/react";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
-import { UserPlus } from "lucide-react";
+import { UserPlus, Trash2 } from "lucide-react";
 
 interface User {
   id: string;
@@ -24,6 +25,8 @@ interface TeamTableProps {
 
 export default function TeamTable({ onInvite }: TeamTableProps) {
   const { addToast } = useToast();
+  const { data: sessionData } = useSession();
+  const sessionUserId = sessionData?.user?.id;
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -79,6 +82,22 @@ export default function TeamTable({ onInvite }: TeamTableProps) {
         `Failed to ${currentActive ? "deactivate" : "activate"} user. Please try again.`,
         "error"
       );
+    }
+  };
+
+  const deleteUser = async (userId: string, userName: string) => {
+    if (!window.confirm(`Permanently delete ${userName}? This cannot be undone.`)) return;
+    try {
+      const res = await fetch(`/api/admin/users/${userId}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        addToast(data.error ?? "Failed to delete user.", "error");
+        return;
+      }
+      setUsers((prev) => prev.filter((u) => u.id !== userId));
+      addToast(`${userName} has been removed.`, "success");
+    } catch {
+      addToast("Failed to delete user. Please try again.", "error");
     }
   };
 
@@ -178,13 +197,25 @@ export default function TeamTable({ onInvite }: TeamTableProps) {
                     {new Date(user.createdAt).toLocaleDateString()}
                   </td>
                   <td className="px-6 py-3 text-right">
-                    <Button
-                      variant={user.isActive ? "ghost" : "secondary"}
-                      size="sm"
-                      onClick={() => toggleActive(user.id, user.isActive)}
-                    >
-                      {user.isActive ? "Deactivate" : "Activate"}
-                    </Button>
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant={user.isActive ? "ghost" : "secondary"}
+                        size="sm"
+                        onClick={() => toggleActive(user.id, user.isActive)}
+                      >
+                        {user.isActive ? "Deactivate" : "Activate"}
+                      </Button>
+                      {user.id !== sessionUserId && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                          onClick={() => deleteUser(user.id, user.name)}
+                        >
+                          <Trash2 size={14} />
+                        </Button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))
