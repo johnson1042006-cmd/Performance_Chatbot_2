@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { sessions, messages } from "@/lib/db/schema";
 import { eq, gte, sql, and, ne, isNull } from "drizzle-orm";
-import { sweepStaleSessions, processDueAiClaims } from "@/lib/sessions/state";
+import { maybeLazyTick } from "@/lib/sessions/lazyTick";
 import { log, serializeError } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
@@ -17,8 +17,8 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Sweep first so open/queued counts are accurate
-    await Promise.allSettled([sweepStaleSessions(), processDueAiClaims()]);
+    // Sweep first so open/queued counts are accurate (debounced)
+    await maybeLazyTick();
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);

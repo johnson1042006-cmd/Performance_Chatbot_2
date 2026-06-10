@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { sessions, users, messages, chatEvents } from "@/lib/db/schema";
 import { asc, desc, eq, ne, sql, inArray, and } from "drizzle-orm";
-import { processDueAiClaims, sweepStaleSessions } from "@/lib/sessions/state";
+import { maybeLazyTick } from "@/lib/sessions/lazyTick";
 import { enforce, getClientIp } from "@/lib/rateLimit";
 import { extractGeoFromHeaders } from "@/lib/utils/geo";
 import { log, serializeError } from "@/lib/log";
@@ -10,8 +10,8 @@ import { log, serializeError } from "@/lib/log";
 export async function GET() {
   const requestId = crypto.randomUUID();
   try {
-    // Lazy tick: expire stale sessions and process AI claims
-    await Promise.allSettled([sweepStaleSessions(), processDueAiClaims()]);
+    // Lazy tick: expire stale sessions and process AI claims (debounced)
+    await maybeLazyTick();
 
     const rows = await db
       .select({

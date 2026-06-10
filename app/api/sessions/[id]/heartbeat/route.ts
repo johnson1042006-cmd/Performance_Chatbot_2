@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { recordSessionHeartbeat, processDueAiClaims } from "@/lib/sessions/state";
+import { recordSessionHeartbeat } from "@/lib/sessions/state";
+import { maybeLazyTick } from "@/lib/sessions/lazyTick";
 
 export const dynamic = "force-dynamic";
 
@@ -15,9 +16,9 @@ export async function POST(
     await recordSessionHeartbeat(params.id);
     // Backstop: as long as a customer's tab is open and beating, fire the
     // AI claim sweep so a queued chat doesn't hang waiting for a manager
-    // to load the dashboard. processDueAiClaims is internally racey-safe
-    // and bounded (limit 20 per call), so concurrent heartbeats are fine.
-    void processDueAiClaims();
+    // to load the dashboard. Debounced (per-instance, 30s) and fire-and-forget
+    // so frequent heartbeats don't each trigger a global sweep.
+    void maybeLazyTick();
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ ok: false }, { status: 500 });

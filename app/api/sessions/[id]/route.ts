@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { sessions, messages, users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { processDueAiClaims, sweepStaleSessions } from "@/lib/sessions/state";
+import { maybeLazyTick } from "@/lib/sessions/lazyTick";
 import { log, serializeError } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
@@ -15,8 +15,8 @@ export async function GET(
 ) {
   const requestId = crypto.randomUUID();
   try {
-    // Lazy tick for this specific session
-    await Promise.allSettled([sweepStaleSessions(), processDueAiClaims()]);
+    // Lazy tick (debounced) — this route is polled while a customer waits.
+    await maybeLazyTick();
 
     const [row] = await db
       .select({ session: sessions, claimerName: users.name, claimerId: users.id })
