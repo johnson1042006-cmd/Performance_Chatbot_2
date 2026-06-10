@@ -1,18 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { sessions } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { sessions, messages } from "@/lib/db/schema";
+import { and, desc, eq } from "drizzle-orm";
 import { runAiTurn } from "@/lib/ai/runAi";
 import { CALL_CLAUDE_ERROR_MESSAGE } from "@/lib/ai/callClaude";
 import { claimByAi } from "@/lib/sessions/state";
+import { enforce, getClientIp } from "@/lib/rateLimit";
 import { log, serializeError } from "@/lib/log";
 import { createSseStream, SSE_RESPONSE_HEADERS, wantsSse } from "@/lib/ai/sse";
+
+const FALLBACK_FRESHNESS_MS = 5 * 60 * 1000;
 
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   const requestId = crypto.randomUUID();
   try {
+    // Same class of IP limit as /api/chat — this route triggers a paid Claude
+    // turn, so it must not be an unmetered spend vector.
+    const ip = getClientIp(req);
+    const rl = await enforce(`ai-fallback:${ip}`, 10, 60);
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: "rate_limited" },
+        {
+          status: 429,
+          headers: { "Retry-After": String(rl.retryAfter ?? 60) },
+        }
+      );
+    }
+
     const body = await req.json();
     const { sessionId, latestMessage, pageContext } = body;
     const useSse = wantsSse(req);
@@ -41,6 +58,38 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         skipped: true,
         reason: "Session is handled by a human agent",
+      });
+    }
+
+    // Redundancy/freshness guard: don't burn a Claude turn when the fallback
+    // already answered the latest customer message, or when the conversation
+    // has gone cold. The legit widget/cron caller fires right after a fresh
+    // customer message, so it is unaffected.
+    const [newest] = await db
+      .select({ role: messages.role, sentAt: messages.sentAt })
+      .from(messages)
+      .where(eq(messages.sessionId, sessionId))
+      .orderBy(desc(messages.sentAt))
+      .limit(1);
+    if (newest?.role === "ai") {
+      return NextResponse.json({
+        skipped: true,
+        reason: "stale_or_already_answered",
+      });
+    }
+    const [latestCustomer] = await db
+      .select({ sentAt: messages.sentAt })
+      .from(messages)
+      .where(and(eq(messages.sessionId, sessionId), eq(messages.role, "customer")))
+      .orderBy(desc(messages.sentAt))
+      .limit(1);
+    if (
+      !latestCustomer ||
+      Date.now() - new Date(latestCustomer.sentAt).getTime() > FALLBACK_FRESHNESS_MS
+    ) {
+      return NextResponse.json({
+        skipped: true,
+        reason: "stale_or_already_answered",
       });
     }
 
