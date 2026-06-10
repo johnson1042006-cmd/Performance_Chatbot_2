@@ -104,6 +104,25 @@ describe("assessSentiment", () => {
     expect(result.score).toBe(0);
   });
 
+  it("does NOT treat benign 'stop'/'fine' usage as frustration", () => {
+    // FIX-3: these used to false-positive and pop the email form mid-chat.
+    expect(
+      assessSentiment(["can I stop by the store?", "can I stop by the store?"]).score
+    ).not.toBe(-1);
+    expect(
+      assessSentiment([
+        "is this fine for summer riding?",
+        "is this fine for summer riding?",
+      ]).score
+    ).not.toBe(-1);
+  });
+
+  it("still treats sarcastic/terminal 'stop'/'fine' as frustration", () => {
+    expect(assessSentiment(["just stop", "just stop"]).score).toBe(-1);
+    expect(assessSentiment(["fine.", "fine."]).score).toBe(-1);
+    expect(assessSentiment(["fine whatever", "fine whatever"]).score).toBe(-1);
+  });
+
   it("matches double exclamation as frustration", () => {
     const result = assessSentiment(["wait what!!", "are you serious!!"]);
     expect(result.score).toBe(-1);
