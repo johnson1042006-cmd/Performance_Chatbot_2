@@ -450,6 +450,55 @@ describe("buildPrompt", () => {
     });
   });
 
+  describe("history depth cap (FIX-8)", () => {
+    beforeEach(async () => {
+      const dbModule = await import("@/lib/db");
+      const db = dbModule.db as any;
+      const selectMock = vi.fn();
+      const fromMock = vi.fn();
+      db.select = selectMock;
+      selectMock.mockReturnValue({ from: fromMock });
+
+      // 40 rows in DESC (newest-first) order, as the query returns them.
+      // After buildPrompt reverses them, chronological order is message 0..39.
+      const rows: any[] = [];
+      for (let i = 39; i >= 0; i--) {
+        rows.push({
+          id: `m${i}`,
+          sessionId: "session-1",
+          role: i % 2 === 1 ? "customer" : "ai",
+          content: `message ${i}`,
+          sentAt: new Date(),
+        });
+      }
+
+      let callCount = 0;
+      fromMock.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            where: vi.fn().mockReturnValue({
+              orderBy: vi.fn().mockReturnValue({
+                limit: vi.fn().mockResolvedValue(rows),
+              }),
+            }),
+          };
+        }
+        return [];
+      });
+    });
+
+    it("caps a 40-message history to <= 18 messages, preserving the first two", async () => {
+      const { buildPrompt } = await import("../buildPrompt");
+      // Empty latest so no extra turn is appended — assert purely on the cap.
+      const result = await buildPrompt("session-1", "");
+
+      expect(result.conversationMessages.length).toBeLessThanOrEqual(18);
+      expect(result.conversationMessages[0].content).toBe("message 0");
+      expect(result.conversationMessages[1].content).toBe("message 1");
+    });
+  });
+
   describe("store_hours knowledge base content", () => {
     beforeEach(async () => {
       const { entries } = await import("@/lib/knowledge/seedKnowledge");

@@ -26,6 +26,12 @@ import {
   type BCProduct,
 } from "@/lib/bigcommerce/client";
 
+// Cap how much history is sent to Claude each turn: the first messages preserve
+// the original ask, the last messages keep recent context. Long sessions
+// otherwise grow slower and costlier every turn.
+const HISTORY_HEAD = 2;
+const HISTORY_TAIL = 16;
+
 // Known brands in the catalog. Order doesn't matter — this is just for
 // extracting a brand name from a product title so we can diversify results.
 // Multi-word brands MUST come before single-word ones they share a token with
@@ -545,8 +551,27 @@ ${AI_BEHAVIOR_RULES.map((r, i) => `${i + 1}. ${r.rule}`).join("\n\n")}
       ? history.slice(0, -1)
       : history;
 
+  // Cap depth: keep the first HISTORY_HEAD messages (the original ask) plus the
+  // last HISTORY_TAIL (recent context), deduplicated, in chronological order.
+  const cappedHistory =
+    historyToUse.length <= HISTORY_HEAD + HISTORY_TAIL
+      ? historyToUse
+      : (() => {
+          const head = historyToUse.slice(0, HISTORY_HEAD);
+          const tail = historyToUse.slice(-HISTORY_TAIL);
+          const seen = new Set(head.map((m: Message) => m.id));
+          const merged = [...head];
+          for (const m of tail) {
+            if (!seen.has(m.id)) {
+              merged.push(m);
+              seen.add(m.id);
+            }
+          }
+          return merged;
+        })();
+
   const conversationMessages: { role: "user" | "assistant"; content: string }[] =
-    historyToUse.map((m: Message) => ({
+    cappedHistory.map((m: Message) => ({
       role: m.role === "customer" ? ("user" as const) : ("assistant" as const),
       content: m.content,
     }));
