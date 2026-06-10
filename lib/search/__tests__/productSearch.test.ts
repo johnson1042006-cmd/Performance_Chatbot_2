@@ -5,6 +5,7 @@ import {
   extractAccessorySubject,
   extractDiscussedProductSubject,
   isLikelyProductFollowUp,
+  extractBrand,
 } from "../productSearch";
 import {
   extractColorFromQuery,
@@ -431,6 +432,33 @@ describe("extractDiscussedProductSubject", () => {
 });
 
 // ---------------------------------------------------------------------------
+// extractBrand
+// ---------------------------------------------------------------------------
+describe("extractBrand", () => {
+  it("detects the collapsed e-bike spelling (super73)", () => {
+    expect(extractBrand("do you sell super73?")).not.toBeNull();
+  });
+
+  it("detects the spaced e-bike spelling (super 73)", () => {
+    expect(extractBrand("super 73 ebikes")).not.toBeNull();
+  });
+
+  it("detects the hyphenated e-bike spelling (Super-73)", () => {
+    expect(extractBrand("Super-73 bikes")).not.toBeNull();
+  });
+
+  it("still matches existing digit-containing brands", () => {
+    expect(extractBrand("6d helmet")).toBe("6d");
+    expect(extractBrand("509 goggles")).toBe("509");
+    expect(extractBrand("100% goggles")).toBe("100%");
+  });
+
+  it("returns null when no brand is present", () => {
+    expect(extractBrand("show me some gloves")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // searchProducts (with mocked dependencies)
 // ---------------------------------------------------------------------------
 describe("searchProducts", () => {
@@ -552,6 +580,25 @@ describe("searchProducts", () => {
     const result = await searchProducts("helmet");
     const ids = result.products.map((p) => p.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("returns a Super73 e-bike when the catalog carries one", async () => {
+    const bc = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const superBike = {
+      id: 73, name: "Super73 RX Adventure E-Bike", sku: "S73-RX", description: "Super73 electric bike",
+      price: 3295, sale_price: 0, retail_price: 0, calculated_price: 3295,
+      inventory_level: 2, inventory_tracking: "product",
+      availability: "available", is_visible: true, categories: [1],
+      brand_id: 50, custom_url: { url: "/super73-rx/" }, variants: [], images: [],
+    };
+
+    (bc.searchProductsBC as ReturnType<typeof vi.fn>).mockResolvedValueOnce([superBike]);
+
+    const result = await searchProducts("do you sell super73 ebikes?");
+    expect(result.products.length).toBeGreaterThanOrEqual(1);
+    expect(result.products.some((p) => p.name.toLowerCase().includes("super73"))).toBe(true);
   });
 
   it("filters out invisible products but keeps disabled (in-store-only) products", async () => {

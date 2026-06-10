@@ -561,6 +561,14 @@ const KNOWN_BRANDS_LOWER: string[] = [
   "evs", "leatt brace", "atlas", "fxr", "509", "100%",
   "cardo", "sena", "ebc", "renthal", "sunstar", "akrapovic", "yoshimura",
   "garmin", "insta360",
+  // E-bike brands carried in the catalog (see EBIKE_BRANDS in
+  // lib/catalog/skeleton.ts). Multi-word / spaced and hyphenated variants come
+  // before the collapsed spelling so digit-adjacent names match either way.
+  "super 73", "super-73", "super73",
+  "stage 2", "stage2",
+  "79 bike", "79bike",
+  "e ride pro",
+  "stacyc",
 ];
 
 // O(1) lookup set for brand filtering in per-token distinctive-lookup pass.
