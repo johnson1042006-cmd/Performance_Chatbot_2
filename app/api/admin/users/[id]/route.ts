@@ -2,7 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
+import {
+  users,
+  sessions,
+  chatEvents,
+  cannedResponses,
+  alertEvents,
+} from "@/lib/db/schema";
 import { eq, count } from "drizzle-orm";
 import { log, serializeError } from "@/lib/log";
 
@@ -49,6 +55,31 @@ export async function DELETE(
         );
       }
     }
+
+    // NULL out FK columns that have no onDelete rule in the schema.
+    // (push_subscriptions, tickets, ticket_comments already use cascade/set null.)
+    await Promise.all([
+      db
+        .update(sessions)
+        .set({ claimedByUserId: null })
+        .where(eq(sessions.claimedByUserId, id)),
+      db
+        .update(chatEvents)
+        .set({ actorUserId: null })
+        .where(eq(chatEvents.actorUserId, id)),
+      db
+        .update(chatEvents)
+        .set({ targetUserId: null })
+        .where(eq(chatEvents.targetUserId, id)),
+      db
+        .update(cannedResponses)
+        .set({ createdBy: null })
+        .where(eq(cannedResponses.createdBy, id)),
+      db
+        .update(alertEvents)
+        .set({ ackedBy: null })
+        .where(eq(alertEvents.ackedBy, id)),
+    ]);
 
     await db.delete(users).where(eq(users.id, id));
 
