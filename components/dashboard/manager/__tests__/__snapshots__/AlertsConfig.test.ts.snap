@@ -4,19 +4,43 @@ exports[`AlertsConfig KINDS > matches snapshot 1`] = `
 [
   {
     "description": "Notify when too many customers are waiting for an agent",
+    "fixedComparator": ">=",
+    "frequencyLabel": "Remind me at most:",
+    "hideNumber": false,
     "label": "Queue depth",
+    "lockedThreshold": null,
+    "sentence": {
+      "after": "customers are waiting in the queue",
+      "before": "Notify me when more than",
+    },
     "unit": "customers waiting",
     "value": "queue_depth",
   },
   {
     "description": "Notify when the AI is failing to answer too often",
+    "fixedComparator": ">=",
+    "frequencyLabel": "Remind me at most:",
+    "hideNumber": false,
     "label": "AI failure rate (%)",
+    "lockedThreshold": null,
+    "sentence": {
+      "after": "% of AI replies are failing",
+      "before": "Notify me when more than",
+    },
     "unit": "% of AI replies failing",
     "value": "ai_failure_rate_pct",
   },
   {
     "description": "Notify when no agents are online during business hours",
+    "fixedComparator": ">=",
+    "frequencyLabel": "Remind me at most:",
+    "hideNumber": true,
     "label": "No agents online during hours",
+    "lockedThreshold": 1,
+    "sentence": {
+      "after": "",
+      "before": "Notify me when no agents are online during business hours",
+    },
     "unit": null,
     "value": "no_agents_online_during_hours",
   },

@@ -18,7 +18,19 @@ interface Threshold {
   lastFiredAt: string | null;
 }
 
-const COMPARATORS = [">", ">=", "<", "<=", "=="];
+const COOLDOWN_OPTIONS = [
+  { value: 15, label: "every 15 minutes" },
+  { value: 30, label: "every 30 minutes" },
+  { value: 60, label: "every hour" },
+  { value: 240, label: "every 4 hours" },
+  { value: 1440, label: "once a day" },
+];
+
+const DEFAULT_THRESHOLD: Record<string, number> = {
+  queue_depth: 5,
+  ai_failure_rate_pct: 10,
+  no_agents_online_during_hours: 1,
+};
 
 function isPositiveInt(value: string): boolean {
   return /^\d+$/.test(value.trim()) && parseInt(value, 10) >= 1;
@@ -33,19 +45,14 @@ export default function AlertsConfig() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  // Local draft strings for the numeric inputs so we can validate live and
-  // block the save when a value is not a positive integer.
-  const [drafts, setDrafts] = useState<
-    Record<string, { threshold: string; cooldown: string }>
-  >({});
+  // Local draft strings for the numeric threshold input so we can validate
+  // live and block the save when a value is not a positive integer.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
 
   const seedDrafts = (list: Threshold[]) => {
-    const next: Record<string, { threshold: string; cooldown: string }> = {};
+    const next: Record<string, string> = {};
     for (const t of list) {
-      next[t.id] = {
-        threshold: String(Number(t.threshold)),
-        cooldown: String(t.cooldownMin),
-      };
+      next[t.id] = String(Number(t.threshold));
     }
     setDrafts(next);
   };
@@ -73,13 +80,14 @@ export default function AlertsConfig() {
     if (creating) return;
     setCreating(true);
     try {
+      const km = kindMeta("queue_depth");
       await fetch("/api/admin/alert-thresholds", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          kind: "queue_depth",
-          comparator: ">=",
-          threshold: 5,
+          kind: km.value,
+          comparator: km.fixedComparator,
+          threshold: DEFAULT_THRESHOLD[km.value] ?? 5,
           cooldownMin: 30,
           enabled: true,
         }),
@@ -99,6 +107,26 @@ export default function AlertsConfig() {
     await refresh();
   };
 
+  const handleKindChange = async (t: Threshold, newKind: string) => {
+    const km = kindMeta(newKind);
+    const patch: Partial<Threshold> = {
+      kind: newKind,
+      comparator: km.fixedComparator,
+    };
+    if (km.lockedThreshold != null) {
+      patch.threshold = String(km.lockedThreshold);
+    }
+    if (newKind === "no_agents_online_during_hours") {
+      const meta = (t.metadata ?? {}) as Record<string, unknown>;
+      patch.metadata = {
+        ...meta,
+        hoursStart: meta.hoursStart ?? "09:00",
+        hoursEnd: meta.hoursEnd ?? "18:00",
+      };
+    }
+    await handlePatch(t.id, patch);
+  };
+
   const handleDelete = async (id: string) => {
     setConfirmDeleteId(null);
     await fetch(`/api/admin/alert-thresholds?id=${encodeURIComponent(id)}`, {
@@ -107,24 +135,13 @@ export default function AlertsConfig() {
     await refresh();
   };
 
-  const updateDraft = (
-    id: string,
-    field: "threshold" | "cooldown",
-    value: string
-  ) => {
-    setDrafts((prev) => ({
-      ...prev,
-      [id]: {
-        threshold: prev[id]?.threshold ?? "",
-        cooldown: prev[id]?.cooldown ?? "",
-        [field]: value,
-      },
-    }));
+  const updateDraft = (id: string, value: string) => {
+    setDrafts((prev) => ({ ...prev, [id]: value }));
   };
 
   const selectClass =
     "text-sm border border-border rounded px-2 py-1 bg-surface";
-  const numberClass = "w-20 text-sm border border-border rounded px-2 py-1";
+  const numberClass = "w-16 text-sm border border-border rounded px-2 py-1";
 
   return (
     <Card padding={false}>
@@ -142,7 +159,7 @@ export default function AlertsConfig() {
           onClick={handleCreate}
           disabled={creating}
         >
-          <Plus size={14} className="mr-1" /> Add threshold
+          <Plus size={14} className="mr-1" /> Add alert
         </Button>
       </div>
 
@@ -153,7 +170,7 @@ export default function AlertsConfig() {
           </div>
         ) : rows.length === 0 ? (
           <div className="px-6 py-6 text-center text-text-secondary text-sm">
-            No thresholds yet. Click “Add threshold” to start.
+            No alerts yet. Click “Add alert” to start.
           </div>
         ) : (
           rows.map((t) => {
@@ -161,35 +178,43 @@ export default function AlertsConfig() {
             const hoursStart = String(meta.hoursStart ?? "09:00");
             const hoursEnd = String(meta.hoursEnd ?? "18:00");
             const km = kindMeta(t.kind);
-            const draft = drafts[t.id] ?? {
-              threshold: String(Number(t.threshold)),
-              cooldown: String(t.cooldownMin),
-            };
-            const thresholdValid = isPositiveInt(draft.threshold);
-            const cooldownValid = isPositiveInt(draft.cooldown);
+            const draft = drafts[t.id] ?? String(Number(t.threshold));
+            const hideNumber = km.hideNumber === true;
+            const thresholdValid = hideNumber || isPositiveInt(draft);
             const showHours = t.kind === "no_agents_online_during_hours";
+
+            const cooldownIsStandard = COOLDOWN_OPTIONS.some(
+              (o) => o.value === t.cooldownMin
+            );
 
             return (
               <div key={t.id} className="px-6 py-4">
                 <div className="flex items-start gap-3">
-                  <input
-                    type="checkbox"
-                    checked={t.enabled}
-                    onChange={(e) =>
-                      handlePatch(t.id, { enabled: e.target.checked })
-                    }
-                    className="mt-1.5"
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={t.enabled}
                     aria-label="Enable alert"
-                  />
+                    onClick={() =>
+                      handlePatch(t.id, { enabled: !t.enabled })
+                    }
+                    className={`relative mt-1 inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                      t.enabled ? "bg-accent-solid" : "bg-border"
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                        t.enabled ? "translate-x-[18px]" : "translate-x-0.5"
+                      }`}
+                    />
+                  </button>
                   <div className="flex-1">
                     <div className="flex flex-wrap items-center gap-1.5 text-sm text-text-primary leading-7">
-                      <span>Alert me when</span>
                       <select
                         value={t.kind}
-                        onChange={(e) =>
-                          handlePatch(t.id, { kind: e.target.value })
-                        }
+                        onChange={(e) => handleKindChange(t, e.target.value)}
                         className={selectClass}
+                        aria-label="Alert type"
                       >
                         {KINDS.map((k) => (
                           <option key={k.value} value={k.value}>
@@ -197,40 +222,27 @@ export default function AlertsConfig() {
                           </option>
                         ))}
                       </select>
-                      <span>is</span>
-                      <select
-                        value={t.comparator}
-                        onChange={(e) =>
-                          handlePatch(t.id, { comparator: e.target.value })
-                        }
-                        className={selectClass}
-                      >
-                        {COMPARATORS.map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        type="number"
-                        min={1}
-                        value={draft.threshold}
-                        onChange={(e) =>
-                          updateDraft(t.id, "threshold", e.target.value)
-                        }
-                        onBlur={(e) => {
-                          if (isPositiveInt(e.target.value)) {
-                            handlePatch(t.id, {
-                              threshold: e.target.value as unknown as string,
-                            });
-                          }
-                        }}
-                        className={numberClass}
-                      />
-                      {km.unit && <span>{km.unit}</span>}
+                      <span>{km.sentence.before}</span>
+                      {!hideNumber && (
+                        <input
+                          type="number"
+                          min={1}
+                          value={draft}
+                          onChange={(e) => updateDraft(t.id, e.target.value)}
+                          onBlur={(e) => {
+                            if (isPositiveInt(e.target.value)) {
+                              handlePatch(t.id, {
+                                threshold: e.target.value as unknown as string,
+                              });
+                            }
+                          }}
+                          className={numberClass}
+                          aria-label="Threshold"
+                        />
+                      )}
+                      {km.sentence.after && <span>{km.sentence.after}</span>}
                       {showHours && (
                         <>
-                          <span>during</span>
                           <input
                             type="time"
                             defaultValue={hoursStart}
@@ -243,6 +255,7 @@ export default function AlertsConfig() {
                               })
                             }
                             className="border border-border rounded px-1 py-0.5 text-sm"
+                            aria-label="Business hours start"
                           />
                           <span>–</span>
                           <input
@@ -257,42 +270,49 @@ export default function AlertsConfig() {
                               })
                             }
                             className="border border-border rounded px-1 py-0.5 text-sm"
+                            aria-label="Business hours end"
                           />
                         </>
                       )}
-                      <span>, at most once every</span>
-                      <input
-                        type="number"
-                        min={1}
-                        value={draft.cooldown}
-                        onChange={(e) =>
-                          updateDraft(t.id, "cooldown", e.target.value)
-                        }
-                        onBlur={(e) => {
-                          if (isPositiveInt(e.target.value)) {
-                            handlePatch(t.id, {
-                              cooldownMin: parseInt(e.target.value, 10),
-                            });
-                          }
-                        }}
-                        className={numberClass}
-                      />
-                      <span>minutes.</span>
                       <button
                         onClick={() => setConfirmDeleteId(t.id)}
                         className="ml-auto text-text-secondary hover:text-error"
-                        aria-label="Delete alert threshold"
+                        aria-label="Delete alert"
                       >
                         <Trash2 size={14} />
                       </button>
                     </div>
+                    <div className="flex flex-wrap items-center gap-1.5 text-sm text-text-secondary mt-1">
+                      <span>{km.frequencyLabel}</span>
+                      <select
+                        value={t.cooldownMin}
+                        onChange={(e) =>
+                          handlePatch(t.id, {
+                            cooldownMin: parseInt(e.target.value, 10),
+                          })
+                        }
+                        className={selectClass}
+                        aria-label="Reminder frequency"
+                      >
+                        {!cooldownIsStandard && (
+                          <option value={t.cooldownMin}>
+                            every {t.cooldownMin} minutes
+                          </option>
+                        )}
+                        {COOLDOWN_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                     <p className="text-xs text-text-secondary mt-1">
                       {km.description}
                     </p>
-                    {(!thresholdValid || !cooldownValid) && (
+                    {!thresholdValid && (
                       <p className="text-xs text-error mt-1">
-                        Threshold and cooldown must be positive whole numbers.
-                        Changes are not saved until fixed.
+                        Threshold must be a positive whole number. Changes are
+                        not saved until fixed.
                       </p>
                     )}
                   </div>
@@ -305,8 +325,8 @@ export default function AlertsConfig() {
 
       <ConfirmDialog
         open={!!confirmDeleteId}
-        title="Delete threshold"
-        message="Delete this alert threshold? This cannot be undone."
+        title="Delete alert"
+        message="Delete this alert? This cannot be undone."
         confirmLabel="Delete"
         destructive
         onConfirm={() => confirmDeleteId && void handleDelete(confirmDeleteId)}
