@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import Sidebar from "@/components/ui/Sidebar";
 import PresenceHeartbeat from "@/components/providers/PresenceHeartbeat";
 import AlertsBanner from "@/components/dashboard/AlertsBanner";
+import DesktopNotificationPrompt from "@/components/dashboard/DesktopNotificationPrompt";
 
 export default async function DashboardLayout({
   children,
@@ -28,6 +29,7 @@ export default async function DashboardLayout({
         className="flex-1 flex flex-col overflow-hidden"
       >
         <AlertsBanner />
+        <DesktopNotificationPrompt />
         {children}
       </main>
     </div>

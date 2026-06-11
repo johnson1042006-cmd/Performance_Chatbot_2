@@ -6,6 +6,7 @@ import SessionCard from "./SessionCard";
 import { DASHBOARD_CHANNEL } from "@/lib/pusher/channels";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { MessageSquare } from "lucide-react";
+import { sendDesktopNotification } from "@/lib/notifications/desktop";
 
 interface Session {
   id: string;
@@ -154,13 +155,23 @@ export default function SessionQueue({
         "session-claimed",
         "session-released",
         "session-closed",
-        // Chime/notification fires globally from Sidebar.tsx to cover
-        // non-Live-Chats pages — here we only refresh the queue.
-        "escalation-requested",
       ];
       for (const event of events) channel.bind(event, refetch);
+      // The chime/escalation desktop notification also fires globally from
+      // Sidebar.tsx to cover non-Live-Chats pages. Here we refresh the queue
+      // and surface a system notification when the tab is not focused.
+      const onEscalationRequested = () => {
+        refetch();
+        sendDesktopNotification(
+          "Customer needs a human",
+          "A chat was escalated and is waiting in the queue",
+          "pc-escalation"
+        );
+      };
+      channel.bind("escalation-requested", onEscalationRequested);
       cleanup = () => {
         for (const event of events) channel.unbind(event, refetch);
+        channel.unbind("escalation-requested", onEscalationRequested);
         releaseChannel(DASHBOARD_CHANNEL);
       };
     }).catch(() => {});

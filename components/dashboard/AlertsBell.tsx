@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react";
 import { Bell, X } from "lucide-react";
 import { FRIENDLY } from "./alertFriendlyNames";
 import { ALERTS_CHANNEL } from "@/lib/pusher/channels";
+import { sendDesktopNotification } from "@/lib/notifications/desktop";
 
 interface AlertEvent {
   id: string;
@@ -26,18 +27,21 @@ export default function AlertsBell() {
   const [events, setEvents] = useState<AlertEvent[]>([]);
   const [open, setOpen] = useState(false);
 
-  const fetchEvents = useCallback(async () => {
-    if (!isManager) return;
+  const fetchEvents = useCallback(async (): Promise<AlertEvent[]> => {
+    if (!isManager) return [];
     try {
       const res = await fetch(
         "/api/admin/alert-events?status=unacked&limit=10",
         { cache: "no-store" }
       );
-      if (!res.ok) return;
+      if (!res.ok) return [];
       const data = await res.json();
-      setEvents(data.events ?? []);
+      const list: AlertEvent[] = data.events ?? [];
+      setEvents(list);
+      return list;
     } catch {
       // non-fatal
+      return [];
     }
   }, [isManager]);
 
@@ -49,7 +53,18 @@ export default function AlertsBell() {
     import("@/lib/pusher/client")
       .then(({ acquireChannel, releaseChannel }) => {
         const channel = acquireChannel(ALERTS_CHANNEL);
-        const onAlertFired = () => void fetchEvents();
+        const onAlertFired = () => {
+          void fetchEvents().then((list) => {
+            const latest = list[0];
+            if (!latest) return;
+            const label = FRIENDLY[latest.kind] ?? latest.kind;
+            sendDesktopNotification(
+              "Performance Cycle Alert",
+              `${label}: ${latest.message}`,
+              "pc-alert"
+            );
+          });
+        };
         channel.bind("alert-fired", onAlertFired);
         cleanup = () => {
           channel.unbind("alert-fired", onAlertFired);
