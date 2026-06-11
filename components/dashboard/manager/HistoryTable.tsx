@@ -37,6 +37,8 @@ interface SessionHistory {
   messageCount: number;
   aiMessageCount: number;
   humanInvolved: boolean;
+  aiPercent: number;
+  lastMessageAt: string | null;
 }
 
 export function getHandlerStatus(
@@ -266,17 +268,26 @@ export default function HistoryTable({ onSelectSession }: HistoryTableProps) {
               </tr>
             ) : (
               sessions.map((s) => {
-                const duration = s.closedAt
-                  ? Math.round(
-                      (new Date(s.closedAt).getTime() -
-                        new Date(s.startedAt).getTime()) /
-                        60000
-                    )
-                  : null;
-                const aiRatio =
-                  s.messageCount > 0
-                    ? Math.round((s.aiMessageCount / s.messageCount) * 100)
-                    : 0;
+                // Duration should reflect conversation activity, not the
+                // 10-minute inactivity sweep. Open sessions stay "Active";
+                // closed sessions prefer lastMessageAt - startedAt (min 1m)
+                // and fall back to closedAt - startedAt.
+                const startedMs = new Date(s.startedAt).getTime();
+                let duration: number | null = null;
+                if (s.closedAt) {
+                  duration = s.lastMessageAt
+                    ? Math.max(
+                        1,
+                        Math.round(
+                          (new Date(s.lastMessageAt).getTime() - startedMs) /
+                            60000
+                        )
+                      )
+                    : Math.round(
+                        (new Date(s.closedAt).getTime() - startedMs) / 60000
+                      );
+                }
+                const aiRatio = s.aiPercent;
                 const handler = getHandlerStatus(s.aiMessageCount, s.humanInvolved);
                 const handlerVariant =
                   handler === "AI" ? "info" : handler === "Human" ? "success" : "warning";

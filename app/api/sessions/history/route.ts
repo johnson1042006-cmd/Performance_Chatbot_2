@@ -40,6 +40,7 @@ interface HistoryRow {
   ai_count: number;
   agent_count: number;
   ai_percent: number;
+  last_msg_at: string | null;
 }
 
 export async function GET(req: NextRequest) {
@@ -91,7 +92,8 @@ export async function GET(req: NextRequest) {
         COALESCE(smc.agent_count, 0)                                 AS agent_count,
         CASE WHEN (smc.ai_count + smc.agent_count) > 0
              THEN ROUND((smc.ai_count::numeric / (smc.ai_count + smc.agent_count)::numeric) * 100)::int
-             ELSE 0 END                                              AS ai_percent
+             ELSE 0 END                                              AS ai_percent,
+        smc.last_msg_at                                              AS last_msg_at
       FROM sessions s
       LEFT JOIN session_msg_counts smc ON smc.session_id = s.id
       ORDER BY s.started_at DESC
@@ -132,6 +134,7 @@ export async function GET(req: NextRequest) {
       aiMessageCount: r.ai_count,
       humanInvolved: r.agent_count > 0,
       aiPercent: r.ai_percent,
+      lastMessageAt: r.last_msg_at,
     }));
 
     return NextResponse.json({
