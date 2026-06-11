@@ -78,7 +78,7 @@ Rules:
 - "intent" MUST be one of: ${INTENTS.join(", ")}.
 - If nothing fits well, use "other".
 - "topics" is 0–10 short kebab-case strings (e.g. "agv-helmet", "return-shipping"). Lowercase, no punctuation.
-- "resolved" is true only if the customer's question was clearly answered or the agent confirmed resolution; otherwise false.
+- "resolved" is true if the customer's question received a complete, accurate, on-point answer — even if the customer did not reply to confirm. It is false if the question was deflected, partially answered, escalated without an answer, or the AI said it could not help.
 - Never include any text outside the JSON object.`;
 
 /**
