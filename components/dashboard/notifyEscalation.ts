@@ -1,3 +1,5 @@
+import { isTabAway } from "@/lib/notifications/desktop";
+
 const REASON_LABELS: Record<string, string> = {
   complex_fitment: "Fitment question — service team needed",
   tech_air_service: "Tech-Air service request",
@@ -77,8 +79,12 @@ export function notifyEscalation(payload: {
   playChime();
 
   // Desktop notification — surfaces on Apple Watch via macOS forwarding.
+  // Only fire it when the dashboard tab is NOT focused: if the agent is
+  // actively looking at the dashboard the chime + in-app UI are enough, and a
+  // system notification would just be redundant noise.
   try {
     if (typeof window === "undefined" || !("Notification" in window)) return;
+    if (!isTabAway()) return;
 
     if (Notification.permission === "granted") {
       showNotification(label, payload);
@@ -88,7 +94,7 @@ export function notifyEscalation(payload: {
       // permission dialog.
       Notification.requestPermission()
         .then((perm) => {
-          if (perm === "granted") showNotification(label, payload);
+          if (perm === "granted" && isTabAway()) showNotification(label, payload);
         })
         .catch(() => {});
     }
