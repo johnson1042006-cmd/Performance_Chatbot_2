@@ -31,6 +31,26 @@ const AGENT_EMAIL =
 const e2ePort = process.env.E2E_PORT || "3050";
 const serverBase = process.env.E2E_BASE_URL || `http://localhost:${e2ePort}`;
 
+/**
+ * Safety guard: the e2e suite writes into whatever DATABASE_URL points at
+ * (it flips mustResetPassword, warms the login path, and individual specs
+ * seed sessions/messages). It previously ran against the production database
+ * and contaminated real data. Refuse to run unless we're clearly pointed at a
+ * local database or the operator has explicitly opted in.
+ */
+function assertSafeDatabase(): void {
+  const url = process.env.DATABASE_URL ?? "";
+  const isLocal = url.includes("localhost") || url.includes("127.0.0.1");
+  const allowRemote = process.env.E2E_ALLOW_REMOTE_DB === "1";
+  if (!isLocal && !allowRemote) {
+    throw new Error(
+      "[e2e/global-setup] Refusing to run: DATABASE_URL does not point at " +
+        "localhost. The e2e suite writes to this database. Set " +
+        "E2E_ALLOW_REMOTE_DB=1 to override (NOT against production).",
+    );
+  }
+}
+
 export default async function globalSetup() {
   if (!process.env.DATABASE_URL) {
     console.warn(
@@ -38,6 +58,8 @@ export default async function globalSetup() {
     );
     return;
   }
+
+  assertSafeDatabase();
 
   const sql = neon(process.env.DATABASE_URL);
   const db = drizzle(sql);

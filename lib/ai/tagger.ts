@@ -150,8 +150,13 @@ async function loadTranscript(sessionId: string): Promise<string> {
  * Test hook. When set to "1", `tagSession` skips the Anthropic call and
  * returns a deterministic result. Wired by the Playwright e2e suite so CI
  * stays hermetic.
+ *
+ * Hard guard: in production we ignore TAGGER_TEST_MODE entirely so a leaked
+ * env var can never contaminate real sessions with the deterministic
+ * "test-tag" result.
  */
 function isTestMode(): boolean {
+  if (process.env.VERCEL_ENV === "production") return false;
   return process.env.TAGGER_TEST_MODE === "1";
 }
 
@@ -183,6 +188,7 @@ export async function tagSession(sessionId: string): Promise<TagResult> {
       return FAIL_OPEN;
     }
     if (isTestMode()) {
+      log.warn("tagger.test_mode_active", { sessionId });
       result = testModeResult(transcript);
       await persist(sessionId, result);
       return result;
