@@ -18,14 +18,37 @@ interface Threshold {
   lastFiredAt: string | null;
 }
 
-
 const COMPARATORS = [">", ">=", "<", "<=", "=="];
+
+function isPositiveInt(value: string): boolean {
+  return /^\d+$/.test(value.trim()) && parseInt(value, 10) >= 1;
+}
+
+function kindMeta(kind: string) {
+  return KINDS.find((k) => k.value === kind) ?? KINDS[0];
+}
 
 export default function AlertsConfig() {
   const [rows, setRows] = useState<Threshold[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  // Local draft strings for the numeric inputs so we can validate live and
+  // block the save when a value is not a positive integer.
+  const [drafts, setDrafts] = useState<
+    Record<string, { threshold: string; cooldown: string }>
+  >({});
+
+  const seedDrafts = (list: Threshold[]) => {
+    const next: Record<string, { threshold: string; cooldown: string }> = {};
+    for (const t of list) {
+      next[t.id] = {
+        threshold: String(Number(t.threshold)),
+        cooldown: String(t.cooldownMin),
+      };
+    }
+    setDrafts(next);
+  };
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -34,7 +57,9 @@ export default function AlertsConfig() {
         cache: "no-store",
       });
       const data = res.ok ? await res.json() : { thresholds: [] };
-      setRows(data.thresholds ?? []);
+      const list: Threshold[] = data.thresholds ?? [];
+      setRows(list);
+      seedDrafts(list);
     } finally {
       setLoading(false);
     }
@@ -82,62 +107,89 @@ export default function AlertsConfig() {
     await refresh();
   };
 
+  const updateDraft = (
+    id: string,
+    field: "threshold" | "cooldown",
+    value: string
+  ) => {
+    setDrafts((prev) => ({
+      ...prev,
+      [id]: {
+        threshold: prev[id]?.threshold ?? "",
+        cooldown: prev[id]?.cooldown ?? "",
+        [field]: value,
+      },
+    }));
+  };
+
+  const selectClass =
+    "text-sm border border-border rounded px-2 py-1 bg-surface";
+  const numberClass = "w-20 text-sm border border-border rounded px-2 py-1";
+
   return (
     <Card padding={false}>
       <div className="flex items-center justify-between px-6 py-4 border-b border-border">
         <div>
           <h3 className="font-semibold text-text-primary text-sm">Alerts</h3>
           <p className="text-xs text-text-secondary">
-            Thresholds evaluated every cron tick. Breaches fire on the
-            <code className="px-1">alerts</code> Pusher channel and POST to
-            <code className="px-1">SLACK_WEBHOOK_URL</code> if configured.
+            Alerts appear as dashboard notifications. If a Slack webhook is
+            configured in project settings, they also post to Slack.
           </p>
         </div>
-        <Button size="sm" variant="secondary" onClick={handleCreate} disabled={creating}>
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={handleCreate}
+          disabled={creating}
+        >
           <Plus size={14} className="mr-1" /> Add threshold
         </Button>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border bg-background">
-              <th className="text-left px-4 py-2 font-medium text-text-secondary">Kind</th>
-              <th className="text-left px-4 py-2 font-medium text-text-secondary">Comparator</th>
-              <th className="text-left px-4 py-2 font-medium text-text-secondary">Threshold</th>
-              <th className="text-left px-4 py-2 font-medium text-text-secondary">Cooldown (min)</th>
-              <th className="text-left px-4 py-2 font-medium text-text-secondary">Enabled</th>
-              <th className="text-left px-4 py-2 font-medium text-text-secondary">Hours (start–end)</th>
-              <th className="text-right px-4 py-2 font-medium text-text-secondary"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-text-secondary">
-                  Loading…
-                </td>
-              </tr>
-            ) : rows.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-text-secondary">
-                  No thresholds yet. Click “Add threshold” to start.
-                </td>
-              </tr>
-            ) : (
-              rows.map((t) => {
-                const meta = (t.metadata ?? {}) as Record<string, unknown>;
-                const hoursStart = String(meta.hoursStart ?? "09:00");
-                const hoursEnd = String(meta.hoursEnd ?? "18:00");
-                return (
-                  <tr key={t.id} className="border-b border-border last:border-b-0">
-                    <td className="px-4 py-2">
+      <div className="divide-y divide-border">
+        {loading ? (
+          <div className="px-6 py-6 text-center text-text-secondary text-sm">
+            Loading…
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="px-6 py-6 text-center text-text-secondary text-sm">
+            No thresholds yet. Click “Add threshold” to start.
+          </div>
+        ) : (
+          rows.map((t) => {
+            const meta = (t.metadata ?? {}) as Record<string, unknown>;
+            const hoursStart = String(meta.hoursStart ?? "09:00");
+            const hoursEnd = String(meta.hoursEnd ?? "18:00");
+            const km = kindMeta(t.kind);
+            const draft = drafts[t.id] ?? {
+              threshold: String(Number(t.threshold)),
+              cooldown: String(t.cooldownMin),
+            };
+            const thresholdValid = isPositiveInt(draft.threshold);
+            const cooldownValid = isPositiveInt(draft.cooldown);
+            const showHours = t.kind === "no_agents_online_during_hours";
+
+            return (
+              <div key={t.id} className="px-6 py-4">
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={t.enabled}
+                    onChange={(e) =>
+                      handlePatch(t.id, { enabled: e.target.checked })
+                    }
+                    className="mt-1.5"
+                    aria-label="Enable alert"
+                  />
+                  <div className="flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5 text-sm text-text-primary leading-7">
+                      <span>Alert me when</span>
                       <select
                         value={t.kind}
                         onChange={(e) =>
                           handlePatch(t.id, { kind: e.target.value })
                         }
-                        className="text-sm border border-border rounded px-2 py-1 bg-surface"
+                        className={selectClass}
                       >
                         {KINDS.map((k) => (
                           <option key={k.value} value={k.value}>
@@ -145,56 +197,40 @@ export default function AlertsConfig() {
                           </option>
                         ))}
                       </select>
-                    </td>
-                    <td className="px-4 py-2">
+                      <span>is</span>
                       <select
                         value={t.comparator}
                         onChange={(e) =>
                           handlePatch(t.id, { comparator: e.target.value })
                         }
-                        className="text-sm border border-border rounded px-2 py-1 bg-surface"
+                        className={selectClass}
                       >
                         {COMPARATORS.map((c) => (
-                          <option key={c} value={c}>{c}</option>
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
                         ))}
                       </select>
-                    </td>
-                    <td className="px-4 py-2">
                       <input
                         type="number"
-                        defaultValue={Number(t.threshold)}
-                        onBlur={(e) =>
-                          handlePatch(t.id, {
-                            threshold: e.target.value as unknown as string,
-                          })
-                        }
-                        className="w-24 text-sm border border-border rounded px-2 py-1"
-                      />
-                    </td>
-                    <td className="px-4 py-2">
-                      <input
-                        type="number"
-                        defaultValue={t.cooldownMin}
-                        onBlur={(e) =>
-                          handlePatch(t.id, {
-                            cooldownMin: parseInt(e.target.value, 10) || 30,
-                          })
-                        }
-                        className="w-20 text-sm border border-border rounded px-2 py-1"
-                      />
-                    </td>
-                    <td className="px-4 py-2">
-                      <input
-                        type="checkbox"
-                        checked={t.enabled}
+                        min={1}
+                        value={draft.threshold}
                         onChange={(e) =>
-                          handlePatch(t.id, { enabled: e.target.checked })
+                          updateDraft(t.id, "threshold", e.target.value)
                         }
+                        onBlur={(e) => {
+                          if (isPositiveInt(e.target.value)) {
+                            handlePatch(t.id, {
+                              threshold: e.target.value as unknown as string,
+                            });
+                          }
+                        }}
+                        className={numberClass}
                       />
-                    </td>
-                    <td className="px-4 py-2">
-                      {t.kind === "no_agents_online_during_hours" ? (
-                        <div className="flex items-center gap-1 text-xs">
+                      {km.unit && <span>{km.unit}</span>}
+                      {showHours && (
+                        <>
+                          <span>during</span>
                           <input
                             type="time"
                             defaultValue={hoursStart}
@@ -206,9 +242,9 @@ export default function AlertsConfig() {
                                 },
                               })
                             }
-                            className="border border-border rounded px-1 py-0.5"
+                            className="border border-border rounded px-1 py-0.5 text-sm"
                           />
-                          –
+                          <span>–</span>
                           <input
                             type="time"
                             defaultValue={hoursEnd}
@@ -220,28 +256,51 @@ export default function AlertsConfig() {
                                 },
                               })
                             }
-                            className="border border-border rounded px-1 py-0.5"
+                            className="border border-border rounded px-1 py-0.5 text-sm"
                           />
-                        </div>
-                      ) : (
-                        <span className="text-xs text-text-secondary">—</span>
+                        </>
                       )}
-                    </td>
-                    <td className="px-4 py-2 text-right">
+                      <span>, at most once every</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={draft.cooldown}
+                        onChange={(e) =>
+                          updateDraft(t.id, "cooldown", e.target.value)
+                        }
+                        onBlur={(e) => {
+                          if (isPositiveInt(e.target.value)) {
+                            handlePatch(t.id, {
+                              cooldownMin: parseInt(e.target.value, 10),
+                            });
+                          }
+                        }}
+                        className={numberClass}
+                      />
+                      <span>minutes.</span>
                       <button
                         onClick={() => setConfirmDeleteId(t.id)}
-                        className="text-text-secondary hover:text-error"
+                        className="ml-auto text-text-secondary hover:text-error"
                         aria-label="Delete alert threshold"
                       >
                         <Trash2 size={14} />
                       </button>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+                    </div>
+                    <p className="text-xs text-text-secondary mt-1">
+                      {km.description}
+                    </p>
+                    {(!thresholdValid || !cooldownValid) && (
+                      <p className="text-xs text-error mt-1">
+                        Threshold and cooldown must be positive whole numbers.
+                        Changes are not saved until fixed.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
 
       <ConfirmDialog

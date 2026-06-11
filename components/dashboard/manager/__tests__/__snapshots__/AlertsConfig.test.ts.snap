@@ -3,15 +3,21 @@
 exports[`AlertsConfig KINDS > matches snapshot 1`] = `
 [
   {
+    "description": "Notify when too many customers are waiting for an agent",
     "label": "Queue depth",
+    "unit": "customers waiting",
     "value": "queue_depth",
   },
   {
+    "description": "Notify when the AI is failing to answer too often",
     "label": "AI failure rate (%)",
+    "unit": "% of AI replies failing",
     "value": "ai_failure_rate_pct",
   },
   {
+    "description": "Notify when no agents are online during business hours",
     "label": "No agents online during hours",
+    "unit": null,
     "value": "no_agents_online_during_hours",
   },
 ]
