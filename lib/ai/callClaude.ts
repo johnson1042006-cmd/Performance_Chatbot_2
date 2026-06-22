@@ -223,6 +223,13 @@ async function callClaudeWithTools(
     return value;
   };
 
+  // TEMP DIAGNOSTIC — remove after confirming tools path executes at runtime.
+  log.info("ai.tools_path.entered", {
+    sessionId: ctx.sessionId || undefined,
+    requestId: ctx.requestId,
+    note: "[tools-path] USE_AI_TOOLS active, tool loop entered",
+  });
+
   for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
     let assistantBlocks: Anthropic.ContentBlock[];
     let stopReason: string | null;
