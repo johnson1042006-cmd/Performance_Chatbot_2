@@ -30,6 +30,7 @@ import {
   type ToolCallEvent,
 } from "./callClaude";
 import { tools as toolCatalog, toolHandlers, escalateToHuman } from "./tools";
+import { rewriteStoreHours } from "./storeHours";
 import { assessConfidence, assessSentiment } from "./quality";
 import { anyAgentsOnline } from "@/lib/presence";
 import { log, serializeError } from "@/lib/log";
@@ -125,7 +126,14 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
     ? {
         onToken: (text: string) => {
           tokensEmitted = true;
-          stream.onToken(text);
+          // Correct the STREAMED copy with the same guard applied to the
+          // persisted copy below, so the live text byte-matches the saved
+          // message. ChatWidget.mergeRealMessage reconciles the streaming bubble
+          // against the Pusher message by exact content equality; if the two
+          // differed it would show the streamed (wrong) hours AND a duplicate
+          // corrected bubble. The tools path emits the full final answer in one
+          // onToken call, so the whole hours statement is visible here.
+          stream.onToken(rewriteStoreHours(text));
         },
         onToolUse: stream.onToolUse,
       }
@@ -152,7 +160,7 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
     /tech.?air/i.test(latestMessage) &&
     /\b(service|send.+in|recharge|recertif|deployed|expir|replac|fix|broken|warranty|repair|fired)\b/i.test(latestMessage);
 
-  const aiResponse = await callClaude(system, conversationMessages, {
+  const rawAiResponse = await callClaude(system, conversationMessages, {
     ...(useTools
       ? {
           tools: toolCatalog,
@@ -193,6 +201,14 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
         }
       : undefined,
   });
+
+  // Deterministic store-hours guard. The store_hours KB entry already holds the
+  // correct values, but the model intermittently drifts ("Sat 9–5", "Sat–Fri")
+  // when it appends hours as an unsolicited footer. Rewrite any hours statement
+  // to the canonical string before the reply is persisted, broadcast, or scored.
+  // The streamed copy was already corrected in guardedStream.onToken using the
+  // same function, so the two stay byte-identical for ChatWidget reconciliation.
+  const aiResponse = rewriteStoreHours(rawAiResponse);
 
   // Post-generation takeover check: a human may have claimed mid-stream.
   // If nothing was shown to the customer yet, abort without persisting so

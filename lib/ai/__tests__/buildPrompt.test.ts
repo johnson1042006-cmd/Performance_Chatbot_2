@@ -9,6 +9,7 @@ import { AI_BEHAVIOR_RULES } from "../rules";
 // with. New rules should be added here AND in `lib/ai/rules.ts` together —
 // the bidirectional guard test below makes either-side drift a hard failure.
 const EXPECTED_RULE_IDS = [
+  "no_unsolicited_hours_footer",
   "color_availability_redirect",
   "multiple_recommendations",
   "no_discontinued",
