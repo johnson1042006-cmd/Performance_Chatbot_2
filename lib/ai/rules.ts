@@ -1,4 +1,11 @@
+import { CANONICAL_STORE_HOURS } from "./storeHours";
+
 export const AI_BEHAVIOR_RULES = [
+  {
+    id: "no_unsolicited_hours_footer",
+    label: "Never append hours/phone as an unsolicited footer; quote hours canonically",
+    rule: `Do NOT append store hours or the phone number as an unsolicited footer to a product, parts, tire, sizing, or order answer. Mention store hours ONLY when the customer actually asks about hours, location, directions, or visiting / in-store pickup. When hours are relevant, state them EXACTLY and in full as: "${CANONICAL_STORE_HOURS}" — one line, never split per day, never add a timezone, never invent hours for a day not shown. The store is closed Sundays. Never tack this hours line onto an answer the customer did not ask hours for.`,
+  },
   {
     id: "color_availability_redirect",
     label: "Answer color questions from variant data, never redirect to phone",
