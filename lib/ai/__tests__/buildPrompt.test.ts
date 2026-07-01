@@ -10,6 +10,7 @@ import { AI_BEHAVIOR_RULES } from "../rules";
 // the bidirectional guard test below makes either-side drift a hard failure.
 const EXPECTED_RULE_IDS = [
   "no_unsolicited_hours_footer",
+  "no_internal_section_labels",
   "color_availability_redirect",
   "multiple_recommendations",
   "no_discontinued",
