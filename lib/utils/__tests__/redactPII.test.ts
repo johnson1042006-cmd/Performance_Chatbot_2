@@ -67,6 +67,26 @@ describe("redactPII", () => {
     expect(hits).toContain("phone");
   });
 
+  it("redacts a real 10-digit phone with dashes", () => {
+    const { redacted, hits } = redactPII("my cell is 720-555-7890");
+    expect(redacted).toBe("my cell is [PHONE]");
+    expect(hits).toContain("phone");
+  });
+
+  it("does NOT redact a bare numeric part number", () => {
+    // Regression for Jacob #8: a 10-digit part number was matched by PHONE_RE
+    // and wiped to [PHONE] before persistence.
+    const { redacted, hits } = redactPII("part number 1234567890 in stock?");
+    expect(redacted).toBe("part number 1234567890 in stock?");
+    expect(hits).not.toContain("phone");
+  });
+
+  it("does NOT redact an alphanumeric SKU with an embedded digit run", () => {
+    const { redacted, hits } = redactPII("do you carry X1234567890 or SM8-12345?");
+    expect(redacted).toBe("do you carry X1234567890 or SM8-12345?");
+    expect(hits).not.toContain("phone");
+  });
+
   it("returns sorted, unique hits across multiple categories", () => {
     const { hits } = redactPII(
       "card 4111111111111111, ssn 123-45-6789, email me@x.com, phone 720-555-1212"

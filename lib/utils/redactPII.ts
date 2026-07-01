@@ -19,10 +19,15 @@ const STORE_PHONE_DIGITS = "3037442011";
 const CARD_RE = /\b\d(?:[ -]?\d){12,18}\b/g;
 const SSN_RE = /\b\d{3}-\d{2}-\d{4}\b/g;
 const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
-// Optional +1 / 1 country prefix, optional area-code parens, single separator
-// between groups (space, dot, or dash). Anchored so leading whitespace is
-// never consumed (otherwise a replacement would eat the preceding space).
-const PHONE_RE = /(?:\+1[\s.\-]?|1[\s.\-])?\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}\b/g;
+// A US phone number in a *formatted* shape: optional +1/1 country code, then a
+// (parenthesized or separator-delimited) area code, exchange, and line number.
+// Separators between the area/exchange/line groups are REQUIRED — a bare digit
+// run (a 10-digit part number, order number, etc.) is intentionally NOT treated
+// as a phone; that's what stops PHONE_RE from eating numeric part numbers. The
+// (?<![\w]) / (?![\w]) lookarounds keep it from matching a phone-shaped run
+// embedded in a longer alphanumeric token (e.g. "X1234567890").
+const PHONE_RE =
+  /(?<![\w])(?:\+?1[\s.\-])?(?:\(\d{3}\)[\s.\-]?|\d{3}[\s.\-])\d{3}[\s.\-]\d{4}(?![\w])/g;
 
 export function redactPII(text: string): { redacted: string; hits: string[] } {
   if (typeof text !== "string" || text.length === 0) {
