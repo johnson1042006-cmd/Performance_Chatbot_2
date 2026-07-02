@@ -119,6 +119,10 @@ const mockPersistHandoff = vi.fn().mockResolvedValue(null);
 vi.mock("@/lib/sessions/aiPause", () => ({
   pauseAi: mockPauseAi,
   persistHandoffMessage: mockPersistHandoff,
+  HANDOFF_HUMAN_COMING:
+    "Let me get someone from our team on this — hang tight one moment, they'll pick up right here in this chat.",
+  HANDOFF_AFTER_HOURS:
+    "I've flagged this for the team, but nobody's available at the moment — if you share your email, they'll reach out directly rather than leaving you hanging.",
 }));
 
 vi.mock("@/lib/log", () => ({
@@ -621,6 +625,47 @@ describe("runAiTurn auto-escalation", () => {
       expect(result.autoEscalated).toMatchObject({ reason: "explicit_request", paused: true });
       expect(mockPauseAi).toHaveBeenCalledWith(SESSION_ID, "explicit_request");
       expect(mockPersistHandoff).not.toHaveBeenCalled();
+    });
+
+    it("live case 1 (7/2 re-test): polite phone punt + irrelevant search hits => no_data, paused", async () => {
+      mockAgentsOnline.mockResolvedValue(true);
+      mockAssessConfidence.mockReturnValue({ confidence: "high", reasons: [] });
+      mockAssessSentiment.mockReturnValue({ score: 0, reasons: [] });
+      mockCallClaude.mockImplementation(
+        async (_s: string, _m: unknown[], opts: { onToolCall?: (e: any) => Promise<void> }) => {
+          if (opts?.onToolCall) {
+            await opts.onToolCall({
+              name: "search_products",
+              input: { query: "5w40 oil" },
+              output: { count: 8, products: [{}] }, // irrelevant hits — got_data
+              durationMs: 50,
+              isError: false,
+            });
+          }
+          return (
+            "We carry a range of motorcycle oils from Motorex and Bel-Ray. " +
+            "I can also suggest you call the shop at 303-744-2011 or check our Parts section."
+          );
+        }
+      );
+      mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession
+      mockDbSelect.mockResolvedValueOnce([{ content: "Do you have 5w40 oil?" }]); // loadRecentCustomerMessages
+      mockDbSelect.mockResolvedValueOnce([{ id: "msg-001", content: "x" }]); // loadPreviousAiMessage (punt branch)
+      mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
+
+      const { runAiTurn } = await import("@/lib/ai/runAi");
+      const result = await runAiTurn({
+        sessionId: SESSION_ID,
+        latestMessage: "Do you have 5w40 oil?",
+      });
+
+      // High confidence + got_data would have slipped through before — the
+      // punt classifier alone must carry this.
+      expect(result.autoEscalated).toMatchObject({ reason: "no_data", paused: true });
+      expect(mockPauseAi).toHaveBeenCalledWith(SESSION_ID, "no_data");
+      // The punt sentence is scrubbed from the customer-facing copy, so the
+      // remaining text doesn't read as a handoff => canned handoff appended.
+      expect(mockPersistHandoff).toHaveBeenCalledWith(SESSION_ID, true);
     });
 
     it("re-pauses on a repeat wall even though notify already fired (once-per-session)", async () => {

@@ -36,11 +36,17 @@ import {
   assessToolDataOutcome,
   containsOffer,
   decideEscalationReason,
+  detectPuntSentences,
   replyAlreadyReadsAsHandoff,
-  replyIsPassivePunt,
+  scrubReply,
   shouldPauseForEscalation,
 } from "./escalationMode";
-import { pauseAi, persistHandoffMessage } from "@/lib/sessions/aiPause";
+import {
+  pauseAi,
+  persistHandoffMessage,
+  HANDOFF_HUMAN_COMING,
+  HANDOFF_AFTER_HOURS,
+} from "@/lib/sessions/aiPause";
 import { anyAgentsOnline } from "@/lib/presence";
 import { log, serializeError } from "@/lib/log";
 
@@ -150,6 +156,35 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
     stream,
   } = opts;
 
+  // Look up agent presence ONCE per turn so buildPrompt can tell the model
+  // whether it's safe to promise human follow-up. Same value is reused below
+  // for the auto-escalation branch — saves a duplicate query and guarantees
+  // the prompt and the escalation routing agree on what "online" means.
+  const agentsOnline = await anyAgentsOnline();
+  const useTools = aiToolsEnabled();
+
+  // Single deterministic transform applied to BOTH the streamed and the
+  // persisted copy so they stay byte-identical for ChatWidget reconciliation:
+  //  1. rewriteStoreHours — canonical hours (item 1.1).
+  //  2. scrubReply — remove passive-punt and search-narration sentences
+  //     (Phase 2a): prompt rules don't reliably stop the model from writing
+  //     "give the team a call at 303-744-2011" even when escalation fires
+  //     underneath, so the sentence is stripped from the visible reply.
+  //     Sentence-level scrubbing is only safe on the tools path, where the
+  //     full final answer arrives in ONE onToken call (same limitation as
+  //     the hours guard); the token-by-token non-tools path skips it.
+  //  3. If scrubbing empties the reply entirely (the whole reply was a
+  //     punt), substitute the active-handoff copy — the handoff-append step
+  //     below then sees the reply already reads as a handoff and skips the
+  //     duplicate.
+  const transformOutbound = (text: string): string => {
+    const hoursFixed = rewriteStoreHours(text);
+    if (!useTools) return hoursFixed;
+    const { cleaned } = scrubReply(hoursFixed, latestMessage);
+    if (cleaned.length > 0) return cleaned;
+    return agentsOnline ? HANDOFF_HUMAN_COMING : HANDOFF_AFTER_HOURS;
+  };
+
   // Track whether any tokens actually reached the SSE client. Used by the
   // post-generation takeover check: if nothing streamed, we can abort
   // cleanly; if the customer already saw text, persist it so the transcript
@@ -159,24 +194,18 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
     ? {
         onToken: (text: string) => {
           tokensEmitted = true;
-          // Correct the STREAMED copy with the same guard applied to the
+          // Correct the STREAMED copy with the same transform applied to the
           // persisted copy below, so the live text byte-matches the saved
           // message. ChatWidget.mergeRealMessage reconciles the streaming bubble
           // against the Pusher message by exact content equality; if the two
-          // differed it would show the streamed (wrong) hours AND a duplicate
+          // differed it would show the streamed (wrong) text AND a duplicate
           // corrected bubble. The tools path emits the full final answer in one
-          // onToken call, so the whole hours statement is visible here.
-          stream.onToken(rewriteStoreHours(text));
+          // onToken call, so the whole reply is visible here.
+          stream.onToken(transformOutbound(text));
         },
         onToolUse: stream.onToolUse,
       }
     : undefined;
-
-  // Look up agent presence ONCE per turn so buildPrompt can tell the model
-  // whether it's safe to promise human follow-up. Same value is reused below
-  // for the auto-escalation branch — saves a duplicate query and guarantees
-  // the prompt and the escalation routing agree on what "online" means.
-  const agentsOnline = await anyAgentsOnline();
 
   const { system, conversationMessages } = await buildPrompt(
     sessionId,
@@ -186,7 +215,6 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
     agentsOnline
   );
 
-  const useTools = aiToolsEnabled();
   const toolCalls: ToolCallEvent[] = [];
 
   const isTechAirServiceRequest =
@@ -235,13 +263,14 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
       : undefined,
   });
 
-  // Deterministic store-hours guard. The store_hours KB entry already holds the
-  // correct values, but the model intermittently drifts ("Sat 9–5", "Sat–Fri")
-  // when it appends hours as an unsolicited footer. Rewrite any hours statement
-  // to the canonical string before the reply is persisted, broadcast, or scored.
-  // The streamed copy was already corrected in guardedStream.onToken using the
-  // same function, so the two stay byte-identical for ChatWidget reconciliation.
-  const aiResponse = rewriteStoreHours(rawAiResponse);
+  // `assessedText` is the hours-corrected but UN-scrubbed reply — confidence
+  // and punt detection run on what the model actually wrote (a scrubbed-away
+  // hedge or punt sentence must still count as an escalation signal).
+  // `aiResponse` is the customer-facing copy: same transform the streamed
+  // copy already went through in guardedStream.onToken, so the two stay
+  // byte-identical for ChatWidget reconciliation.
+  const assessedText = rewriteStoreHours(rawAiResponse);
+  const aiResponse = transformOutbound(rawAiResponse);
 
   // Post-generation takeover check: a human may have claimed mid-stream.
   // If nothing was shown to the customer yet, abort without persisting so
@@ -252,7 +281,7 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
     throw makeHumanTakeoverError();
   }
 
-  const confidence = assessConfidence(aiResponse);
+  const confidence = assessConfidence(assessedText);
   const recentCustomer = await loadRecentCustomerMessages(sessionId);
   const sentiment = assessSentiment(recentCustomer);
 
@@ -327,10 +356,12 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
   let autoEscalated: RunAiResult["autoEscalated"] = null;
   // Phase 2a: a reply that punts the customer to the phone/contact form for
   // something the bot should have answered is an escalation trigger in its
-  // own right — the punt phrasings ("I'm not finding…", "call the team to
-  // ask…") often score high on the confidence heuristic and would otherwise
-  // slip through (observed live in smoke testing, 7/2/2026).
-  const isPassivePunt = replyIsPassivePunt(aiResponse);
+  // own right — the punt phrasings ("suggest you call the shop…") often
+  // score high on the confidence heuristic and would otherwise slip through
+  // (observed live, 7/2/2026). Detection runs on the PRE-scrub text: the
+  // punt sentence has already been stripped from aiResponse.
+  const isPassivePunt =
+    detectPuntSentences(assessedText, latestMessage).length > 0;
   const shouldEscalate =
     sentiment.score === -1 ||
     confidence.confidence === "low" ||

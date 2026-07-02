@@ -6,9 +6,10 @@ import {
   assessToolDataOutcome,
   containsOffer,
   decideEscalationReason,
+  detectPuntSentences,
+  scrubReply,
   shouldPauseForEscalation,
   replyAlreadyReadsAsHandoff,
-  replyIsPassivePunt,
   PAUSE_REASONS,
 } from "../escalationMode";
 
@@ -194,53 +195,101 @@ describe("decideEscalationReason", () => {
   });
 });
 
-describe("replyIsPassivePunt (real replies observed in 7/2/2026 smoke run)", () => {
-  it("flags the Rotella punt (search returned irrelevant hits, bot said call to ask)", () => {
-    expect(
-      replyIsPassivePunt(
-        "I'm not finding Shell Rotella T6 15w40 diesel oil in our current inventory right now. " +
-          "That said, it's worth checking the full chemicals category on our website or calling the team at 303-744-2011 " +
-          "to ask directly if they have it in stock at the physical store."
-      )
-    ).toBe(true);
+describe("detectPuntSentences / scrubReply — Antonio's 7/2/2026 live-test replies verbatim", () => {
+  // ── Live miss #1: the 5w40 punt that slipped through ──────────────────────
+  const LIVE_5W40_PUNT =
+    "I can also suggest you call the shop at 303-744-2011 or check our Parts section.";
+
+  it("live case 1: detects the 5w40 punt (deflection verb, no inability admission)", () => {
+    expect(detectPuntSentences(LIVE_5W40_PUNT, "Do you have 5w40 oil?")).toHaveLength(1);
   });
 
-  it("flags the Vespa punt (contact form + 'may be able to point you')", () => {
-    expect(
-      replyIsPassivePunt(
-        "I can't confirm that our chain products are compatible with a vintage Vespa scooter. " +
-          "If you want to ask our team directly, you can call 303-744-2011 or use our contact form " +
-          "and they may be able to point you in the right direction."
-      )
-    ).toBe(true);
+  it("live case 1: detects it even without the availability-question context", () => {
+    // "suggest you call" + "or check our" are in-sentence deflection cues
+    expect(detectPuntSentences(LIVE_5W40_PUNT, "something unrelated")).toHaveLength(1);
   });
 
-  it("flags the M2 spec punt ('give them a call … they'll get back to you')", () => {
-    expect(
-      replyIsPassivePunt(
-        "I don't have the top speed specs pulled up here right now. " +
-          "Our team can walk you through it — give them a call at 303-744-2011 or use the contact form " +
-          "and they'll get back to you with all the details."
-      )
-    ).toBe(true);
+  it("live case 1: scrubs the punt sentence but keeps the rest of the reply", () => {
+    const reply =
+      "We carry a range of motorcycle oils from Motorex, Bel-Ray, and Maxima.\n\n" +
+      LIVE_5W40_PUNT;
+    const { cleaned, puntSentences } = scrubReply(reply, "Do you have 5w40 oil?");
+    expect(puntSentences).toHaveLength(1);
+    expect(cleaned).toContain("Motorex, Bel-Ray, and Maxima");
+    expect(cleaned).not.toContain("303-744-2011");
+    expect(cleaned).not.toContain("suggest you call");
   });
 
+  // ── Live miss #2: punt language stacked with the handoff ─────────────────
+  const LIVE_M2_PUNT =
+    "If you want the full performance details, give the team a call at 303-744-2011 and they can walk you through it.";
+
+  it("live case 2: detects the M2 punt ('give the team a call … walk you through')", () => {
+    expect(detectPuntSentences(LIVE_M2_PUNT, "what's the top speed")).toHaveLength(1);
+  });
+
+  it("live case 2: scrub removes the punt so only the hedge + handoff remain visible", () => {
+    const reply = "I don't have the top speed specs pulled up here right now. " + LIVE_M2_PUNT;
+    const { cleaned } = scrubReply(reply, "what's the top speed");
+    expect(cleaned).toBe("I don't have the top speed specs pulled up here right now.");
+  });
+
+  // ── Live miss #3: search narration (no_search_narration violation) ───────
+  const LIVE_NARRATION =
+    "That search didn't return helmets - it grabbed race gear instead.";
+
+  it("live case 3: scrubs the search-narration sentence", () => {
+    const reply =
+      LIVE_NARRATION + " Here are some street options I'd recommend instead.";
+    const { cleaned, narrationSentences } = scrubReply(reply, "show me helmets");
+    expect(narrationSentences).toHaveLength(1);
+    expect(cleaned).toBe("Here are some street options I'd recommend instead.");
+  });
+
+  it("scrubs other observed narration phrasings", () => {
+    for (const s of [
+      "The search is picking up motorcycle oils instead of truck diesel oil.",
+      "The search didn't find Shell Rotella T6 diesel oil in our catalog.",
+      "That's because our catalog search leans toward riding gear and accessories.",
+    ]) {
+      expect(scrubReply(s + " We do carry motorcycle oils.", null).narrationSentences.length).toBe(1);
+    }
+  });
+
+  // ── Safety: legitimate phone mentions survive ─────────────────────────────
   it("does NOT flag the hours answer (phone number is the answer, not a punt)", () => {
-    expect(
-      replyIsPassivePunt(
-        "Monday–Saturday: 9 AM–6 PM · Sunday: Closed\n\n" +
-          "We're located at 7375 S Fulton St., Centennial, CO 80112. If you need to reach us, " +
-          "you can call 303-744-2011 during business hours."
-      )
-    ).toBe(false);
+    const reply =
+      "Monday–Saturday: 9 AM–6 PM · Sunday: Closed\n\n" +
+      "We're located at 7375 S Fulton St., Centennial, CO 80112. If you need to reach us, " +
+      "you can call 303-744-2011 during business hours.";
+    const { cleaned, puntSentences } = scrubReply(reply, "what are your store hours?");
+    expect(puntSentences).toHaveLength(0);
+    expect(cleaned).toBe(reply);
+  });
+
+  it("'do you have weekend hours?' is an hours question, not an availability question", () => {
+    const reply = "We're closed Sundays. You can call 303-744-2011 during business hours.";
+    expect(detectPuntSentences(reply, "do you have weekend hours?")).toHaveLength(0);
+  });
+
+  it("keeps the sanctioned secondary-phone service-handoff sentence", () => {
+    const reply =
+      "Our service team monitors this chat and will jump in to confirm what'll fit your specific bike. " +
+      "If you'd rather not wait, you can also call 303-744-2011.";
+    expect(detectPuntSentences(reply, "will this sprocket fit my bike?")).toHaveLength(0);
   });
 
   it("does NOT flag a normal product answer", () => {
-    expect(
-      replyIsPassivePunt(
-        "Yes! We carry 5w40 oil — the Motorex Power 4T Full Synthetic runs $22.99 per quart and it's in stock."
-      )
-    ).toBe(false);
+    const reply =
+      "Yes! We carry 5w40 oil — the Motorex Power 4T Full Synthetic runs $22.99 per quart and it's in stock.";
+    expect(detectPuntSentences(reply, "Do you have 5w40 oil?")).toHaveLength(0);
+    expect(scrubReply(reply, "Do you have 5w40 oil?").cleaned).toBe(reply);
+  });
+
+  it("returns cleaned='' when the entire reply is one punt sentence (caller substitutes handoff)", () => {
+    const { cleaned, puntSentences } = scrubReply(LIVE_5W40_PUNT, "Do you have 5w40 oil?");
+    expect(puntSentences).toHaveLength(1);
+    expect(cleaned).toBe("");
   });
 });
 

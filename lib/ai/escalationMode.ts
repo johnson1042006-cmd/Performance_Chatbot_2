@@ -92,23 +92,106 @@ export const PAUSE_REASONS = new Set([
 ]);
 
 /**
- * Passive-punt classifier — Jacob's core complaint verbatim: "it should
- * connect them to us rather than just telling them to call." A reply is a
- * punt only when BOTH fire:
+ * Unified punt-sentence detector + scrubber — Jacob's core complaint
+ * verbatim: "it should connect them to us rather than just telling them to
+ * call." Prompt rules (no_call_store) demonstrably don't stop the model
+ * from punting, so this is the deterministic enforcement layer, same
+ * pattern as rewriteStoreHours.
+ *
+ * A SENTENCE is a punt when it contains:
  *  (1) a redirect marker — the store phone number, "call the team/store",
  *      or the contact form; AND
- *  (2) an inability/deferral marker — the bot admitting it can't answer and
- *      deflecting the check to the customer.
- * Requiring both keeps legitimate contact-info answers (store hours replies
- * include the phone number) from false-positiving.
+ *  (2) either an in-sentence deflection cue (the bot deferring the check:
+ *      "suggest you call", "they can confirm", "to ask if…") OR the
+ *      customer's question was an availability/product question ("do you
+ *      have X?") — where a phone redirect IS the punt regardless of how
+ *      politely it's phrased (live-test miss, 7/2/2026: "I can also suggest
+ *      you call the shop … or check our Parts section" admits nothing).
+ * Hours/contact-info answers stay safe: their phone sentence has no
+ * deflection cue and hours questions aren't availability questions.
+ *
+ * The same classification drives BOTH escalation (any punt sentence found)
+ * and the scrub (flagged sentences removed from the visible reply) — one
+ * source of truth, so detect and strip cannot drift apart.
  */
 const PUNT_REDIRECT_RE =
-  /303[\s.\-]?744[\s.\-]?2011|\bcall(ing)? (the )?(team|store|shop|us|them)\b|\bgive (us|them) a (call|ring)\b|\bcontact form\b/i;
-const PUNT_INABILITY_RE =
-  /\b(not finding|can'?t confirm|don'?t carry|couldn'?t find|don'?t have|not showing up in my|outside our|ask (them )?directly|to ask (if|whether)|check with|they (may|might) be able|point you in the right direction|get back to you|confirm (if|whether|what))\b/i;
+  /303[\s.\-]?744[\s.\-]?2011|\bcall(ing)? (the )?(team|store|shop|us|them)\b|\bgive (us|them|the (team|shop|store)) a (call|ring)\b|\bcontact form\b/i;
+const PUNT_DEFLECTION_RE =
+  /\b(suggest(s|ing)? (that )?(you )?call|recommend (you )?(call|calling|giving)|to ask (if|whether|directly|about)|ask (them |us )?directly|they('ll| will| can| could) (confirm|check|tell|help|walk you|get back|point you)|can walk you through|get back to you|check with|to (confirm|check) (if|whether|what|availability|stock)|or check (our|the)|for (current )?(stock|availability|pricing)|(may|might) be able to|not finding|can'?t confirm|couldn'?t find|don'?t have|don'?t carry)\b/i;
+/** "do you have/carry X?"-style questions. Hours/location questions are
+ *  excluded — "do you have weekend hours?" is not an availability question. */
+const AVAILABILITY_QUESTION_RE =
+  /\b(do you (guys )?(have|carry|stock|sell)|got any|have any|carry any|in stock|availability|is (this|that|it) available)\b/i;
+const HOURS_LOCATION_RE =
+  /\b(hours?|open|closed?|closing|location|address|directions?)\b/i;
 
-export function replyIsPassivePunt(aiText: string): boolean {
-  return PUNT_REDIRECT_RE.test(aiText) && PUNT_INABILITY_RE.test(aiText);
+/** no_search_narration enforcement — sentences that reveal the retrieval
+ *  process ("That search didn't return helmets — it grabbed race gear"). */
+const NARRATION_RE =
+  /\b(the |that |my |our )?(catalog )?search( results?)? (didn'?t|did not|returned|picked up|grabbed|pulled( up)?|found|came back|is(n'?t)? (pulling|finding|returning|picking)|leans?)\b|\bmy (current )?results\b|\bthe results (are pulling|came back|show)\b|\bwhat came up in (the|my) search\b/i;
+
+function customerAskedAvailability(latestMessage: string | null | undefined): boolean {
+  if (!latestMessage) return false;
+  return (
+    AVAILABILITY_QUESTION_RE.test(latestMessage) &&
+    !HOURS_LOCATION_RE.test(latestMessage)
+  );
+}
+
+function splitIntoSentences(line: string): string[] {
+  return line.split(/(?<=[.!?])\s+/);
+}
+
+export interface ScrubResult {
+  /** Reply with punt/narration sentences removed. May be "" when the whole
+   *  reply was flagged — the caller substitutes the handoff copy then. */
+  cleaned: string;
+  puntSentences: string[];
+  narrationSentences: string[];
+}
+
+export function scrubReply(
+  reply: string,
+  latestCustomerMessage: string | null | undefined
+): ScrubResult {
+  const availability = customerAskedAvailability(latestCustomerMessage);
+  const puntSentences: string[] = [];
+  const narrationSentences: string[] = [];
+
+  const outLines = reply.split("\n").map((line) => {
+    const kept = splitIntoSentences(line).filter((sentence) => {
+      if (
+        PUNT_REDIRECT_RE.test(sentence) &&
+        (PUNT_DEFLECTION_RE.test(sentence) || availability)
+      ) {
+        puntSentences.push(sentence);
+        return false;
+      }
+      if (NARRATION_RE.test(sentence)) {
+        narrationSentences.push(sentence);
+        return false;
+      }
+      return true;
+    });
+    return kept.join(" ");
+  });
+
+  const cleaned = outLines
+    .join("\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return { cleaned, puntSentences, narrationSentences };
+}
+
+/** Escalation-side view of the same classification: any punt sentence in
+ *  the reply means the bot deflected instead of connecting. */
+export function detectPuntSentences(
+  reply: string,
+  latestCustomerMessage: string | null | undefined
+): string[] {
+  return scrubReply(reply, latestCustomerMessage).puntSentences;
 }
 
 export interface EscalationReasonSignals {
