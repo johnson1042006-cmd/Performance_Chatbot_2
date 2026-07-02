@@ -32,6 +32,15 @@ import {
 import { tools as toolCatalog, toolHandlers, escalateToHuman } from "./tools";
 import { rewriteStoreHours } from "./storeHours";
 import { assessConfidence, assessSentiment } from "./quality";
+import {
+  assessToolDataOutcome,
+  containsOffer,
+  decideEscalationReason,
+  replyAlreadyReadsAsHandoff,
+  replyIsPassivePunt,
+  shouldPauseForEscalation,
+} from "./escalationMode";
+import { pauseAi, persistHandoffMessage } from "@/lib/sessions/aiPause";
 import { anyAgentsOnline } from "@/lib/presence";
 import { log, serializeError } from "@/lib/log";
 
@@ -52,7 +61,12 @@ interface RunAiResult {
   message: typeof messages.$inferSelect;
   confidence: ReturnType<typeof assessConfidence>;
   sentiment: ReturnType<typeof assessSentiment>;
-  autoEscalated: { reason: string; agentsOnline: boolean } | null;
+  autoEscalated: {
+    reason: string;
+    agentsOnline: boolean;
+    /** Phase 2a: true when this escalation also paused the session's AI. */
+    paused: boolean;
+  } | null;
   toolCalls: ToolCallEvent[];
 }
 
@@ -91,6 +105,25 @@ async function loadRecentCustomerMessages(sessionId: string): Promise<string[]> 
     .orderBy(desc(messages.sentAt))
     .limit(8);
   return rows.reverse().map((r) => r.content);
+}
+
+/**
+ * The AI message BEFORE this turn's reply — used by the mode (a)/(b) split
+ * to detect whether the bot previously OFFERED the information it now can't
+ * deliver. Only queried on the low-confidence/no-data branch.
+ */
+async function loadPreviousAiMessage(
+  sessionId: string,
+  excludeMessageId: string
+): Promise<string | null> {
+  const rows = await db
+    .select({ id: messages.id, content: messages.content })
+    .from(messages)
+    .where(and(eq(messages.sessionId, sessionId), eq(messages.role, "ai")))
+    .orderBy(desc(messages.sentAt))
+    .limit(2);
+  const prior = rows.find((r) => r.id !== excludeMessageId);
+  return prior?.content ?? null;
 }
 
 async function hasAutoEscalated(sessionId: string): Promise<boolean> {
@@ -292,23 +325,54 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
   );
 
   let autoEscalated: RunAiResult["autoEscalated"] = null;
+  // Phase 2a: a reply that punts the customer to the phone/contact form for
+  // something the bot should have answered is an escalation trigger in its
+  // own right — the punt phrasings ("I'm not finding…", "call the team to
+  // ask…") often score high on the confidence heuristic and would otherwise
+  // slip through (observed live in smoke testing, 7/2/2026).
+  const isPassivePunt = replyIsPassivePunt(aiResponse);
   const shouldEscalate =
     sentiment.score === -1 ||
     confidence.confidence === "low" ||
     aiEscalatedViaTool ||
     isExplicitHumanRequest ||
-    isTechAirServiceRequest;
+    isTechAirServiceRequest ||
+    isPassivePunt;
   if (shouldEscalate) {
+    // Phase 2a mode split. The two new reasons refine what used to collapse
+    // into "unsupported": mode (a) no_data — the bot has nothing to answer
+    // with; mode (b) undeliverable_offer — same, but the bot's previous
+    // message offered the info it now can't deliver. The prior-message
+    // lookup only runs on that branch, so other triggers cost no extra query.
+    const toolDataOutcome = assessToolDataOutcome(toolCalls);
+    const baseTriggerHit =
+      sentiment.score === -1 || isExplicitHumanRequest || isTechAirServiceRequest;
+    let priorAiOffer = false;
+    if (
+      !baseTriggerHit &&
+      ((confidence.confidence === "low" && toolDataOutcome !== "got_data") ||
+        isPassivePunt)
+    ) {
+      priorAiOffer = containsOffer(
+        await loadPreviousAiMessage(sessionId, savedMessage.id)
+      );
+    }
+    const reason = decideEscalationReason({
+      sentimentScore: sentiment.score,
+      confidence: confidence.confidence,
+      isExplicitHumanRequest,
+      isTechAirServiceRequest,
+      toolDataOutcome,
+      priorAiOffer,
+      replyIsPunt: isPassivePunt,
+    });
+    // Pause policy (Antonio 7/2/2026): pause on no_data, undeliverable_offer,
+    // explicit_request, frustrated_customer, and tool-initiated escalations;
+    // bare low confidence with data in hand stays notify-only.
+    const shouldPause = shouldPauseForEscalation(reason, aiEscalatedViaTool);
+
     const already = await hasAutoEscalated(sessionId);
     if (!already) {
-      const reason: "frustrated_customer" | "unsupported" | "explicit_request" | "tech_air_service" =
-        sentiment.score === -1
-          ? "frustrated_customer"
-          : isExplicitHumanRequest
-          ? "explicit_request"
-          : isTechAirServiceRequest
-          ? "tech_air_service"
-          : "unsupported";
       // Skip escalateToHuman when the tool already called it this turn —
       // aiClaimDueAt was already cleared and escalation-requested already
       // fired on the dashboard channel.
@@ -335,6 +399,9 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
             sentimentReasons: sentiment.reasons,
             aiEscalatedViaTool,
             isExplicitHumanRequest,
+            isPassivePunt,
+            toolDataOutcome,
+            paused: shouldPause,
           },
         });
       } catch (err) {
@@ -370,7 +437,26 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
         });
       }
 
-      autoEscalated = { reason, agentsOnline };
+      autoEscalated = { reason, agentsOnline, paused: shouldPause };
+    }
+
+    // Pause even when the once-per-session notify already fired (e.g. the
+    // bot hit a second wall after a pause timed out) — suppression must hold
+    // every time, notification stays deduped. The active-handoff message is
+    // skipped when the model's own reply already reads as a handoff.
+    if (shouldPause) {
+      try {
+        await pauseAi(sessionId, reason);
+        if (!replyAlreadyReadsAsHandoff(aiResponse)) {
+          await persistHandoffMessage(sessionId, agentsOnline);
+        }
+      } catch (err) {
+        log.warn("ai.run.pause_failed", {
+          requestId,
+          sessionId,
+          error: serializeError(err),
+        });
+      }
     }
   }
 

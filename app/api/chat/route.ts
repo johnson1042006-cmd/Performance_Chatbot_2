@@ -14,6 +14,11 @@ import {
   claimByAi,
 } from "@/lib/sessions/state";
 import {
+  getAiPauseState,
+  clearAiPause,
+  persistHoldingAckIfNeeded,
+} from "@/lib/sessions/aiPause";
+import {
   runAiTurn,
   persistFallbackAiMessage,
   isHumanTakeoverError,
@@ -322,6 +327,45 @@ export async function POST(req: NextRequest) {
 
     // If already claimed by AI — respond inline to every follow-up
     if (session.claimedByKind === "ai") {
+      // Phase 2a: a paused session never gets a Claude turn — a human owes
+      // this customer an answer. Acknowledge the follow-up once (then stay
+      // quiet); an expired pause (45 min, nobody claimed) clears lazily and
+      // the turn proceeds normally.
+      const pauseState = getAiPauseState(session);
+      if (pauseState === "expired") {
+        await clearAiPause(sessionId, "timeout");
+      } else if (pauseState === "active") {
+        const holding = await persistHoldingAckIfNeeded(sessionId);
+        if (useSse) {
+          const stream = createSseStream(async ({ send }) => {
+            send({
+              event: "customer_message",
+              data: {
+                id: savedMessage.id,
+                sentAt: savedMessage.sentAt,
+                productMention,
+              },
+            });
+            if (holding) {
+              send({ event: "token", data: { text: holding.content } });
+              send({
+                event: "message",
+                data: { id: holding.id, sentAt: holding.sentAt },
+              });
+            }
+            send({ event: "done", data: {} });
+          });
+          return new Response(stream, { headers: SSE_RESPONSE_HEADERS });
+        }
+        return NextResponse.json({
+          message: savedMessage,
+          aiMessage: holding ?? undefined,
+          sessionStatus: "active_ai",
+          aiPaused: true,
+          productMention,
+        });
+      }
+
       if (useSse) {
         return sseAiResponse(aiCtx, savedMessage, productMention);
       }

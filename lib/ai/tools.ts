@@ -201,6 +201,10 @@ const ESCALATION_REASONS = [
   "policy_exception",
   "tech_air_service",
   "unsupported",
+  // Phase 2a mode split: (a) the bot has no data to answer with;
+  // (b) the bot offered information it then couldn't deliver.
+  "no_data",
+  "undeliverable_offer",
 ] as const;
 
 type EscalationReason = (typeof ESCALATION_REASONS)[number];

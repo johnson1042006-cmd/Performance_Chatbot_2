@@ -6,6 +6,7 @@ import { runAiTurn, isHumanTakeoverError } from "@/lib/ai/runAi";
 import { verifySessionAccess } from "@/lib/sessions/verifySessionToken";
 import { CALL_CLAUDE_ERROR_MESSAGE } from "@/lib/ai/callClaude";
 import { claimByAi } from "@/lib/sessions/state";
+import { getAiPauseState } from "@/lib/sessions/aiPause";
 import { enforce, getClientIp } from "@/lib/rateLimit";
 import { log, serializeError } from "@/lib/log";
 import { createSseStream, SSE_RESPONSE_HEADERS, wantsSse } from "@/lib/ai/sse";
@@ -66,6 +67,12 @@ export async function POST(req: NextRequest) {
         skipped: true,
         reason: "Session is handled by a human agent",
       });
+    }
+
+    // Phase 2a: never burn a Claude turn on a paused session — a human owes
+    // the customer an answer and /api/chat already acknowledged the follow-up.
+    if (getAiPauseState(session) === "active") {
+      return NextResponse.json({ skipped: true, reason: "ai_paused" });
     }
 
     // Redundancy/freshness guard: don't burn a Claude turn when the fallback
