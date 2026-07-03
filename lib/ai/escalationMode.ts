@@ -92,11 +92,12 @@ export const PAUSE_REASONS = new Set([
 ]);
 
 /**
- * Unified punt-sentence detector + scrubber — Jacob's core complaint
- * verbatim: "it should connect them to us rather than just telling them to
- * call." Prompt rules (no_call_store) demonstrably don't stop the model
- * from punting, so this is the deterministic enforcement layer, same
- * pattern as rewriteStoreHours.
+ * Punt-sentence detector — Jacob's core complaint verbatim: "it should
+ * connect them to us rather than just telling them to call." Prompt rules
+ * (no_call_store) demonstrably don't stop the model from punting, so this
+ * is a deterministic escalation trigger. Enforcement is full handoff-copy
+ * replacement of the visible reply once the escalation pauses (see runAi),
+ * same principle as rewriteStoreHours.
  *
  * A SENTENCE is a punt when it contains:
  *  (1) a redirect marker — the store phone number, "call the team/store",
@@ -110,9 +111,11 @@ export const PAUSE_REASONS = new Set([
  * Hours/contact-info answers stay safe: their phone sentence has no
  * deflection cue and hours questions aren't availability questions.
  *
- * The same classification drives BOTH escalation (any punt sentence found)
- * and the scrub (flagged sentences removed from the visible reply) — one
- * source of truth, so detect and strip cannot drift apart.
+ * A detection miss is cushioned by the other escalation triggers
+ * (low-confidence + no-data, frustration, explicit request, tool-initiated);
+ * a false positive replaces a healthy reply with the handoff copy AND
+ * pauses the session, so the safety pins in the tests matter more than
+ * the coverage pins.
  */
 const PUNT_REDIRECT_RE =
   /303[\s.\-]?744[\s.\-]?2011|\bcall(ing)? (the )?(team|store|shop|us|them)\b|\bgive (us|them|the (team|shop|store)) a (call|ring)\b|\bcontact form\b/i;
@@ -163,42 +166,65 @@ function splitIntoSentences(line: string): string[] {
   return line.split(/(?<=[.!?])\s+/);
 }
 
-export interface ScrubResult {
-  /** Reply with punt/narration sentences removed. May be "" when the whole
-   *  reply was flagged — the caller substitutes the handoff copy then. */
-  cleaned: string;
-  puntSentences: string[];
-  narrationSentences: string[];
-}
-
-export function scrubReply(
+/**
+ * Escalation-trigger view of the classification: any punt sentence in the
+ * reply means the bot deflected instead of connecting.
+ *
+ * Structural fix (Antonio, 7/3/2026): punt sentences are DETECTED but no
+ * longer individually removed. Once escalation pauses the session, runAi
+ * replaces the ENTIRE visible reply with the deterministic handoff copy —
+ * same principle as the hours guard. So a pattern miss here costs one
+ * redundant trigger layer, not a phone number in a customer-visible reply.
+ */
+export function detectPuntSentences(
   reply: string,
   latestCustomerMessage: string | null | undefined
-): ScrubResult {
+): string[] {
   const availability = customerAskedAvailability(latestCustomerMessage);
   const replyAdmitsGap = REPLY_ADMITS_GAP_RE.test(reply);
   const puntSentences: string[] = [];
-  const narrationSentences: string[] = [];
-
-  const outLines = reply.split("\n").map((line) => {
-    const kept = splitIntoSentences(line).filter((sentence) => {
+  for (const line of reply.split("\n")) {
+    for (const sentence of splitIntoSentences(line)) {
       const isPhonePunt =
         PUNT_REDIRECT_RE.test(sentence) &&
         (PUNT_DEFLECTION_RE.test(sentence) || availability);
       const isPagePunt =
         PAGE_REDIRECT_RE.test(sentence) && (replyAdmitsGap || availability);
-      if (isPhonePunt || isPagePunt) {
-        puntSentences.push(sentence);
-        return false;
-      }
-      if (NARRATION_RE.test(sentence)) {
-        narrationSentences.push(sentence);
-        return false;
-      }
-      return true;
-    });
-    return kept.join(" ");
-  });
+      if (isPhonePunt || isPagePunt) puntSentences.push(sentence);
+    }
+  }
+  return puntSentences;
+}
+
+export interface NarrationScrubResult {
+  /** Reply with narration sentences removed. May be "" when the whole reply
+   *  was narration — runAi treats that as a punt-equivalent no_data trigger,
+   *  so the handoff copy replaces it. */
+  cleaned: string;
+  narrationSentences: string[];
+}
+
+/**
+ * no_search_narration enforcement for NON-pausing replies. Unlike punt
+ * phrasing (unbounded), narration is a bounded vocabulary — the sentence
+ * must reference the retrieval process itself — so sentence-level removal
+ * stays maintainable here. Pausing replies never reach the customer at all
+ * (full handoff-copy replacement), so this only guards replies the bot is
+ * allowed to keep talking through.
+ */
+export function scrubNarration(reply: string): NarrationScrubResult {
+  const narrationSentences: string[] = [];
+  const outLines = reply.split("\n").map((line) =>
+    splitIntoSentences(line)
+      .filter((sentence) => {
+        if (NARRATION_RE.test(sentence)) {
+          narrationSentences.push(sentence);
+          return false;
+        }
+        return true;
+      })
+      .join(" ")
+  );
 
   const cleaned = outLines
     .join("\n")
@@ -206,16 +232,7 @@ export function scrubReply(
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-  return { cleaned, puntSentences, narrationSentences };
-}
-
-/** Escalation-side view of the same classification: any punt sentence in
- *  the reply means the bot deflected instead of connecting. */
-export function detectPuntSentences(
-  reply: string,
-  latestCustomerMessage: string | null | undefined
-): string[] {
-  return scrubReply(reply, latestCustomerMessage).puntSentences;
+  return { cleaned, narrationSentences };
 }
 
 export interface EscalationReasonSignals {
@@ -264,14 +281,28 @@ export function shouldPauseForEscalation(
   return aiEscalatedViaTool || PAUSE_REASONS.has(reason);
 }
 
-/**
- * True when the AI's own reply already reads as an active handoff
- * ("Connecting you to a teammate…"), so appending the canned handoff
- * message would duplicate it.
- */
-const HANDOFF_ALREADY_RE =
-  /\b(connect(ing)? you|get(ting)? (someone|a teammate|one of our)|team ?(member|mate)? (will|monitors)|service team monitors|specialist on our team|be with you (shortly|in a moment)|hang tight)\b/i;
+/** Everything the pause verdict depends on — deliberately WITHOUT
+ *  priorAiOffer, see escalationWillPause. */
+export interface PausePredicateSignals {
+  sentimentScore: number;
+  confidence: string;
+  isExplicitHumanRequest: boolean;
+  isTechAirServiceRequest: boolean;
+  toolDataOutcome: ToolDataOutcome;
+  replyIsPunt: boolean;
+  aiEscalatedViaTool: boolean;
+}
 
-export function replyAlreadyReadsAsHandoff(aiText: string): boolean {
-  return HANDOFF_ALREADY_RE.test(aiText);
+/**
+ * Will this turn's escalation pause the AI? Synchronously computable —
+ * `priorAiOffer` (the one async signal) only toggles the reason label
+ * between no_data and undeliverable_offer, both of which pause, so the
+ * verdict is invariant to it. runAi's outbound transform calls this at
+ * stream time to decide full handoff-copy replacement, and the escalation
+ * block reaches the same verdict through decideEscalationReason +
+ * shouldPauseForEscalation — one derivation, no drift.
+ */
+export function escalationWillPause(s: PausePredicateSignals): boolean {
+  const reason = decideEscalationReason({ ...s, priorAiOffer: false });
+  return shouldPauseForEscalation(reason, s.aiEscalatedViaTool);
 }

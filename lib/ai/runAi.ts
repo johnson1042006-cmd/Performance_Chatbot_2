@@ -5,15 +5,17 @@
  *  - lib/sessions/state.ts processDueAiClaims (cron sweep)
  *
  * Responsibilities (in order):
- *   1. buildPrompt
- *   2. callClaude (with tools when USE_AI_TOOLS=true)
+ *   1. compute sentiment + request-classification signals (pre-call, so the
+ *      outbound transform can decide handoff replacement at stream time)
+ *   2. buildPrompt
+ *   3. callClaude (with tools when USE_AI_TOOLS=true)
  *      - tool calls are persisted as chat_events rows (type "tool_call")
  *      - streaming hook forwards tokens + tool_use events to the caller
- *   3. compute confidence + sentiment heuristics
- *   4. insert messages row with confidence + sentiment
- *   5. fire Pusher new-message (session) + session-update (dashboard)
- *   6. auto-escalate at most once per session when sentiment === -1 OR
- *      confidence === "low"; emits "request-contact" when no agents online
+ *   4. compute confidence; on a pausing turn the visible reply is REPLACED
+ *      with the deterministic handoff copy (structural fix, 7/3/2026)
+ *   5. insert messages row with confidence + sentiment
+ *   6. fire Pusher new-message (session) + session-update (dashboard)
+ *   7. auto-escalate (notify once per session; pause per Phase 2a policy)
  *
  * Returns the saved AI message and the metadata needed by callers.
  */
@@ -37,8 +39,8 @@ import {
   containsOffer,
   decideEscalationReason,
   detectPuntSentences,
-  replyAlreadyReadsAsHandoff,
-  scrubReply,
+  escalationWillPause,
+  scrubNarration,
   shouldPauseForEscalation,
 } from "./escalationMode";
 import {
@@ -132,6 +134,18 @@ async function loadPreviousAiMessage(
   return prior?.content ?? null;
 }
 
+const EXPLICIT_HUMAN_REQUEST_PATTERNS: RegExp[] = [
+  /\b(real|actual|live) (human|person)\b/i,
+  /\btalk to (a |an )?(human|person|agent|rep|representative|teammate|team\s*member|staff|employee|associate|someone)\b/i,
+  /\bspeak (to|with) (a |an )?(human|person|agent|rep|representative|manager|teammate|team\s*member|staff|employee|associate|someone)\b/i,
+  /\bchat with (a |an )?(human|person|agent|rep|representative|teammate|team\s*member|staff|someone)\b/i,
+  /\bconnect (me )?(to|with) (a |an )?(human|person|agent|rep|representative|teammate|team\s*member|staff|someone)\b/i,
+  /\bget (me )?(a |an )?(human|person|agent|rep|teammate|team\s*member|manager)\b/i,
+  /\blive agent\b/i,
+  /\bhuman agent\b/i,
+  /\b(customer )?service rep(resentative)?\b/i,
+];
+
 async function hasAutoEscalated(sessionId: string): Promise<boolean> {
   const [row] = await db
     .select({ id: chatEvents.id })
@@ -163,26 +177,68 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
   const agentsOnline = await anyAgentsOnline();
   const useTools = aiToolsEnabled();
 
+  // Escalation signals hoisted BEFORE the model call: the outbound transform
+  // needs the full pause verdict synchronously at stream time (structural
+  // fix, 7/3/2026 — a pausing turn's visible reply is REPLACED with the
+  // handoff copy, not scrubbed sentence by sentence). The customer's latest
+  // message is persisted by the caller before runAiTurn, so computing
+  // sentiment here matches the old post-generation result.
+  const recentCustomer = await loadRecentCustomerMessages(sessionId);
+  const sentiment = assessSentiment(recentCustomer);
+  const isExplicitHumanRequest = EXPLICIT_HUMAN_REQUEST_PATTERNS.some((re) =>
+    re.test(latestMessage)
+  );
+  const isTechAirServiceRequest =
+    /tech.?air/i.test(latestMessage) &&
+    /\b(service|send.+in|recharge|recertif|deployed|expir|replac|fix|broken|warranty|repair|fired)\b/i.test(latestMessage);
+
+  // Populated by onToolCall as tool rounds complete. On the tools path the
+  // final answer arrives in ONE onToken call AFTER every tool round, so the
+  // transform below reads a fully-populated array at call time.
+  const toolCalls: ToolCallEvent[] = [];
+
+  // A reply is punt-equivalent when it contains a punt sentence, or (tools
+  // path) when scrubbing narration leaves nothing — a reply that is nothing
+  // but retrieval narration has nothing to answer with. Shared by the
+  // transform's pause verdict and the escalation block so they cannot drift.
+  const replyIsPuntEquivalent = (assessed: string): boolean =>
+    detectPuntSentences(assessed, latestMessage).length > 0 ||
+    (useTools && scrubNarration(assessed).cleaned.length === 0);
+
+  const willPauseThisTurn = (assessed: string): boolean =>
+    escalationWillPause({
+      sentimentScore: sentiment.score,
+      confidence: assessConfidence(assessed).confidence,
+      isExplicitHumanRequest,
+      isTechAirServiceRequest,
+      toolDataOutcome: assessToolDataOutcome(toolCalls),
+      replyIsPunt: replyIsPuntEquivalent(assessed),
+      aiEscalatedViaTool: toolCalls.some(
+        (tc) => tc.name === "escalate_to_human" && !tc.isError
+      ),
+    });
+
   // Single deterministic transform applied to BOTH the streamed and the
   // persisted copy so they stay byte-identical for ChatWidget reconciliation:
   //  1. rewriteStoreHours — canonical hours (item 1.1).
-  //  2. scrubReply — remove passive-punt and search-narration sentences
-  //     (Phase 2a): prompt rules don't reliably stop the model from writing
-  //     "give the team a call at 303-744-2011" even when escalation fires
-  //     underneath, so the sentence is stripped from the visible reply.
-  //     Sentence-level scrubbing is only safe on the tools path, where the
-  //     full final answer arrives in ONE onToken call (same limitation as
-  //     the hours guard); the token-by-token non-tools path skips it.
-  //  3. If scrubbing empties the reply entirely (the whole reply was a
-  //     punt), substitute the active-handoff copy — the handoff-append step
-  //     below then sees the reply already reads as a handoff and skips the
-  //     duplicate.
+  //  2. Full handoff-copy replacement when this turn's escalation will pause
+  //     the AI (structural fix, 7/3/2026): no punt phrasing, phone number,
+  //     or self-serve redirect can reach the customer on a pausing turn,
+  //     regardless of how the model worded it. Replaces the old sentence-
+  //     level punt scrub, which required predicting every punt phrasing.
+  //  3. Otherwise, narration-only scrub (bounded vocabulary, still safe to
+  //     police per sentence).
+  //  Only safe on the tools path, where the full final answer arrives in
+  //  ONE onToken call (same limitation as the hours guard); the
+  //  token-by-token non-tools path passes through and the escalation block
+  //  appends the handoff message instead.
   const transformOutbound = (text: string): string => {
     const hoursFixed = rewriteStoreHours(text);
     if (!useTools) return hoursFixed;
-    const { cleaned } = scrubReply(hoursFixed, latestMessage);
-    if (cleaned.length > 0) return cleaned;
-    return agentsOnline ? HANDOFF_HUMAN_COMING : HANDOFF_AFTER_HOURS;
+    if (willPauseThisTurn(hoursFixed)) {
+      return agentsOnline ? HANDOFF_HUMAN_COMING : HANDOFF_AFTER_HOURS;
+    }
+    return scrubNarration(hoursFixed).cleaned;
   };
 
   // Track whether any tokens actually reached the SSE client. Used by the
@@ -214,12 +270,6 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
     latestMessageRaw,
     agentsOnline
   );
-
-  const toolCalls: ToolCallEvent[] = [];
-
-  const isTechAirServiceRequest =
-    /tech.?air/i.test(latestMessage) &&
-    /\b(service|send.+in|recharge|recertif|deployed|expir|replac|fix|broken|warranty|repair|fired)\b/i.test(latestMessage);
 
   const rawAiResponse = await callClaude(system, conversationMessages, {
     ...(useTools
@@ -263,12 +313,13 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
       : undefined,
   });
 
-  // `assessedText` is the hours-corrected but UN-scrubbed reply — confidence
-  // and punt detection run on what the model actually wrote (a scrubbed-away
-  // hedge or punt sentence must still count as an escalation signal).
-  // `aiResponse` is the customer-facing copy: same transform the streamed
-  // copy already went through in guardedStream.onToken, so the two stay
-  // byte-identical for ChatWidget reconciliation.
+  // `assessedText` is the hours-corrected but UNREPLACED reply — confidence
+  // and punt detection run on what the model actually wrote (a replaced-away
+  // hedge or punt must still count as an escalation signal). `aiResponse` is
+  // the customer-facing copy: same transform the streamed copy already went
+  // through in guardedStream.onToken (possibly the handoff copy verbatim on
+  // a pausing turn), so the two stay byte-identical for ChatWidget
+  // reconciliation.
   const assessedText = rewriteStoreHours(rawAiResponse);
   const aiResponse = transformOutbound(rawAiResponse);
 
@@ -282,8 +333,6 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
   }
 
   const confidence = assessConfidence(assessedText);
-  const recentCustomer = await loadRecentCustomerMessages(sessionId);
-  const sentiment = assessSentiment(recentCustomer);
 
   const [savedMessage] = await db
     .insert(messages)
@@ -335,22 +384,8 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
   // escalation-requested, but we still insert the auto_escalated chat event
   // and fire the correct per-session Pusher event so the widget can render
   // EmailCaptureForm or the connecting banner.
-  const EXPLICIT_HUMAN_REQUEST_PATTERNS: RegExp[] = [
-    /\b(real|actual|live) (human|person)\b/i,
-    /\btalk to (a |an )?(human|person|agent|rep|representative|teammate|team\s*member|staff|employee|associate|someone)\b/i,
-    /\bspeak (to|with) (a |an )?(human|person|agent|rep|representative|manager|teammate|team\s*member|staff|employee|associate|someone)\b/i,
-    /\bchat with (a |an )?(human|person|agent|rep|representative|teammate|team\s*member|staff|someone)\b/i,
-    /\bconnect (me )?(to|with) (a |an )?(human|person|agent|rep|representative|teammate|team\s*member|staff|someone)\b/i,
-    /\bget (me )?(a |an )?(human|person|agent|rep|teammate|team\s*member|manager)\b/i,
-    /\blive agent\b/i,
-    /\bhuman agent\b/i,
-    /\b(customer )?service rep(resentative)?\b/i,
-  ];
   const aiEscalatedViaTool = toolCalls.some(
     (tc) => tc.name === "escalate_to_human" && !tc.isError
-  );
-  const isExplicitHumanRequest = EXPLICIT_HUMAN_REQUEST_PATTERNS.some((re) =>
-    re.test(latestMessage)
   );
 
   let autoEscalated: RunAiResult["autoEscalated"] = null;
@@ -358,10 +393,10 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
   // something the bot should have answered is an escalation trigger in its
   // own right — the punt phrasings ("suggest you call the shop…") often
   // score high on the confidence heuristic and would otherwise slip through
-  // (observed live, 7/2/2026). Detection runs on the PRE-scrub text: the
-  // punt sentence has already been stripped from aiResponse.
-  const isPassivePunt =
-    detectPuntSentences(assessedText, latestMessage).length > 0;
+  // (observed live, 7/2/2026). Detection runs on the PRE-replacement text
+  // via the same predicate the outbound transform used, so this block and
+  // the visible reply always agree on whether the turn pauses.
+  const isPassivePunt = replyIsPuntEquivalent(assessedText);
   const shouldEscalate =
     sentiment.score === -1 ||
     confidence.confidence === "low" ||
@@ -473,12 +508,14 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
 
     // Pause even when the once-per-session notify already fired (e.g. the
     // bot hit a second wall after a pause timed out) — suppression must hold
-    // every time, notification stays deduped. The active-handoff message is
-    // skipped when the model's own reply already reads as a handoff.
+    // every time, notification stays deduped. On the tools path the saved
+    // message already IS the handoff copy (transformOutbound replaced it),
+    // so no separate handoff message is appended; the non-tools path can't
+    // replace mid-stream, so it appends one instead.
     if (shouldPause) {
       try {
         await pauseAi(sessionId, reason);
-        if (!replyAlreadyReadsAsHandoff(aiResponse)) {
+        if (!useTools) {
           await persistHandoffMessage(sessionId, agentsOnline);
         }
       } catch (err) {

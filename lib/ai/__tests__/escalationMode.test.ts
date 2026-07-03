@@ -7,9 +7,9 @@ import {
   containsOffer,
   decideEscalationReason,
   detectPuntSentences,
-  scrubReply,
+  escalationWillPause,
+  scrubNarration,
   shouldPauseForEscalation,
-  replyAlreadyReadsAsHandoff,
   PAUSE_REASONS,
 } from "../escalationMode";
 
@@ -195,7 +195,11 @@ describe("decideEscalationReason", () => {
   });
 });
 
-describe("detectPuntSentences / scrubReply — Antonio's 7/2/2026 live-test replies verbatim", () => {
+describe("detectPuntSentences — Antonio's 7/2/2026 live-test replies verbatim", () => {
+  // Since the 7/3/2026 structural fix, punt detection is an escalation
+  // TRIGGER only — a pausing turn's whole reply is replaced with the
+  // handoff copy, so there are no punt-removal assertions here anymore.
+
   // ── Live miss #1: the 5w40 punt that slipped through ──────────────────────
   const LIVE_5W40_PUNT =
     "I can also suggest you call the shop at 303-744-2011 or check our Parts section.";
@@ -209,15 +213,11 @@ describe("detectPuntSentences / scrubReply — Antonio's 7/2/2026 live-test repl
     expect(detectPuntSentences(LIVE_5W40_PUNT, "something unrelated")).toHaveLength(1);
   });
 
-  it("live case 1: scrubs the punt sentence but keeps the rest of the reply", () => {
+  it("live case 1: detects the punt even when buried in an otherwise-useful reply", () => {
     const reply =
       "We carry a range of motorcycle oils from Motorex, Bel-Ray, and Maxima.\n\n" +
       LIVE_5W40_PUNT;
-    const { cleaned, puntSentences } = scrubReply(reply, "Do you have 5w40 oil?");
-    expect(puntSentences).toHaveLength(1);
-    expect(cleaned).toContain("Motorex, Bel-Ray, and Maxima");
-    expect(cleaned).not.toContain("303-744-2011");
-    expect(cleaned).not.toContain("suggest you call");
+    expect(detectPuntSentences(reply, "Do you have 5w40 oil?")).toHaveLength(1);
   });
 
   // ── Live miss #2: punt language stacked with the handoff ─────────────────
@@ -228,43 +228,15 @@ describe("detectPuntSentences / scrubReply — Antonio's 7/2/2026 live-test repl
     expect(detectPuntSentences(LIVE_M2_PUNT, "what's the top speed")).toHaveLength(1);
   });
 
-  it("live case 2: scrub removes the punt so only the hedge + handoff remain visible", () => {
-    const reply = "I don't have the top speed specs pulled up here right now. " + LIVE_M2_PUNT;
-    const { cleaned } = scrubReply(reply, "what's the top speed");
-    expect(cleaned).toBe("I don't have the top speed specs pulled up here right now.");
-  });
-
-  // ── Live miss #3: search narration (no_search_narration violation) ───────
-  const LIVE_NARRATION =
-    "That search didn't return helmets - it grabbed race gear instead.";
-
-  it("live case 3: scrubs the search-narration sentence", () => {
-    const reply =
-      LIVE_NARRATION + " Here are some street options I'd recommend instead.";
-    const { cleaned, narrationSentences } = scrubReply(reply, "show me helmets");
-    expect(narrationSentences).toHaveLength(1);
-    expect(cleaned).toBe("Here are some street options I'd recommend instead.");
-  });
-
-  it("scrubs other observed narration phrasings", () => {
-    for (const s of [
-      "The search is picking up motorcycle oils instead of truck diesel oil.",
-      "The search didn't find Shell Rotella T6 diesel oil in our catalog.",
-      "That's because our catalog search leans toward riding gear and accessories.",
-    ]) {
-      expect(scrubReply(s + " We do carry motorcycle oils.", null).narrationSentences.length).toBe(1);
-    }
-  });
-
-  // ── Safety: legitimate phone mentions survive ─────────────────────────────
+  // ── Safety: legitimate phone mentions survive (a false positive now
+  //    replaces the whole reply AND pauses the session, so these matter) ────
   it("does NOT flag the hours answer (phone number is the answer, not a punt)", () => {
     const reply =
       "Monday–Saturday: 9 AM–6 PM · Sunday: Closed\n\n" +
       "We're located at 7375 S Fulton St., Centennial, CO 80112. If you need to reach us, " +
       "you can call 303-744-2011 during business hours.";
-    const { cleaned, puntSentences } = scrubReply(reply, "what are your store hours?");
-    expect(puntSentences).toHaveLength(0);
-    expect(cleaned).toBe(reply);
+    expect(detectPuntSentences(reply, "what are your store hours?")).toHaveLength(0);
+    expect(scrubNarration(reply).cleaned).toBe(reply);
   });
 
   it("'do you have weekend hours?' is an hours question, not an availability question", () => {
@@ -283,13 +255,35 @@ describe("detectPuntSentences / scrubReply — Antonio's 7/2/2026 live-test repl
     const reply =
       "Yes! We carry 5w40 oil — the Motorex Power 4T Full Synthetic runs $22.99 per quart and it's in stock.";
     expect(detectPuntSentences(reply, "Do you have 5w40 oil?")).toHaveLength(0);
-    expect(scrubReply(reply, "Do you have 5w40 oil?").cleaned).toBe(reply);
+    expect(scrubNarration(reply).cleaned).toBe(reply);
+  });
+});
+
+describe("scrubNarration — no_search_narration enforcement on non-pausing replies", () => {
+  // ── 7/2/2026 live miss #3: search narration ───────────────────────────────
+  const LIVE_NARRATION =
+    "That search didn't return helmets - it grabbed race gear instead.";
+
+  it("live case 3: scrubs the search-narration sentence", () => {
+    const reply =
+      LIVE_NARRATION + " Here are some street options I'd recommend instead.";
+    const { cleaned, narrationSentences } = scrubNarration(reply);
+    expect(narrationSentences).toHaveLength(1);
+    expect(cleaned).toBe("Here are some street options I'd recommend instead.");
   });
 
-  it("returns cleaned='' when the entire reply is one punt sentence (caller substitutes handoff)", () => {
-    const { cleaned, puntSentences } = scrubReply(LIVE_5W40_PUNT, "Do you have 5w40 oil?");
-    expect(puntSentences).toHaveLength(1);
-    expect(cleaned).toBe("");
+  it("scrubs other observed narration phrasings", () => {
+    for (const s of [
+      "The search is picking up motorcycle oils instead of truck diesel oil.",
+      "The search didn't find Shell Rotella T6 diesel oil in our catalog.",
+      "That's because our catalog search leans toward riding gear and accessories.",
+    ]) {
+      expect(scrubNarration(s + " We do carry motorcycle oils.").narrationSentences.length).toBe(1);
+    }
+  });
+
+  it("returns cleaned='' for an all-narration reply (runAi treats that as a punt-equivalent trigger)", () => {
+    expect(scrubNarration(LIVE_NARRATION).cleaned).toBe("");
   });
 });
 
@@ -309,14 +303,8 @@ describe("Antonio's 7/3/2026 live re-test misses — pinned verbatim", () => {
     expect(detectPuntSentences(LIVE_PAGE_PUNT, "whats the top speed")).toHaveLength(1);
   });
 
-  it("miss 1: 'description I'm seeing is cut off' is scrubbed as narration; whole reply scrubs empty", () => {
-    const { cleaned, puntSentences, narrationSentences } = scrubReply(
-      LIVE_PAGE_PUNT,
-      "whats the top speed"
-    );
-    expect(puntSentences).toHaveLength(1);
-    expect(narrationSentences).toHaveLength(1);
-    expect(cleaned).toBe("");
+  it("miss 1: 'description I'm seeing is cut off' classifies as narration", () => {
+    expect(scrubNarration(LIVE_PAGE_PUNT).narrationSentences).toHaveLength(1);
   });
 
   it("miss 1: got_data + page punt + prior offer => undeliverable_offer", () => {
@@ -345,14 +333,6 @@ describe("Antonio's 7/3/2026 live re-test misses — pinned verbatim", () => {
     ).toHaveLength(1);
   });
 
-  it("miss 2: scrub keeps 'Our team can give you that answer right away.' and drops the phone punt", () => {
-    const { cleaned } = scrubReply(
-      LIVE_THEYLL_GIVE_PUNT,
-      "this isn't helping, I just need a real answer"
-    );
-    expect(cleaned).toBe("Our team can give you that answer right away.");
-  });
-
   // ── Safety: the healthy answer-plus-link pattern must survive intact ─────
   it("healthy answer + supplementary product-page link (no gap admission) is NOT a punt", () => {
     const reply =
@@ -360,7 +340,7 @@ describe("Antonio's 7/3/2026 live re-test misses — pinned verbatim", () => {
       "You can see the full spec sheet on the product page: " +
       "[Stage 2 M2](https://performancecycle.com/products/stage-2-m2)";
     expect(detectPuntSentences(reply, "whats the top speed")).toHaveLength(0);
-    expect(scrubReply(reply, "whats the top speed").cleaned).toBe(reply);
+    expect(scrubNarration(reply).cleaned).toBe(reply);
   });
 
   // Accepted tradeoff (Antonio, 7/3/2026): a COLD page-redirect punt with no
@@ -389,23 +369,51 @@ describe("shouldPauseForEscalation", () => {
   });
 });
 
-describe("replyAlreadyReadsAsHandoff", () => {
-  it("matches typical handoff phrasings", () => {
+describe("escalationWillPause — sync pause verdict for the outbound transform", () => {
+  const base = {
+    sentimentScore: 0,
+    confidence: "high",
+    isExplicitHumanRequest: false,
+    isTechAirServiceRequest: false,
+    toolDataOutcome: "got_data" as const,
+    replyIsPunt: false,
+    aiEscalatedViaTool: false,
+  };
+
+  it("pauses on a punt reply even at high confidence with data in hand", () => {
+    expect(escalationWillPause({ ...base, replyIsPunt: true })).toBe(true);
+  });
+
+  it("pauses on frustration, explicit request, and tool-initiated escalation", () => {
+    expect(escalationWillPause({ ...base, sentimentScore: -1 })).toBe(true);
+    expect(escalationWillPause({ ...base, isExplicitHumanRequest: true })).toBe(true);
+    expect(escalationWillPause({ ...base, aiEscalatedViaTool: true })).toBe(true);
+  });
+
+  it("pauses on low confidence without data", () => {
     expect(
-      replyAlreadyReadsAsHandoff("I'm connecting you to a teammate now.")
-    ).toBe(true);
-    expect(
-      replyAlreadyReadsAsHandoff(
-        "Our service team monitors this chat and will jump in to confirm."
-      )
+      escalationWillPause({ ...base, confidence: "low", toolDataOutcome: "no_data" })
     ).toBe(true);
   });
 
-  it("does not match a passive punt", () => {
-    expect(
-      replyAlreadyReadsAsHandoff(
-        "I don't have that information — you could check the chemical page on our website."
-      )
-    ).toBe(false);
+  it("does NOT pause on bare low confidence with data (notify-only), nor on a clean turn", () => {
+    expect(escalationWillPause({ ...base, confidence: "low" })).toBe(false);
+    expect(escalationWillPause(base)).toBe(false);
+  });
+
+  it("verdict is invariant to priorAiOffer (why the predicate can be sync)", () => {
+    // priorAiOffer only toggles no_data <-> undeliverable_offer; both pause.
+    const gateOpen = {
+      sentimentScore: 0,
+      confidence: "low",
+      isExplicitHumanRequest: false,
+      isTechAirServiceRequest: false,
+      toolDataOutcome: "no_data" as const,
+      replyIsPunt: true,
+    };
+    for (const priorAiOffer of [true, false]) {
+      const reason = decideEscalationReason({ ...gateOpen, priorAiOffer });
+      expect(shouldPauseForEscalation(reason, false)).toBe(true);
+    }
   });
 });

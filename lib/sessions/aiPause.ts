@@ -19,7 +19,10 @@ import { log, serializeError } from "@/lib/log";
  *  whichever comes first. */
 export const AI_PAUSE_TIMEOUT_MINUTES = 45;
 
-/** Active handoff — agents online (copy variant 1). */
+/** Active handoff — agents online (copy variant 1). Since the 7/3/2026
+ *  structural fix, this IS the AI message on a pausing turn: runAi replaces
+ *  the model's entire reply with it rather than appending it as a second
+ *  bubble after a scrubbed reply. */
 export const HANDOFF_HUMAN_COMING =
   "Let me get someone from our team on this — hang tight one moment, they'll pick up right here in this chat.";
 
@@ -111,9 +114,11 @@ async function fanOutAiMessage(
 }
 
 /**
- * Persist the active-handoff message that accompanies a new pause. The
- * runAi caller skips this when the model's own reply already reads as a
- * handoff (see replyAlreadyReadsAsHandoff).
+ * Persist the active-handoff message that accompanies a new pause on the
+ * NON-tools path only (USE_AI_TOOLS off), where token-by-token streaming
+ * means runAi cannot replace the already-shown reply with the handoff copy.
+ * On the tools path the pausing turn's message IS the handoff copy and this
+ * is never called.
  */
 export async function persistHandoffMessage(
   sessionId: string,
