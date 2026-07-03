@@ -60,7 +60,7 @@ export function assessToolDataOutcome(toolCalls: ToolCallLike[]): ToolDataOutcom
  */
 const AI_OFFER_PATTERNS: RegExp[] = [
   /\bwould you like (to know|to see|me to|more|the|details|specs)\b/i,
-  /\bwant (me to|to know|to see|the specs|the details|more info)\b/i,
+  /\bwant (me to|to know|to see|more|(the |any )?(details|specs|info))\b/i,
   /\bdo you want (me to|to know|the|more)\b/i,
   /\bI can (also )?(look up|pull up|get you|share|tell you|find|check)\b/i,
   /\bhappy to (share|pull up|look up|provide|get)\b/i,
@@ -117,7 +117,26 @@ export const PAUSE_REASONS = new Set([
 const PUNT_REDIRECT_RE =
   /303[\s.\-]?744[\s.\-]?2011|\bcall(ing)? (the )?(team|store|shop|us|them)\b|\bgive (us|them|the (team|shop|store)) a (call|ring)\b|\bcontact form\b/i;
 const PUNT_DEFLECTION_RE =
-  /\b(suggest(s|ing)? (that )?(you )?call|recommend (you )?(call|calling|giving)|to ask (if|whether|directly|about)|ask (them |us )?directly|they('ll| will| can| could) (confirm|check|tell|help|walk you|get back|point you)|can walk you through|get back to you|check with|to (confirm|check) (if|whether|what|availability|stock)|or check (our|the)|for (current )?(stock|availability|pricing)|(may|might) be able to|not finding|can'?t confirm|couldn'?t find|don'?t have|don'?t carry)\b/i;
+  /\b(suggest(s|ing)? (that )?(you )?call|recommend (you )?(call|calling|giving)|to ask (if|whether|directly|about)|ask (them |us )?directly|they('ll| will| can| could) (confirm|check|tell|help|give|answer|share|provide|walk you|talk you|go over|run (you )?through|fill you in|look into|sort|set you up|get back|point you)|can walk you through|get back to you|check with|to (confirm|check) (if|whether|what|availability|stock)|or check (our|the)|for (current )?(stock|availability|pricing)|(may|might) be able to|not finding|can'?t confirm|couldn'?t find|don'?t have|don'?t carry)\b/i;
+
+/**
+ * Self-serve page redirect — the third punt shape (live-test miss,
+ * 7/3/2026): "You can see the full specs including top speed on the
+ * product page: [link]". A page-redirect sentence is a punt ONLY when the
+ * reply as a whole admits a data gap (REPLY_ADMITS_GAP_RE) or the customer
+ * asked an availability question — otherwise the very common healthy
+ * pattern "here's the answer, and here's the product page for more" would
+ * escalate + pause on false positives.
+ *
+ * Accepted tradeoff (Antonio, 7/3/2026): an unhedged COLD page-redirect
+ * punt — "Check the product page for top speed" with no admission anywhere
+ * in the reply — still slips through. In every observed live punt the model
+ * admits the gap, so the admission gate is the right side of the tradeoff.
+ */
+const PAGE_REDIRECT_RE =
+  /\b(you can|you'?ll) (see|find|view|read|check( out)?)\b[^.!?]*\b(product page|listing|on (our|the) (web)?site)\b/i;
+const REPLY_ADMITS_GAP_RE =
+  /\b(cut off|truncated|incomplete|not (showing|loading|seeing)|can'?t (see|pull up|access|find)|couldn'?t find|don'?t have|isn'?t (showing|loading|coming up)|not coming (up|through))\b/i;
 /** "do you have/carry X?"-style questions. Hours/location questions are
  *  excluded — "do you have weekend hours?" is not an availability question. */
 const AVAILABILITY_QUESTION_RE =
@@ -126,9 +145,11 @@ const HOURS_LOCATION_RE =
   /\b(hours?|open|closed?|closing|location|address|directions?)\b/i;
 
 /** no_search_narration enforcement — sentences that reveal the retrieval
- *  process ("That search didn't return helmets — it grabbed race gear"). */
+ *  process ("That search didn't return helmets — it grabbed race gear") or
+ *  the bot's internal data view ("the product description I'm seeing is
+ *  cut off", live-test miss 7/3/2026). */
 const NARRATION_RE =
-  /\b(the |that |my |our )?(catalog )?search( results?)? (didn'?t|did not|returned|picked up|grabbed|pulled( up)?|found|came back|is(n'?t)? (pulling|finding|returning|picking)|leans?)\b|\bmy (current )?results\b|\bthe results (are pulling|came back|show)\b|\bwhat came up in (the|my) search\b/i;
+  /\b(the |that |my |our )?(catalog )?search( results?)? (didn'?t|did not|returned|picked up|grabbed|pulled( up)?|found|came back|is(n'?t)? (pulling|finding|returning|picking)|leans?)\b|\bmy (current )?results\b|\bthe results (are pulling|came back|show)\b|\bwhat came up in (the|my) search\b|\b(description|listing|product (data|info)|details?|specs?) (I'?m|I am|we'?re) (seeing|getting|pulling)\b|\b(description|listing|details?|specs?)[^.!?]{0,40}\b(is|are|looks?) (cut off|truncated|incomplete)\b/i;
 
 function customerAskedAvailability(latestMessage: string | null | undefined): boolean {
   if (!latestMessage) return false;
@@ -155,15 +176,18 @@ export function scrubReply(
   latestCustomerMessage: string | null | undefined
 ): ScrubResult {
   const availability = customerAskedAvailability(latestCustomerMessage);
+  const replyAdmitsGap = REPLY_ADMITS_GAP_RE.test(reply);
   const puntSentences: string[] = [];
   const narrationSentences: string[] = [];
 
   const outLines = reply.split("\n").map((line) => {
     const kept = splitIntoSentences(line).filter((sentence) => {
-      if (
+      const isPhonePunt =
         PUNT_REDIRECT_RE.test(sentence) &&
-        (PUNT_DEFLECTION_RE.test(sentence) || availability)
-      ) {
+        (PUNT_DEFLECTION_RE.test(sentence) || availability);
+      const isPagePunt =
+        PAGE_REDIRECT_RE.test(sentence) && (replyAdmitsGap || availability);
+      if (isPhonePunt || isPagePunt) {
         puntSentences.push(sentence);
         return false;
       }

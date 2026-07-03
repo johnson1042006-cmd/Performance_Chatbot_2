@@ -293,6 +293,86 @@ describe("detectPuntSentences / scrubReply — Antonio's 7/2/2026 live-test repl
   });
 });
 
+describe("Antonio's 7/3/2026 live re-test misses — pinned verbatim", () => {
+  // ── Miss 1: self-serve page-redirect punt after a prior offer ─────────────
+  const LIVE_PRIOR_OFFER = "Want more details on specs or color options?";
+  const LIVE_PAGE_PUNT =
+    "I found the Stage 2 M2 but the product description I'm seeing is cut off. " +
+    "You can see the full specs including top speed on the product page: " +
+    "[Stage 2 M2](https://performancecycle.com/products/stage-2-m2)";
+
+  it("miss 1: 'Want more details on specs or color options?' registers as an offer", () => {
+    expect(containsOffer(LIVE_PRIOR_OFFER)).toBe(true);
+  });
+
+  it("miss 1: the page-redirect sentence is a punt (reply admits the data gap)", () => {
+    expect(detectPuntSentences(LIVE_PAGE_PUNT, "whats the top speed")).toHaveLength(1);
+  });
+
+  it("miss 1: 'description I'm seeing is cut off' is scrubbed as narration; whole reply scrubs empty", () => {
+    const { cleaned, puntSentences, narrationSentences } = scrubReply(
+      LIVE_PAGE_PUNT,
+      "whats the top speed"
+    );
+    expect(puntSentences).toHaveLength(1);
+    expect(narrationSentences).toHaveLength(1);
+    expect(cleaned).toBe("");
+  });
+
+  it("miss 1: got_data + page punt + prior offer => undeliverable_offer", () => {
+    expect(
+      decideEscalationReason({
+        sentimentScore: 0,
+        confidence: "high",
+        isExplicitHumanRequest: false,
+        isTechAirServiceRequest: false,
+        toolDataOutcome: "got_data",
+        priorAiOffer: containsOffer(LIVE_PRIOR_OFFER),
+        replyIsPunt:
+          detectPuntSentences(LIVE_PAGE_PUNT, "whats the top speed").length > 0,
+      })
+    ).toBe("undeliverable_offer");
+  });
+
+  // ── Miss 2: "or you can call … and they'll give you" punt construction ───
+  const LIVE_THEYLL_GIVE_PUNT =
+    "Our team can give you that answer right away. Want me to have someone follow up with you, " +
+    "or you can call 303-744-2011 during business hours and they'll give you all the M2 specs.";
+
+  it("miss 2: detects the 'or you can call … and they'll give you' punt", () => {
+    expect(
+      detectPuntSentences(LIVE_THEYLL_GIVE_PUNT, "this isn't helping, I just need a real answer")
+    ).toHaveLength(1);
+  });
+
+  it("miss 2: scrub keeps 'Our team can give you that answer right away.' and drops the phone punt", () => {
+    const { cleaned } = scrubReply(
+      LIVE_THEYLL_GIVE_PUNT,
+      "this isn't helping, I just need a real answer"
+    );
+    expect(cleaned).toBe("Our team can give you that answer right away.");
+  });
+
+  // ── Safety: the healthy answer-plus-link pattern must survive intact ─────
+  it("healthy answer + supplementary product-page link (no gap admission) is NOT a punt", () => {
+    const reply =
+      "The Stage 2 M2 kit runs $4,299 and bumps output to 510 hp. " +
+      "You can see the full spec sheet on the product page: " +
+      "[Stage 2 M2](https://performancecycle.com/products/stage-2-m2)";
+    expect(detectPuntSentences(reply, "whats the top speed")).toHaveLength(0);
+    expect(scrubReply(reply, "whats the top speed").cleaned).toBe(reply);
+  });
+
+  // Accepted tradeoff (Antonio, 7/3/2026): a COLD page-redirect punt with no
+  // gap admission anywhere in the reply still slips through — the admission
+  // gate is what keeps healthy answer-plus-link replies from false-positive
+  // pausing. This test documents the accepted behavior, not a bug.
+  it("accepted tradeoff: unhedged cold page-redirect punt is NOT flagged", () => {
+    const reply = "Check out the product page for the top speed and other specs.";
+    expect(detectPuntSentences(reply, "whats the top speed")).toHaveLength(0);
+  });
+});
+
 describe("shouldPauseForEscalation", () => {
   it("pauses for every reason in PAUSE_REASONS", () => {
     for (const reason of Array.from(PAUSE_REASONS)) {
