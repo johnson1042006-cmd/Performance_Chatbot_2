@@ -14,7 +14,9 @@ import { FRIENDLY } from "../../alertFriendlyNames";
 
 describe("AlertsConfig KINDS", () => {
   it("does not include ticket_sla_breach", () => {
-    expect(KINDS.some((k) => k.value === "ticket_sla_breach")).toBe(false);
+    // Cast: "ticket_sla_breach" was removed from the KINDS value union — the
+    // absence check is exactly what this test asserts.
+    expect(KINDS.some((k) => (k.value as string) === "ticket_sla_breach")).toBe(false);
   });
 
   it("still contains the three active kinds", () => {

@@ -242,7 +242,7 @@ describe("toolHandlers", () => {
 //   - the returned text equals the final assistant text
 
 const mockAnthropicCreate = vi.fn();
-const mockAnthropicStream = vi.fn(() => {
+const mockAnthropicStream = vi.fn((..._args: any[]): any => {
   throw new Error("stream() not exercised in this test");
 });
 
