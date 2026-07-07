@@ -3,15 +3,18 @@
 Source: Jacob's deployment notes (Jun 30, 2026) on the live-tested build, cross-referenced
 against the repo (including existing debug logs and stress-test scripts already present
 from a prior color-search investigation), and the escalation/routing-layer design drafted
-in an earlier voice conversation. Target: shippable by Friday, July 10 (~7 working days,
-accounting for the Jul 4 weekend).
+in an earlier voice conversation.
+
+**Sprint target (updated 7/6/2026 — supersedes the original Friday Jul 10 target):**
+two-week sprint from July 6. This week (Jul 6–10): finish and merge Phase 2a. Next week
+(Jul 13–17): Phase 2b (Sonnet classification layer) + the Phase 2c ranking fix. Remaining
+time is buffer before Phase 3 and maintenance-only mode.
 
 Work top to bottom within each phase. Phase 1 has no open decisions - start there immediately.
-Phase 2a is scoped and ready once you say go. Phase 2b (routing layer) is the piece most
-likely to slip past Friday - treat Phase 1 + 2a as the hard commitment, 2b/2c as "as far as
-we get," with 2b the highest-value stretch goal. Phase 2c is BLOCKED on BigCommerce
-access (three checks pending) - do not start until that's unblocked. Phase 3 is explicitly
-deferred - do not start.
+Phase 2a is scoped and ready once you say go. Phase 2c is no longer blocked (reframed
+7/6/2026): it's now a direct code fix for the Road 5 vs Road 6 ranking bug, no BigCommerce
+access needed - BC access is deferred to a Phase 3 dependency instead. Phase 3 is
+explicitly deferred - do not start.
 
 ---
 
@@ -19,9 +22,9 @@ deferred - do not start.
 
 | # | Jacob's note | Where it lands |
 |---|---|---|
-| 1 | Color search broken (blue helmet -> not blue; green street -> "none") | Phase 2c (blocked on BC) |
+| 1 | Color search broken (blue helmet -> not blue; green street -> "none") | Phase 3 (BC-dependent; moved out of 2c 7/6/2026) |
 | 2 | No clarifying questions, esp. tires | Phase 2b (routing layer) |
-| 3 | Defaults to stale product generation (Michelin Road 5->6, Commander II->III tires) | Fully Phase 2c (blocked on BC). Phase 1 KB-content-edit portion RESOLVED: no hardcoded stale names found - both Road 5 and Commander 2/3 are live-BC-catalog issues (see item 1.4). |
+| 3 | Defaults to stale product generation (Michelin Road 5->6, Commander II->III tires) | Phase 2c - direct code ranking fix (prefer current generation when unspecified; decided 7/6/2026, no BC access needed). Phase 1 KB-content-edit portion RESOLVED: no hardcoded stale names found - both Road 5 and Commander 2/3 are live-BC-catalog issues (see item 1.4). |
 | 4 | Offers to answer specs it then can't deliver | Phase 2a (escalation mode) |
 | 5 | Can't answer off-catalog questions, doesn't connect to a human | Phase 2a (escalation mode) |
 | 6 | Doesn't know if in-store stock exists (5w40 oil case), tells customer to call | Phase 2a (escalation mode) |
@@ -115,6 +118,11 @@ just said it would defer):
   offer in the first place if the data isn't available; if it's already made the offer,
   flag immediately rather than stalling.
 
+**Status update 7/6/2026:** Migration 0007 (`0007_phase2a_escalation.sql`) is DONE -
+applied and verified against production Neon: adds the `ai_paused` / `ai_pause_cleared`
+enum values and the `ai_paused_at` / `ai_pause_reason` columns on `sessions`. No longer
+a blocker. Remaining 2a work: finish and merge this week per the sprint target above.
+
 Task for Claude Code:
 Read the current escalation logic (search for where human-agent escalation is
 triggered and notified - likely near the takeover/fallback code). Today it's
@@ -139,13 +147,12 @@ behavior baked in - this is what closes the "no clarifying questions" gap system
 instead of patching it case by case.
 
 This is a bigger lift than the Phase 1 guards - real engineering, not a one-file fix.
-Model note: don't broadly swap the whole bot to Sonnet. The gaps in Jacob's list
-(phantom colors, stale SKUs, no clarifying questions) are dispatch/retrieval gaps, not
-reasoning-depth gaps - a smarter model given the same loose process will still freelance,
-just more articulately, at higher cost. Instead: try Sonnet specifically for the
-classification step once the routing layer exists, and decide from real before/after data
-whether it's worth it (possibly tiered - Sonnet classifies, Haiku still generates the
-final reply).
+Model note (decided 7/6/2026): Sonnet handles ONLY the first routing/categorization
+decision per conversation. Haiku still does all execution - tool calls and every
+customer-facing reply. This is a classification-layer addition, not a full model swap.
+(Original rationale stands: the gaps in Jacob's list are dispatch/retrieval gaps, not
+reasoning-depth gaps - a smarter model given the same loose process would still
+freelance, just more articulately, at higher cost.)
 
 Do not start this until Phase 1 and Phase 2a are closed out. When ready, this needs its
 own gameplanning session before any Claude Code prompt is written - it's an architecture
@@ -153,27 +160,31 @@ change, not a guard.
 
 ---
 
-## PHASE 2c - Color search + stale product surfacing (Jacob #1, #3) - BLOCKED
+## PHASE 2c - Stale-generation ranking fix (Jacob #3) - REFRAMED 7/6/2026, no longer blocked
 
-Blocked on BigCommerce access. Three checks needed before this can be scoped:
-1. How color is actually represented in the BC catalog data (attribute? variant option?
-   free-text in description?) - this determines why "blue helmet" search returns wrong
-   results and "green street" returns none.
-2. Whether stale/discontinued product GENERATIONS are still marked active/in-stock in BC,
-   or whether the bot is defaulting to them from a stale local cache/KB independent of
-   BC's actual current state. Two confirmed examples, both Michelin tire lines where an
-   older generation surfaces over the current one: Michelin Road 5 -> 6 (sport-touring)
-   and Michelin Commander II -> III (cruiser/touring). Neither model name is hardcoded
-   anywhere in the repo (verified in item 1.4) - they surface from live BC catalog data,
-   so the fix is BC-side generation / active-flag handling, not a content edit.
-3. Whether there's a reliable "current/active" flag in BC that the catalog sync isn't
-   currently respecting.
+Decided 7/6/2026: going with a direct code fix for the Road 5 vs Road 6 ranking bug -
+when the customer doesn't specify a generation, prefer the current one (Road 6 over
+Road 5; same principle covers Michelin Commander II -> III). This does NOT require
+BigCommerce admin access, so 2c is no longer blocked. Scheduled alongside Phase 2b in
+the week of Jul 13 (see sprint target at top).
 
-Do not start Claude Code work on this phase until these three checks come back.
+BigCommerce access is deferred to a Phase 3 dependency instead of blocking 2c. The
+BC-dependent work moves with it:
+- Color search (Jacob #1) - depends on how color is actually represented in the BC
+  catalog data (attribute? variant option? free-text in description?) - now Phase 3.
+- The BC-side checks originally scoped here: whether stale generations are still marked
+  active/in-stock in BC, and whether there's a reliable "current/active" flag the
+  catalog sync isn't respecting. (Neither model name is hardcoded in the repo -
+  verified in item 1.4 - they surface from live BC catalog data.) Verify under Phase 3
+  once BC access exists; the 2c code fix handles the customer-facing symptom meanwhile.
 
 ---
 
 ## PHASE 3 - Explicitly deferred, do not start
+
+Dependency (added 7/6/2026): BigCommerce admin access - deferred here from Phase 2c.
+It unblocks the BC-dependent items moved out of 2c: color search (Jacob #1) and the
+BC-side stale-generation / active-flag checks.
 
 Jacob #7 (recommends least-popular stock) - no popularity data exists in the current
 schema; would require a Lightspeed POS import. Logged as a post-launch roadmap item, not
@@ -214,3 +225,9 @@ part of this sprint.
     Preview-scoped `DATABASE_URL` record is ever deleted, Preview would silently fall
     back to reading/writing production. Don't remove that record without re-pointing
     the fallbacks too.
+- **Migration journal gap (not urgent - housekeeping):** migrations
+  `0006_session_token.sql` and `0007_phase2a_escalation.sql` exist as raw SQL in
+  `drizzle/` but are not journaled in `drizzle/meta/_journal.json` (entries stop at
+  0005) - both were applied by hand rather than via `drizzle-kit migrate`. Fine as-is,
+  but backfill the journal entries if this repo ever moves to the formal drizzle-kit
+  migration flow.

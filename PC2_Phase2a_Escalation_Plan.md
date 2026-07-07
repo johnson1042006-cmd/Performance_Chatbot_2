@@ -135,10 +135,14 @@ Deliverable: written design covering all of the above. STOP for review. Do not
 proceed to code until Antonio approves the design.
 
 ### Step 2 - Implement the data model / state changes
+**DONE 7/6/2026:** landed as migration `0007_phase2a_escalation.sql` - applied and
+verified against production Neon (`ai_paused`/`ai_pause_cleared` enum values;
+`ai_paused_at`/`ai_pause_reason` columns on `sessions`). Note: not yet journaled in
+`drizzle/meta/_journal.json` - see Known infra gaps in PC2_Jacob_Fixes_Plan.md.
 Only after Step 1 is approved. Implement the schema/type/enum changes for the mode
 split and the pause mechanism. If this touches the DB schema (Drizzle), propose the
-migration explicitly and note it's a migration (phased migrations 0000-0006 exist;
-this would be the next one). Show the diff. Run npx vitest run. STOP for review.
+migration explicitly and note it's a migration. Show the diff. Run npx vitest run.
+STOP for review.
 
 ### Step 3 - Implement the suppression logic (mode a - pause)
 Wire the pause flag so that when mode (a) fires, subsequent AI generation on that
