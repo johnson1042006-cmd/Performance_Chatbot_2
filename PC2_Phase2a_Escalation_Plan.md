@@ -162,7 +162,9 @@ on the defined reset condition. Run npx vitest run. STOP for review.
 ### Step 5 - Full verification
 1. Run the full suite (npx vitest run) - confirm green.
 2. Write (or describe) a smoke test analogous to the Phase 1.1 approach: exercise the
-   real path locally against .env.local (NOT the broken Preview env) with probes
+   real path against the Vercel Preview environment and its isolated Neon branch
+   (updated 7/9/2026 - Preview is fixed and is now the required test target; .env.local
+   points at PRODUCTION Neon and must not be used for test runs) with probes
    that reproduce Jacob's three cases:
    - 5w40 oil ("do you have 5w40 oil?") -> should hit mode (a), active handoff,
      no passive "check the chemical page."
@@ -173,9 +175,13 @@ on the defined reset condition. Run npx vitest run. STOP for review.
 3. Report raw outputs for Antonio to judge against pass/fail before any merge.
 
 ### Step 6 - Land it
-Same pattern as Phase 1: commit onto main (or a branch if Antonio prefers), show
-git status + git log, wait for explicit go-ahead before pushing (push = prod
-deploy).
+**Updated 7/9/2026 (merge/production policy, decided):** implementation and the full
+test gate run autonomously against the Vercel Preview environment and its isolated Neon
+branch - unit suite, e2e:slow (with DATABASE_URL pointed at the Preview Neon branch for
+that run only), scripted Playwright, and a real-browser pass against the live Preview
+deployment (Jacob's three smoke probes: fitment, spec, general product question). Then
+STOP: merging/pushing to main and ANY interaction with the production Neon database
+require Antonio's explicit go-ahead - nothing is auto-merged.
 
 ---
 

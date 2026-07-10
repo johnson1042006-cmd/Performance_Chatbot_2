@@ -10,6 +10,13 @@ two-week sprint from July 6. This week (Jul 6–10): finish and merge Phase 2a. 
 (Jul 13–17): Phase 2b (Sonnet classification layer) + the Phase 2c ranking fix. Remaining
 time is buffer before Phase 3 and maintenance-only mode.
 
+**Merge/production policy (decided 7/9/2026, applies to every remaining item):**
+implementation and the full test gate (unit suite, e2e:slow, scripted Playwright, and a
+real-browser pass against the live Preview deployment) run fully autonomously against the
+Vercel Preview environment and its isolated Neon branch. Production pushes and ANY
+interaction with the production Neon database require Antonio's explicit go-ahead at each
+item - nothing is auto-merged. Each item stops at "gate green, awaiting go-ahead."
+
 Work top to bottom within each phase. Phase 1 has no open decisions - start there immediately.
 Phase 2a is scoped and ready once you say go. Phase 2c is no longer blocked (reframed
 7/6/2026): it's now a direct code fix for the Road 5 vs Road 6 ranking bug, no BigCommerce
@@ -154,6 +161,13 @@ customer-facing reply. This is a classification-layer addition, not a full model
 reasoning-depth gaps - a smarter model given the same loose process would still
 freelance, just more articulately, at higher cost.)
 
+Fallback rule (decided 7/9/2026): if Sonnet's classification comes back low-confidence
+or the classification call errors out, fall back to the current Haiku-only routing path
+(exactly what runs today, as if the classification layer weren't there). Do NOT escalate
+to a human/queue for this failure mode - escalation stays reserved for the Phase 2a
+escalation-mode triggers. The fallback path needs its own tests (forced low-confidence,
+forced error) since it's a new failure mode with no existing coverage.
+
 Do not start this until Phase 1 and Phase 2a are closed out. When ready, this needs its
 own gameplanning session before any Claude Code prompt is written - it's an architecture
 change, not a guard.
@@ -167,6 +181,12 @@ when the customer doesn't specify a generation, prefer the current one (Road 6 o
 Road 5; same principle covers Michelin Commander II -> III). This does NOT require
 BigCommerce admin access, so 2c is no longer blocked. Scheduled alongside Phase 2b in
 the week of Jul 13 (see sprint target at top).
+
+Default rule confirmed 7/9/2026: when the customer doesn't specify a generation, the
+bot defaults to Road 6 (the newer model). Confirmed this is a ranking/default-selection
+bug, not a missing-product bug - both Road 5 and Road 6 are live on the storefront. The
+fix must include a regression test asserting Road 6 wins the unspecified case. Color
+search stays out of scope (Phase 3, pending BigCommerce admin access).
 
 BigCommerce access is deferred to a Phase 3 dependency instead of blocking 2c. The
 BC-dependent work moves with it:
