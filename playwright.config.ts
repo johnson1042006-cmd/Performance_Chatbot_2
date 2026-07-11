@@ -70,6 +70,10 @@ export default defineConfig({
             // browser-driven request shares one localhost bucket and the
             // session-heavy suites 429 after 5 sessions/min (lib/rateLimit.ts).
             E2E_RATE_LIMIT_BYPASS: "1",
+            // Phase 2b: exercise the Sonnet routing classifier end-to-end in
+            // e2e (first turn of each conversation). Deployed environments
+            // keep it off until USE_ROUTING_CLASSIFIER=true is set there.
+            USE_ROUTING_CLASSIFIER: "true",
           },
         },
 });
