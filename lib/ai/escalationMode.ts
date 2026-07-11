@@ -306,3 +306,65 @@ export function escalationWillPause(s: PausePredicateSignals): boolean {
   const reason = decideEscalationReason({ ...s, priorAiOffer: false });
   return shouldPauseForEscalation(reason, s.aiEscalatedViaTool);
 }
+
+/**
+ * Fitment preserve fix (Antonio, 7/11/2026 — live production bug): the
+ * service_handoff rule REQUIRES the model to share what we carry and then
+ * call escalate_to_human(reason='complex_fitment') in the same turn, and the
+ * 2b fitment directive reinforces exactly that shape on full year/make/model
+ * openers. Full handoff-copy replacement then wiped the rule-mandated
+ * product content, leaving only the generic handoff line.
+ *
+ * Pause reasons whose pausing turn may KEEP the model's reply (with the
+ * handoff line appended) when it contains real product recommendations.
+ * ONLY complex_fitment qualifies — its reply is valuable by design. Every
+ * other pause reason (no_data, undeliverable_offer, explicit_request,
+ * frustrated_customer, …) has no good content to preserve and keeps full
+ * replacement.
+ */
+export const PRESERVE_REPLY_PAUSE_REASONS = new Set(["complex_fitment"]);
+
+export interface PreserveReplySignals {
+  /** Validated reason from this turn's successful escalate_to_human tool
+   *  call, or null when the tool didn't fire. */
+  toolEscalationReason: string | null;
+  sentimentScore: number;
+  isExplicitHumanRequest: boolean;
+  isTechAirServiceRequest: boolean;
+  toolDataOutcome: ToolDataOutcome;
+  /** Reply classified as a passive punt / narration-only non-answer. */
+  replyIsPunt: boolean;
+}
+
+/**
+ * Should this pausing turn's reply be preserved (handoff line appended)
+ * instead of fully replaced? True ONLY when the tool's complex_fitment call
+ * is the sole cause of the pause AND the reply is a real answer:
+ *  - no independent pause trigger (frustration, explicit human request,
+ *    Tech-Air service) — those customers asked for a person, not products;
+ *  - the reply is not a punt/non-answer;
+ *  - this turn's data tools actually returned products ("real product
+ *    recommendations" requires retrieved data behind them — without data
+ *    the reply is speculation and full replacement stays the safe default).
+ * Bare low confidence WITH retrieved data is notify-only and never pauses
+ * on its own, so it cannot be a hidden co-trigger here.
+ */
+export function shouldPreserveReplyWithHandoff(
+  s: PreserveReplySignals
+): boolean {
+  if (
+    !s.toolEscalationReason ||
+    !PRESERVE_REPLY_PAUSE_REASONS.has(s.toolEscalationReason)
+  ) {
+    return false;
+  }
+  if (
+    s.sentimentScore === -1 ||
+    s.isExplicitHumanRequest ||
+    s.isTechAirServiceRequest
+  ) {
+    return false;
+  }
+  if (s.replyIsPunt) return false;
+  return s.toolDataOutcome === "got_data";
+}

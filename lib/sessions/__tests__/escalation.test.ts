@@ -728,6 +728,196 @@ describe("runAiTurn auto-escalation", () => {
     });
   });
 
+  // ── 5b. Fitment preserve fix (7/11/2026 live production bug) ─────────────
+  //
+  // A full year/make/model fitment opener: the service_handoff rule makes the
+  // model show matching products AND call escalate_to_human with
+  // reason='complex_fitment' in the same turn. Full handoff-copy replacement
+  // was wiping the rule-mandated product content — the customer saw only the
+  // generic handoff line. The fix preserves the reply and APPENDS the handoff
+  // line for that one reason; every other pause reason keeps full replacement.
+
+  describe("complex_fitment preserve fix", () => {
+    beforeEach(() => {
+      process.env.USE_AI_TOOLS = "true";
+    });
+    afterEach(() => {
+      delete process.env.USE_AI_TOOLS;
+    });
+
+    const FITMENT_QUESTION =
+      "does the Michelin Road 6 fit a 2021 Kawasaki Ninja 650?";
+    const FITMENT_REPLY =
+      "Great news — we carry the Michelin Road 6 Sport Touring Tires at $214.99, " +
+      "in stock. For a 2021 Kawasaki Ninja 650 you'd typically run 120/70-17 front " +
+      "and 160/60-17 rear. Our service team monitors this chat and will jump in to " +
+      "confirm what'll fit your specific bike.";
+
+    /** Simulate the live-bug turn: search returned real products and the model
+     *  called escalate_to_human(reason='complex_fitment') per service_handoff. */
+    function mockFitmentTurn(reply: string, opts?: { searchCount?: number }) {
+      const count = opts?.searchCount ?? 2;
+      mockCallClaude.mockImplementation(
+        async (
+          _s: string,
+          _m: unknown[],
+          o: {
+            onToolCall?: (e: any) => Promise<void>;
+            stream?: { onToken: (t: string) => void };
+          }
+        ) => {
+          if (o?.onToolCall) {
+            await o.onToolCall({
+              name: "search_products",
+              input: { query: "michelin road 6" },
+              output: { count, products: Array.from({ length: count }, () => ({})) },
+              durationMs: 80,
+              isError: false,
+            });
+            await o.onToolCall({
+              name: "escalate_to_human",
+              input: { reason: "complex_fitment" },
+              output: { ok: true, reason: "complex_fitment", urgency: "normal" },
+              durationMs: 40,
+              isError: false,
+            });
+          }
+          o?.stream?.onToken(reply);
+          return reply;
+        }
+      );
+      mockAssessConfidence.mockReturnValue({ confidence: "high", reasons: [] });
+      mockAssessSentiment.mockReturnValue({ score: 0, reasons: [] });
+    }
+
+    it("preserves product content and APPENDS the handoff line (streamed + persisted identical)", async () => {
+      mockAgentsOnline.mockResolvedValue(true);
+      mockFitmentTurn(FITMENT_REPLY);
+      const onToken = vi.fn();
+      // tokensEmitted short-circuits humanOwnsSession; got_data + high
+      // confidence + no punt skips loadPreviousAiMessage.
+      mockDbSelect.mockResolvedValueOnce([{ content: FITMENT_QUESTION }]); // loadRecentCustomerMessages
+      mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
+
+      const { HANDOFF_HUMAN_COMING } = await import("@/lib/sessions/aiPause");
+      const { runAiTurn } = await import("@/lib/ai/runAi");
+      const result = await runAiTurn({
+        sessionId: SESSION_ID,
+        latestMessage: FITMENT_QUESTION,
+        stream: { onToken, onToolUse: vi.fn() },
+      });
+
+      // The customer keeps the product recommendations; the handoff line is
+      // appended, not substituted.
+      expect(onToken).toHaveBeenCalledTimes(1);
+      expect(onToken).toHaveBeenCalledWith(
+        `${FITMENT_REPLY}\n\n${HANDOFF_HUMAN_COMING}`
+      );
+      // The session still pauses — a human owes the fitment confirmation.
+      expect(result.autoEscalated).toMatchObject({ paused: true });
+      expect(mockPauseAi).toHaveBeenCalled();
+      // Tool already escalated; runAiTurn must not double-fire.
+      expect(mockEscalateToHuman).not.toHaveBeenCalled();
+      expect(mockPersistHandoff).not.toHaveBeenCalled();
+    });
+
+    it("appends the after-hours variant when no agents are online", async () => {
+      mockAgentsOnline.mockResolvedValue(false);
+      mockFitmentTurn(FITMENT_REPLY);
+      const onToken = vi.fn();
+      mockDbSelect.mockResolvedValueOnce([{ content: FITMENT_QUESTION }]); // loadRecentCustomerMessages
+      mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
+
+      const { HANDOFF_AFTER_HOURS } = await import("@/lib/sessions/aiPause");
+      const { runAiTurn } = await import("@/lib/ai/runAi");
+      await runAiTurn({
+        sessionId: SESSION_ID,
+        latestMessage: FITMENT_QUESTION,
+        stream: { onToken, onToolUse: vi.fn() },
+      });
+
+      expect(onToken).toHaveBeenCalledWith(
+        `${FITMENT_REPLY}\n\n${HANDOFF_AFTER_HOURS}`
+      );
+    });
+
+    it("keeps FULL replacement when the fitment search returned no products", async () => {
+      mockAgentsOnline.mockResolvedValue(true);
+      mockFitmentTurn(
+        "I couldn't pull up matching tires, but our service team can confirm fitment.",
+        { searchCount: 0 }
+      );
+      const onToken = vi.fn();
+      // High confidence + no punt means loadPreviousAiMessage is skipped even
+      // though the search came back empty (the tool call is the escalation
+      // trigger here, not the low-confidence branch).
+      mockDbSelect.mockResolvedValueOnce([{ content: FITMENT_QUESTION }]); // loadRecentCustomerMessages
+      mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
+
+      const { HANDOFF_HUMAN_COMING } = await import("@/lib/sessions/aiPause");
+      const { runAiTurn } = await import("@/lib/ai/runAi");
+      const result = await runAiTurn({
+        sessionId: SESSION_ID,
+        latestMessage: FITMENT_QUESTION,
+        stream: { onToken, onToolUse: vi.fn() },
+      });
+
+      // No real product recommendations to preserve — replacement stands.
+      expect(onToken).toHaveBeenCalledWith(HANDOFF_HUMAN_COMING);
+      expect(result.autoEscalated).toMatchObject({ paused: true });
+    });
+
+    it("keeps FULL replacement for a non-fitment tool escalation with data in hand", async () => {
+      mockAgentsOnline.mockResolvedValue(true);
+      mockCallClaude.mockImplementation(
+        async (
+          _s: string,
+          _m: unknown[],
+          o: {
+            onToolCall?: (e: any) => Promise<void>;
+            stream?: { onToken: (t: string) => void };
+          }
+        ) => {
+          if (o?.onToolCall) {
+            await o.onToolCall({
+              name: "search_products",
+              input: { query: "exhaust" },
+              output: { count: 3, products: [{}, {}, {}] },
+              durationMs: 60,
+              isError: false,
+            });
+            await o.onToolCall({
+              name: "escalate_to_human",
+              input: { reason: "policy_exception" },
+              output: { ok: true, reason: "policy_exception", urgency: "normal" },
+              durationMs: 40,
+              isError: false,
+            });
+          }
+          const reply = "We carry three exhaust systems that could work.";
+          o?.stream?.onToken(reply);
+          return reply;
+        }
+      );
+      mockAssessConfidence.mockReturnValue({ confidence: "high", reasons: [] });
+      mockAssessSentiment.mockReturnValue({ score: 0, reasons: [] });
+      const onToken = vi.fn();
+      mockDbSelect.mockResolvedValueOnce([{ content: "can you price-match this exhaust?" }]); // loadRecentCustomerMessages
+      mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
+
+      const { HANDOFF_HUMAN_COMING } = await import("@/lib/sessions/aiPause");
+      const { runAiTurn } = await import("@/lib/ai/runAi");
+      await runAiTurn({
+        sessionId: SESSION_ID,
+        latestMessage: "can you price-match this exhaust?",
+        stream: { onToken, onToolUse: vi.fn() },
+      });
+
+      // Only complex_fitment preserves; policy_exception keeps replacement.
+      expect(onToken).toHaveBeenCalledWith(HANDOFF_HUMAN_COMING);
+    });
+  });
+
   // ── 6. Happy-path (no escalation) sanity check ──────────────────────────
 
   it("does not fire request-contact for a normal message with no escalation trigger", async () => {

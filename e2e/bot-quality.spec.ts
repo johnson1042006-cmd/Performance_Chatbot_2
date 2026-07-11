@@ -610,3 +610,63 @@ test.describe("Search refinement — brand context preserved across narrowing", 
     ).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Full-YMM fitment opener — products preserved on the pausing turn
+// (July 11 live production regression, classifier flag ON)
+// ---------------------------------------------------------------------------
+//
+// A fitment question that already includes the full bike year/make/model.
+// The 2b routing directive + the service_handoff rule make the model show
+// matching products AND call escalate_to_human(reason='complex_fitment') in
+// the same turn; Phase 2a's full-reply replacement then wiped the product
+// content, leaving only the generic handoff line. Existing fitment probes
+// only covered PARTIAL bike info (where the reply is show-and-ask, no
+// escalation), so this exact shape was uncovered.
+//
+// playwright.config.ts webServer env sets USE_ROUTING_CLASSIFIER=true, so
+// this runs the real production path: Sonnet classifies tire_fitment with
+// no missing fields, then Haiku answers.
+
+test.describe("Fitment with full year/make/model — products survive the handoff", () => {
+  test.setTimeout(3 * 50_000);
+
+  // Handoff copy from lib/sessions/aiPause.ts (specs don't import app code).
+  // If the reply is EXACTLY one of these, the bug has regressed: the product
+  // content was replaced instead of preserved.
+  const HANDOFF_COPIES = [
+    "Let me get someone from our team on this — hang tight one moment, they'll pick up right here in this chat.",
+    "I've flagged this for the team, but nobody's available at the moment — if you share your email, they'll reach out directly rather than leaving you hanging.",
+  ];
+
+  test("Ninja 650 Road 6 fitment opener shows the product, not just the handoff line", async ({
+    page,
+  }) => {
+    const sessionId = `fitment-full-ymm-${Date.now()}`;
+    await page.goto(`/embed?sessionId=${sessionId}`);
+    await waitForEmbedReady(page);
+
+    const reply = await ask(
+      page,
+      "does the Michelin Road 6 fit a 2021 Kawasaki Ninja 650?"
+    );
+
+    // Regression pin: the reply must not be ONLY the generic handoff copy.
+    expect(
+      HANDOFF_COPIES.some((copy) => reply.trim() === copy),
+      `Reply was only the generic handoff copy (product content wiped) — got:\n${reply}`
+    ).toBe(false);
+
+    // The product the customer asked about must actually appear…
+    expect(
+      /road\s*6/i.test(reply),
+      `Reply must mention the Michelin Road 6 — got:\n${reply}`
+    ).toBe(true);
+
+    // …with a price (product recommendations carry prices per the base rules).
+    expect(
+      /\$\s?\d/.test(reply),
+      `Reply must include a price for the recommended product — got:\n${reply}`
+    ).toBe(true);
+  });
+});

@@ -10,7 +10,9 @@ import {
   escalationWillPause,
   scrubNarration,
   shouldPauseForEscalation,
+  shouldPreserveReplyWithHandoff,
   PAUSE_REASONS,
+  PRESERVE_REPLY_PAUSE_REASONS,
 } from "../escalationMode";
 
 describe("assessToolDataOutcome", () => {
@@ -415,5 +417,77 @@ describe("escalationWillPause — sync pause verdict for the outbound transform"
       const reason = decideEscalationReason({ ...gateOpen, priorAiOffer });
       expect(shouldPauseForEscalation(reason, false)).toBe(true);
     }
+  });
+});
+
+describe("shouldPreserveReplyWithHandoff (fitment preserve fix, 7/11/2026)", () => {
+  /** The live-bug shape: full-YMM fitment opener, model recommended real
+   *  products and (per service_handoff) called the tool with
+   *  reason='complex_fitment'. Nothing else is wrong with the turn. */
+  const fitmentTurn = {
+    toolEscalationReason: "complex_fitment",
+    sentimentScore: 0,
+    isExplicitHumanRequest: false,
+    isTechAirServiceRequest: false,
+    toolDataOutcome: "got_data" as const,
+    replyIsPunt: false,
+  };
+
+  it("preserves the reply for a sole complex_fitment escalation with real product data", () => {
+    expect(shouldPreserveReplyWithHandoff(fitmentTurn)).toBe(true);
+  });
+
+  it("only complex_fitment is a preserve reason", () => {
+    expect(PRESERVE_REPLY_PAUSE_REASONS.has("complex_fitment")).toBe(true);
+    expect(PRESERVE_REPLY_PAUSE_REASONS.size).toBe(1);
+  });
+
+  it("keeps full replacement for every other tool escalation reason", () => {
+    for (const reason of [
+      "no_data",
+      "undeliverable_offer",
+      "explicit_request",
+      "frustrated_customer",
+      "tech_air_service",
+      "policy_exception",
+      "unsupported",
+    ]) {
+      expect(
+        shouldPreserveReplyWithHandoff({ ...fitmentTurn, toolEscalationReason: reason })
+      ).toBe(false);
+    }
+  });
+
+  it("keeps full replacement when the tool didn't fire (null reason)", () => {
+    expect(
+      shouldPreserveReplyWithHandoff({ ...fitmentTurn, toolEscalationReason: null })
+    ).toBe(false);
+  });
+
+  it("keeps full replacement when an independent pause trigger co-fires", () => {
+    expect(
+      shouldPreserveReplyWithHandoff({ ...fitmentTurn, sentimentScore: -1 })
+    ).toBe(false);
+    expect(
+      shouldPreserveReplyWithHandoff({ ...fitmentTurn, isExplicitHumanRequest: true })
+    ).toBe(false);
+    expect(
+      shouldPreserveReplyWithHandoff({ ...fitmentTurn, isTechAirServiceRequest: true })
+    ).toBe(false);
+  });
+
+  it("keeps full replacement when the reply is a punt/non-answer", () => {
+    expect(shouldPreserveReplyWithHandoff({ ...fitmentTurn, replyIsPunt: true })).toBe(
+      false
+    );
+  });
+
+  it("keeps full replacement without retrieved product data behind the reply", () => {
+    expect(
+      shouldPreserveReplyWithHandoff({ ...fitmentTurn, toolDataOutcome: "no_data" })
+    ).toBe(false);
+    expect(
+      shouldPreserveReplyWithHandoff({ ...fitmentTurn, toolDataOutcome: "no_tools_ran" })
+    ).toBe(false);
   });
 });

@@ -42,6 +42,7 @@ import {
   escalationWillPause,
   scrubNarration,
   shouldPauseForEscalation,
+  shouldPreserveReplyWithHandoff,
 } from "./escalationMode";
 import {
   pauseAi,
@@ -233,6 +234,21 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
       ),
     });
 
+  // The VALIDATED reason from this turn's escalate_to_human tool call (the
+  // handler normalizes unknown reasons to "unsupported" in its output);
+  // null when the tool didn't fire. Drives the complex_fitment preserve
+  // branch in transformOutbound.
+  const toolEscalationReason = (): string | null => {
+    const call = toolCalls.find(
+      (tc) => tc.name === "escalate_to_human" && !tc.isError
+    );
+    if (!call) return null;
+    const fromOutput = (call.output as { reason?: unknown } | null)?.reason;
+    if (typeof fromOutput === "string") return fromOutput;
+    const fromInput = (call.input as { reason?: unknown } | null)?.reason;
+    return typeof fromInput === "string" ? fromInput : null;
+  };
+
   // Single deterministic transform applied to BOTH the streamed and the
   // persisted copy so they stay byte-identical for ChatWidget reconciliation:
   //  1. rewriteStoreHours — canonical hours (item 1.1).
@@ -251,7 +267,28 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
     const hoursFixed = rewriteStoreHours(text);
     if (!useTools) return hoursFixed;
     if (willPauseThisTurn(hoursFixed)) {
-      return agentsOnline ? HANDOFF_HUMAN_COMING : HANDOFF_AFTER_HOURS;
+      const handoff = agentsOnline ? HANDOFF_HUMAN_COMING : HANDOFF_AFTER_HOURS;
+      // Fitment preserve fix (7/11/2026): when the pause is caused solely by
+      // the rule-mandated escalate_to_human(reason='complex_fitment') call
+      // and the reply contains real product recommendations (data retrieved,
+      // not a punt/non-answer), keep the model's content and append the
+      // handoff line — full replacement was wiping the product options the
+      // service_handoff rule requires the model to show. Every other pause
+      // reason keeps full replacement.
+      if (
+        shouldPreserveReplyWithHandoff({
+          toolEscalationReason: toolEscalationReason(),
+          sentimentScore: sentiment.score,
+          isExplicitHumanRequest,
+          isTechAirServiceRequest,
+          toolDataOutcome: assessToolDataOutcome(toolCalls),
+          replyIsPunt: replyIsPuntEquivalent(hoursFixed),
+        })
+      ) {
+        const cleaned = scrubNarration(hoursFixed).cleaned;
+        if (cleaned.length > 0) return `${cleaned}\n\n${handoff}`;
+      }
+      return handoff;
     }
     return scrubNarration(hoursFixed).cleaned;
   };
