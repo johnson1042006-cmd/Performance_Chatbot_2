@@ -417,22 +417,6 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
   const assessedText = rewriteStoreHours(rawAiResponse);
   const aiResponse = transformOutbound(rawAiResponse);
 
-  // TEMP DIAGNOSTIC (fitment preserve gate, 7/11/2026) — remove before merge.
-  // On pausing turns, record what the model actually wrote and which preserve
-  // signal gated the outcome, so gate failures are attributable.
-  if (useTools && willPauseThisTurn(assessedText)) {
-    log.info("ai.pause.reply_transform_debug", {
-      requestId,
-      sessionId,
-      toolEscalationReason: toolEscalationReason(),
-      replyIsPunt: replyIsPuntEquivalent(assessedText),
-      replyHasProductContent: replyContainsProductContent(assessedText),
-      toolDataOutcome: assessToolDataOutcome(toolCalls),
-      preserved: aiResponse !== HANDOFF_HUMAN_COMING && aiResponse !== HANDOFF_AFTER_HOURS,
-      rawExcerpt: assessedText.slice(0, 400),
-    });
-  }
-
   // Post-generation takeover check: a human may have claimed mid-stream.
   // If nothing was shown to the customer yet, abort without persisting so
   // the AI never barges into a human-owned conversation. If tokens already
