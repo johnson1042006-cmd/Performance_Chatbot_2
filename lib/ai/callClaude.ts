@@ -252,8 +252,15 @@ async function callClaudeWithTools(
         assistantBlocks = final.content;
         stopReason = final.stop_reason;
         // Pre-tool-use text is internal narration; only flush to the client when
-        // this iteration is the final turn (not a mid-loop tool call).
-        if (stopReason !== "tool_use" && pendingDeltas.length > 0) {
+        // this iteration is the final turn (not a mid-loop tool call). When an
+        // earlier escalation-only turn preserved text into collectedText, skip
+        // this flush — finalize() emits the full joined reply instead, keeping
+        // the streamed copy byte-identical to the persisted one.
+        if (
+          stopReason !== "tool_use" &&
+          pendingDeltas.length > 0 &&
+          collectedText === ""
+        ) {
           stream.onToken(pendingDeltas.join(""));
           tokensEmittedToClient = true;
         }
@@ -277,24 +284,38 @@ async function callClaudeWithTools(
       throw err;
     }
 
+    const toolUses = assistantBlocks.filter(
+      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
+    );
+    // escalate_to_human is a terminal ACTION, not data retrieval — the
+    // service_handoff rule requires the model to write the customer-facing
+    // reply (products, prices, handoff language) and call the tool in the
+    // SAME turn. Discarding that text left only the post-tool wrap-up —
+    // usually nothing, so NO_TEXT_FALLBACK shipped instead of the reply
+    // (the 7/11/2026 fitment production bug). Text in an iteration whose
+    // only tool call is escalate_to_human IS the reply — keep it.
+    const escalationOnlyToolTurn =
+      stopReason === "tool_use" &&
+      toolUses.length > 0 &&
+      toolUses.every((t) => t.name === "escalate_to_human");
+
     const textChunk = assistantBlocks
       .filter((b): b is Anthropic.TextBlock => b.type === "text")
       .map((b) => b.text)
       .join("");
     // Pre-tool-use text is internal narration ("I'll search for X").
     // The customer-facing reply is the FINAL iteration's text only.
-    // Concatenating pre-tool narration with the final answer caused the "I'll search.Got it" jam bug.
-    if (textChunk && stopReason !== "tool_use") collectedText += textChunk;
+    // Concatenating pre-tool narration with the final answer caused the
+    // "I'll search.Got it" jam bug. Exception: escalation-only turns above.
+    if (textChunk && (stopReason !== "tool_use" || escalationOnlyToolTurn)) {
+      collectedText += (collectedText ? "\n\n" : "") + textChunk;
+    }
 
     history.push({ role: "assistant", content: assistantBlocks });
 
     if (stopReason !== "tool_use") {
       return finalize(collectedText || NO_TEXT_FALLBACK);
     }
-
-    const toolUses = assistantBlocks.filter(
-      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
-    );
     if (toolUses.length === 0) {
       return finalize(collectedText || NO_TEXT_FALLBACK);
     }

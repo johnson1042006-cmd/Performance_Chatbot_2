@@ -420,6 +420,166 @@ describe("callClaude tool loop", () => {
     expect(events).toEqual([{ name: "does_not_exist", isError: true }]);
   });
 
+  it("preserves reply text written alongside an escalate_to_human call (fitment fix, 7/11/2026)", async () => {
+    // service_handoff REQUIRES the reply text and the escalation tool call in
+    // the same turn. Discarding it as "pre-tool narration" shipped
+    // NO_TEXT_FALLBACK instead of the product reply (live production bug).
+    mockAnthropicCreate
+      .mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [
+          {
+            type: "text",
+            text: "We carry the Michelin Road 6 — $214.99, in stock. Our service team will confirm exact fitment.",
+          },
+          { type: "tool_use", id: "use_1", name: "escalate_to_human", input: { reason: "complex_fitment" } },
+        ],
+      })
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        content: [], // model has nothing to add after the tool round
+      });
+
+    const { callClaude } = await import("@/lib/ai/callClaude");
+    const out = await callClaude(
+      "system",
+      [{ role: "user", content: "does the road 6 fit a 2021 ninja 650?" }],
+      {
+        tools: [
+          { name: "escalate_to_human", description: "", input_schema: { type: "object", properties: {} } },
+        ] as any,
+        toolHandlers: { escalate_to_human: async () => ({ ok: true, reason: "complex_fitment" }) } as any,
+        ctx: { sessionId: "s1" },
+      }
+    );
+
+    expect(out).toBe(
+      "We carry the Michelin Road 6 — $214.99, in stock. Our service team will confirm exact fitment."
+    );
+    expect(out).not.toContain("flagged this for our team");
+  });
+
+  it("joins preserved escalation-turn text with a post-tool wrap-up", async () => {
+    mockAnthropicCreate
+      .mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [
+          { type: "text", text: "We carry the Road 6 at $214.99." },
+          { type: "tool_use", id: "use_1", name: "escalate_to_human", input: { reason: "complex_fitment" } },
+        ],
+      })
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: "The team will pick this up shortly." }],
+      });
+
+    const { callClaude } = await import("@/lib/ai/callClaude");
+    const out = await callClaude(
+      "system",
+      [{ role: "user", content: "fitment?" }],
+      {
+        tools: [
+          { name: "escalate_to_human", description: "", input_schema: { type: "object", properties: {} } },
+        ] as any,
+        toolHandlers: { escalate_to_human: async () => ({ ok: true }) } as any,
+        ctx: { sessionId: "s1" },
+      }
+    );
+
+    expect(out).toBe(
+      "We carry the Road 6 at $214.99.\n\nThe team will pick this up shortly."
+    );
+  });
+
+  it("still discards pre-tool text when a DATA tool is called in the same turn", async () => {
+    // Mixed turn (text + search_products + escalate_to_human) is NOT an
+    // escalation-only turn — the text may be search narration; discard holds.
+    mockAnthropicCreate
+      .mockResolvedValueOnce({
+        stop_reason: "tool_use",
+        content: [
+          { type: "text", text: "Let me look that up" },
+          { type: "tool_use", id: "use_1", name: "search_products", input: { query: "road 6" } },
+          { type: "tool_use", id: "use_2", name: "escalate_to_human", input: { reason: "complex_fitment" } },
+        ],
+      })
+      .mockResolvedValueOnce({
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: "Final answer with results." }],
+      });
+
+    const { callClaude } = await import("@/lib/ai/callClaude");
+    const out = await callClaude(
+      "system",
+      [{ role: "user", content: "fitment?" }],
+      {
+        tools: [
+          { name: "search_products", description: "", input_schema: { type: "object", properties: {} } },
+          { name: "escalate_to_human", description: "", input_schema: { type: "object", properties: {} } },
+        ] as any,
+        toolHandlers: {
+          search_products: async () => ({ count: 1, products: [{}] }),
+          escalate_to_human: async () => ({ ok: true }),
+        } as any,
+        ctx: { sessionId: "s1" },
+      }
+    );
+
+    expect(out).toBe("Final answer with results.");
+  });
+
+  it("streams the preserved escalation reply byte-identical to the returned value", async () => {
+    // Streaming path: iteration 1 preserves the escalation-turn text; the
+    // final iteration's mid-flush must be SKIPPED so finalize emits the full
+    // joined reply once (streamed === persisted for widget reconciliation).
+    mockAnthropicStream
+      .mockReturnValueOnce(
+        makeFakeStream(
+          ["We carry the Road 6 at $214.99."],
+          {
+            stop_reason: "tool_use",
+            content: [
+              { type: "text", text: "We carry the Road 6 at $214.99." },
+              { type: "tool_use", id: "use_1", name: "escalate_to_human", input: { reason: "complex_fitment" } },
+            ],
+          }
+        ) as any
+      )
+      .mockReturnValueOnce(
+        makeFakeStream(
+          ["The team will pick this up shortly."],
+          {
+            stop_reason: "end_turn",
+            content: [{ type: "text", text: "The team will pick this up shortly." }],
+          }
+        ) as any
+      );
+
+    const { callClaude } = await import("@/lib/ai/callClaude");
+    const emitted: string[] = [];
+    const out = await callClaude(
+      "system",
+      [{ role: "user", content: "fitment?" }],
+      {
+        tools: [
+          { name: "escalate_to_human", description: "", input_schema: { type: "object", properties: {} } },
+        ] as any,
+        toolHandlers: { escalate_to_human: async () => ({ ok: true }) } as any,
+        ctx: { sessionId: "s1" },
+        stream: {
+          onToken: (t: string) => emitted.push(t),
+          onToolUse: () => {},
+        },
+      }
+    );
+
+    expect(out).toBe(
+      "We carry the Road 6 at $214.99.\n\nThe team will pick this up shortly."
+    );
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]).toBe(out);
+  });
+
   it("does not leak pre-tool narration into the final reply", async () => {
     // Iteration 1: Claude narrates before calling a tool (the bug scenario).
     // Iteration 2: Claude returns the actual answer with no tool call.

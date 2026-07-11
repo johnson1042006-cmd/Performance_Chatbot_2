@@ -128,10 +128,20 @@ describe("routingDirective", () => {
     expect(d).toMatch(/Never guess sizes/i);
   });
 
-  it("parts_fitment with fields already provided routes to service-team confirmation", () => {
+  it("parts_fitment with fields already provided shows products AND routes to service-team confirmation", () => {
     const d = routingDirective(make("parts_fitment"));
     expect(d).toMatch(/already stated their bike/i);
     expect(d).toMatch(/service team/i);
+    // Fitment preserve gate (7/11/2026): "route to the service team" alone
+    // made the model skip the product recommendations — both halves must be
+    // demanded in one message, mirroring the missing-fields branch. In tool
+    // mode there is no RELEVANT PRODUCTS section, so the directive must
+    // point at search_products, not at a prompt section that isn't there.
+    expect(d).toMatch(/SHOW the matching options/);
+    expect(d).toMatch(/prices and links/);
+    expect(d).toMatch(/search_products tool FIRST/);
+    expect(d).toMatch(/Never reply with only a handoff and no products/);
+    expect(d).toMatch(/escalate_to_human/);
   });
 
   it("order_support with missing lookup fields asks for them", () => {

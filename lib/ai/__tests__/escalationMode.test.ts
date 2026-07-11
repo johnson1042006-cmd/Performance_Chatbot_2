@@ -8,9 +8,13 @@ import {
   decideEscalationReason,
   detectPuntSentences,
   escalationWillPause,
+  replyContainsProductContent,
   scrubNarration,
+  scrubPreservedReply,
   shouldPauseForEscalation,
+  shouldPreserveReplyWithHandoff,
   PAUSE_REASONS,
+  PRESERVE_REPLY_PAUSE_REASONS,
 } from "../escalationMode";
 
 describe("assessToolDataOutcome", () => {
@@ -415,5 +419,136 @@ describe("escalationWillPause — sync pause verdict for the outbound transform"
       const reason = decideEscalationReason({ ...gateOpen, priorAiOffer });
       expect(shouldPauseForEscalation(reason, false)).toBe(true);
     }
+  });
+});
+
+describe("replyContainsProductContent", () => {
+  it("detects priced product recommendations", () => {
+    expect(
+      replyContainsProductContent(
+        "We carry the Michelin Road 6 Sport Touring Tires at $214.99, in stock."
+      )
+    ).toBe(true);
+    expect(replyContainsProductContent("Two options: $ 89 and $129.95")).toBe(true);
+  });
+
+  it("returns false for unpriced replies and empty input", () => {
+    expect(
+      replyContainsProductContent("Our service team will confirm what fits your bike.")
+    ).toBe(false);
+    expect(replyContainsProductContent("")).toBe(false);
+    expect(replyContainsProductContent(null)).toBe(false);
+    expect(replyContainsProductContent(undefined)).toBe(false);
+  });
+});
+
+describe("shouldPreserveReplyWithHandoff (fitment preserve fix, 7/11/2026)", () => {
+  /** The live-bug shape verbatim: full-YMM fitment opener; products came
+   *  from the prompt's pre-rendered catalog section (no data-tool calls at
+   *  all — escalate_to_human was the only tool call, per the Preview-DB
+   *  chat_events from the live repro); the model called the tool with
+   *  reason='complex_fitment'. Nothing else is wrong with the turn. */
+  const fitmentTurn = {
+    toolEscalationReason: "complex_fitment",
+    sentimentScore: 0,
+    isExplicitHumanRequest: false,
+    isTechAirServiceRequest: false,
+    toolDataOutcome: "no_tools_ran" as const,
+  };
+
+  it("eligible for the live-repro shape (prompt-sourced products, no data tools)", () => {
+    expect(shouldPreserveReplyWithHandoff(fitmentTurn)).toBe(true);
+  });
+
+  it("also eligible when data tools DID return products", () => {
+    expect(
+      shouldPreserveReplyWithHandoff({ ...fitmentTurn, toolDataOutcome: "got_data" })
+    ).toBe(true);
+  });
+
+  it("only complex_fitment is a preserve reason", () => {
+    expect(PRESERVE_REPLY_PAUSE_REASONS.has("complex_fitment")).toBe(true);
+    expect(PRESERVE_REPLY_PAUSE_REASONS.size).toBe(1);
+  });
+
+  it("keeps full replacement for every other tool escalation reason", () => {
+    for (const reason of [
+      "no_data",
+      "undeliverable_offer",
+      "explicit_request",
+      "frustrated_customer",
+      "tech_air_service",
+      "policy_exception",
+      "unsupported",
+    ]) {
+      expect(
+        shouldPreserveReplyWithHandoff({ ...fitmentTurn, toolEscalationReason: reason })
+      ).toBe(false);
+    }
+  });
+
+  it("keeps full replacement when the tool didn't fire (null reason)", () => {
+    expect(
+      shouldPreserveReplyWithHandoff({ ...fitmentTurn, toolEscalationReason: null })
+    ).toBe(false);
+  });
+
+  it("keeps full replacement when an independent pause trigger co-fires", () => {
+    expect(
+      shouldPreserveReplyWithHandoff({ ...fitmentTurn, sentimentScore: -1 })
+    ).toBe(false);
+    expect(
+      shouldPreserveReplyWithHandoff({ ...fitmentTurn, isExplicitHumanRequest: true })
+    ).toBe(false);
+    expect(
+      shouldPreserveReplyWithHandoff({ ...fitmentTurn, isTechAirServiceRequest: true })
+    ).toBe(false);
+  });
+
+  it("NOT eligible when a data tool ran and found NOTHING (prices would be fabricated)", () => {
+    expect(
+      shouldPreserveReplyWithHandoff({ ...fitmentTurn, toolDataOutcome: "no_data" })
+    ).toBe(false);
+  });
+});
+
+describe("scrubPreservedReply (fitment preserve fix, 7/11/2026)", () => {
+  const QUESTION = "does the Michelin Road 6 fit a 2021 Kawasaki Ninja 650?";
+
+  it("removes a phone-punt sentence but keeps the product content around it", () => {
+    // Gate-observed shape: real product content plus one rule-flavored phone
+    // fallback that the punt detector flags — the sentence goes, the
+    // products stay.
+    const reply =
+      "We carry the Michelin Road 6 Sport Touring Tires — $214.99, in stock.\n\n" +
+      "If you'd rather not wait, I suggest you call the shop at 303-744-2011 and they can walk you through sizing.\n\n" +
+      "Our service team monitors this chat and will jump in to confirm exact fitment.";
+    const cleaned = scrubPreservedReply(reply, QUESTION);
+    expect(cleaned).toContain("$214.99");
+    expect(cleaned).toContain("service team monitors this chat");
+    expect(cleaned).not.toContain("303-744-2011");
+    expect(replyContainsProductContent(cleaned)).toBe(true);
+  });
+
+  it("also removes narration sentences", () => {
+    const reply =
+      "The search results came back with sport touring tires.\n\n" +
+      "We carry the Michelin Road 6 — $214.99, in stock.";
+    const cleaned = scrubPreservedReply(reply, QUESTION);
+    expect(cleaned).not.toContain("search results came back");
+    expect(cleaned).toContain("$214.99");
+  });
+
+  it("a punt-only reply scrubs down to something with no product content (caller then replaces)", () => {
+    const reply =
+      "I suggest you call the shop at 303-744-2011 and they can walk you through it.";
+    const cleaned = scrubPreservedReply(reply, QUESTION);
+    expect(replyContainsProductContent(cleaned)).toBe(false);
+  });
+
+  it("leaves a clean reply untouched", () => {
+    const reply =
+      "We carry the Michelin Road 6 Sport Touring Tires — $214.99, in stock. Our service team will confirm exact fitment right here.";
+    expect(scrubPreservedReply(reply, QUESTION)).toBe(reply);
   });
 });

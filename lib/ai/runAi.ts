@@ -40,8 +40,11 @@ import {
   decideEscalationReason,
   detectPuntSentences,
   escalationWillPause,
+  replyContainsProductContent,
   scrubNarration,
+  scrubPreservedReply,
   shouldPauseForEscalation,
+  shouldPreserveReplyWithHandoff,
 } from "./escalationMode";
 import {
   pauseAi,
@@ -233,6 +236,21 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
       ),
     });
 
+  // The VALIDATED reason from this turn's escalate_to_human tool call (the
+  // handler normalizes unknown reasons to "unsupported" in its output);
+  // null when the tool didn't fire. Drives the complex_fitment preserve
+  // branch in transformOutbound.
+  const toolEscalationReason = (): string | null => {
+    const call = toolCalls.find(
+      (tc) => tc.name === "escalate_to_human" && !tc.isError
+    );
+    if (!call) return null;
+    const fromOutput = (call.output as { reason?: unknown } | null)?.reason;
+    if (typeof fromOutput === "string") return fromOutput;
+    const fromInput = (call.input as { reason?: unknown } | null)?.reason;
+    return typeof fromInput === "string" ? fromInput : null;
+  };
+
   // Single deterministic transform applied to BOTH the streamed and the
   // persisted copy so they stay byte-identical for ChatWidget reconciliation:
   //  1. rewriteStoreHours — canonical hours (item 1.1).
@@ -251,7 +269,29 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
     const hoursFixed = rewriteStoreHours(text);
     if (!useTools) return hoursFixed;
     if (willPauseThisTurn(hoursFixed)) {
-      return agentsOnline ? HANDOFF_HUMAN_COMING : HANDOFF_AFTER_HOURS;
+      const handoff = agentsOnline ? HANDOFF_HUMAN_COMING : HANDOFF_AFTER_HOURS;
+      // Fitment preserve fix (7/11/2026): when the pause is caused solely by
+      // the rule-mandated escalate_to_human(reason='complex_fitment') call,
+      // keep the model's content — full replacement was wiping the product
+      // options the service_handoff rule requires the model to show. The
+      // preserved reply is sanitized (narration + individual punt sentences
+      // removed) and must still carry priced product content afterward;
+      // otherwise, and for every other pause reason, full replacement holds.
+      if (
+        shouldPreserveReplyWithHandoff({
+          toolEscalationReason: toolEscalationReason(),
+          sentimentScore: sentiment.score,
+          isExplicitHumanRequest,
+          isTechAirServiceRequest,
+          toolDataOutcome: assessToolDataOutcome(toolCalls),
+        })
+      ) {
+        const cleaned = scrubPreservedReply(hoursFixed, latestMessage);
+        if (replyContainsProductContent(cleaned)) {
+          return `${cleaned}\n\n${handoff}`;
+        }
+      }
+      return handoff;
     }
     return scrubNarration(hoursFixed).cleaned;
   };
@@ -283,6 +323,7 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
   // proceeds exactly as the Haiku-only path (locked fallback, 7/9/2026 —
   // never an escalation trigger). Flag-gated; zero extra queries when off.
   let directive: string | null = null;
+  let includeProductContext = false;
   if (routingClassifierEnabled()) {
     try {
       if (shouldClassifyTurn(await hasPriorAiMessage(sessionId))) {
@@ -290,7 +331,18 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
           requestId,
           sessionId,
         });
-        if (classification) directive = routingDirective(classification);
+        if (classification) {
+          directive = routingDirective(classification);
+          // Full year/make/model fitment opener: pre-render the catalog
+          // search into the prompt even in tool mode. The model frequently
+          // escalates (complex_fitment) without searching first, and a
+          // directive can't make it show products it never retrieved —
+          // deterministic injection can (fitment preserve gate, 7/11/2026).
+          includeProductContext =
+            (classification.category === "tire_fitment" ||
+              classification.category === "parts_fitment") &&
+            classification.missingFields.length === 0;
+        }
       }
     } catch (err) {
       // Defensive: even an unexpected throw in the gating query must not
@@ -309,7 +361,8 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
     pageContext as never,
     latestMessageRaw,
     agentsOnline,
-    directive
+    directive,
+    { includeProductContext }
   );
 
   const rawAiResponse = await callClaude(system, conversationMessages, {
