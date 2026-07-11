@@ -603,7 +603,17 @@ test.describe("Search refinement — brand context preserved across narrowing", 
     // or honestly acknowledge no in-stock Alpinestars MX BEFORE pivoting —
     // it must not silently pivot to Fox/Bell as if Alpinestars never existed.
     const namesAlpinestarsMX = /alpinestars\s+(sm-?[58]|supertech\s+s?-?m?-?\s*1?0|m10)/i.test(reply2);
-    const honestlyAcknowledges = /not\s+(finding|seeing)\s+alpinestars|don't\s+have\s+alpinestars|alpinestars\s+.{0,30}\s+out\s+of\s+stock/i.test(reply2);
+    // Honest acknowledgments come in more phrasings than the original regex
+    // accepted — observed 7/11/2026 failing replies said "We don't CARRY
+    // Alpinestars motocross helmets" and "Alpinestars makes the SM5 and SM8
+    // models, but we don't have those in stock right now", both of which ARE
+    // the honest acknowledgment this test demands. The intent (never silently
+    // pivot to another brand as if Alpinestars never existed) is unchanged:
+    // a silent pivot mentions no Alpinestars stock-status at all and still fails.
+    const honestlyAcknowledges =
+      /not\s+(finding|seeing)\s+alpinestars|(don'?t|do not|doesn'?t)\s+(currently\s+)?(have|carry|stock)\s+(any\s+)?alpinestars|alpinestars\s+.{0,30}\s+out\s+of\s+stock|alpinestars\s+[^.!?]{0,80}\b(don'?t|do not)\s+have\s+(those|them|any)\s+in\s+stock/i.test(
+        reply2
+      );
     expect(
       namesAlpinestarsMX || honestlyAcknowledges,
       `Expected an Alpinestars MX helmet or honest acknowledgment — got:\n${reply2}`
