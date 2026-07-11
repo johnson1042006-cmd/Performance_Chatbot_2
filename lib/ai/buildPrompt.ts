@@ -483,7 +483,7 @@ ${AI_BEHAVIOR_RULES.map((r, i) => `${i + 1}. ${r.rule}`).join("\n\n")}
     const streetLabel = STREET_LABEL[subcategoryProductType];
     system += `\n## STYLE PREFERENCE\n`;
     if (subcategoryRequest && subcategoryRequest.explicit) {
-      system += `The customer asked specifically for **${subcategoryRequest.value.replace(/_/g, " ")}** ${typeLabel}s. ONLY lead with products tagged \`[STYLE: ${subcategoryRequest.value}]\` in the RELEVANT PRODUCTS section. If no products carry that tag, say so honestly and offer the closest alternative.\n`;
+      system += `The customer asked specifically for **${subcategoryRequest.value.replace(/_/g, " ")}** ${typeLabel}s. ONLY lead with products tagged \`[STYLE: ${subcategoryRequest.value}]\` in the RELEVANT PRODUCTS section. If no products carry that tag, say so honestly and SHOW the closest alternatives from the list with their prices and links — you may add ONE clarifying question after the products, but never reply with only a question and no products.\n`;
     } else if (subcategoryRequest && !subcategoryRequest.explicit) {
       system += `The customer asked to see all ${typeLabel}s. Show a mix across styles using the \`[STYLE: ...]\` tags in the RELEVANT PRODUCTS section.\n`;
     } else {
