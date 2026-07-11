@@ -214,7 +214,12 @@ export function routingDirective(
       if (missing.length > 0) {
         return `This conversation opened with a ${partLabel} fitment question, and the customer has NOT yet provided: ${missing.join(", ")}. In ONE message, do BOTH: (1) show the relevant options we carry from the RELEVANT PRODUCTS section with prices and links, presented by model — do NOT claim any of them fits the customer's bike yet; and (2) ask ONE friendly question collecting the missing details (year, make, and model together). Never guess sizes or fitment. Once they answer, narrow to what fits and route exact-fit confirmation to the service team.`;
       }
-      return `This conversation opened with a ${partLabel} fitment question and the customer has already stated their bike. Do not guess sizes or exact fitment — recommend matching product models with prices and links, and route exact-fit confirmation to the service team per the fitment rules.`;
+      // Same show-AND-route shape as the missing-fields branch above (the
+      // 2b gate fix, 155786d): "route to the service team" alone reads to
+      // the model as the WHOLE job and it skips the product recommendations
+      // (observed live + in the fitment-preserve gate, 7/11/2026). Both
+      // halves must land in one message.
+      return `This conversation opened with a ${partLabel} fitment question and the customer has already stated their bike. In ONE message, do BOTH: (1) SHOW the matching options we carry from the RELEVANT PRODUCTS section with prices and links — never guess sizes or claim exact fitment for their specific bike; and (2) tell them our service team will jump in right here to confirm exact fitment, following the fitment rules (including the required escalate_to_human tool call with reason='complex_fitment'). Never reply with only a handoff and no products.`;
     }
     case "order_support": {
       if (missing.length > 0) {
