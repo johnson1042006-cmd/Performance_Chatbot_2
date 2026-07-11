@@ -10,6 +10,7 @@ import {
   escalationWillPause,
   replyContainsProductContent,
   scrubNarration,
+  scrubPreservedReply,
   shouldPauseForEscalation,
   shouldPreserveReplyWithHandoff,
   PAUSE_REASONS,
@@ -443,26 +444,23 @@ describe("replyContainsProductContent", () => {
 
 describe("shouldPreserveReplyWithHandoff (fitment preserve fix, 7/11/2026)", () => {
   /** The live-bug shape verbatim: full-YMM fitment opener; products came
-   *  from the prompt's RELEVANT PRODUCTS section (no data-tool calls at
+   *  from the prompt's pre-rendered catalog section (no data-tool calls at
    *  all — escalate_to_human was the only tool call, per the Preview-DB
-   *  chat_events from the live repro); the reply recommends priced
-   *  products; the model called the tool with reason='complex_fitment'.
-   *  Nothing else is wrong with the turn. */
+   *  chat_events from the live repro); the model called the tool with
+   *  reason='complex_fitment'. Nothing else is wrong with the turn. */
   const fitmentTurn = {
     toolEscalationReason: "complex_fitment",
     sentimentScore: 0,
     isExplicitHumanRequest: false,
     isTechAirServiceRequest: false,
     toolDataOutcome: "no_tools_ran" as const,
-    replyIsPunt: false,
-    replyHasProductContent: true,
   };
 
-  it("preserves the reply for the live-repro shape (prompt-sourced products, no data tools)", () => {
+  it("eligible for the live-repro shape (prompt-sourced products, no data tools)", () => {
     expect(shouldPreserveReplyWithHandoff(fitmentTurn)).toBe(true);
   });
 
-  it("also preserves when data tools DID return products", () => {
+  it("also eligible when data tools DID return products", () => {
     expect(
       shouldPreserveReplyWithHandoff({ ...fitmentTurn, toolDataOutcome: "got_data" })
     ).toBe(true);
@@ -507,21 +505,50 @@ describe("shouldPreserveReplyWithHandoff (fitment preserve fix, 7/11/2026)", () 
     ).toBe(false);
   });
 
-  it("keeps full replacement when the reply is a punt/non-answer", () => {
-    expect(shouldPreserveReplyWithHandoff({ ...fitmentTurn, replyIsPunt: true })).toBe(
-      false
-    );
-  });
-
-  it("keeps full replacement when the reply has no priced product content", () => {
-    expect(
-      shouldPreserveReplyWithHandoff({ ...fitmentTurn, replyHasProductContent: false })
-    ).toBe(false);
-  });
-
-  it("keeps full replacement when a data tool ran and found NOTHING (prices would be fabricated)", () => {
+  it("NOT eligible when a data tool ran and found NOTHING (prices would be fabricated)", () => {
     expect(
       shouldPreserveReplyWithHandoff({ ...fitmentTurn, toolDataOutcome: "no_data" })
     ).toBe(false);
+  });
+});
+
+describe("scrubPreservedReply (fitment preserve fix, 7/11/2026)", () => {
+  const QUESTION = "does the Michelin Road 6 fit a 2021 Kawasaki Ninja 650?";
+
+  it("removes a phone-punt sentence but keeps the product content around it", () => {
+    // Gate-observed shape: real product content plus one rule-flavored phone
+    // fallback that the punt detector flags — the sentence goes, the
+    // products stay.
+    const reply =
+      "We carry the Michelin Road 6 Sport Touring Tires — $214.99, in stock.\n\n" +
+      "If you'd rather not wait, I suggest you call the shop at 303-744-2011 and they can walk you through sizing.\n\n" +
+      "Our service team monitors this chat and will jump in to confirm exact fitment.";
+    const cleaned = scrubPreservedReply(reply, QUESTION);
+    expect(cleaned).toContain("$214.99");
+    expect(cleaned).toContain("service team monitors this chat");
+    expect(cleaned).not.toContain("303-744-2011");
+    expect(replyContainsProductContent(cleaned)).toBe(true);
+  });
+
+  it("also removes narration sentences", () => {
+    const reply =
+      "The search results came back with sport touring tires.\n\n" +
+      "We carry the Michelin Road 6 — $214.99, in stock.";
+    const cleaned = scrubPreservedReply(reply, QUESTION);
+    expect(cleaned).not.toContain("search results came back");
+    expect(cleaned).toContain("$214.99");
+  });
+
+  it("a punt-only reply scrubs down to something with no product content (caller then replaces)", () => {
+    const reply =
+      "I suggest you call the shop at 303-744-2011 and they can walk you through it.";
+    const cleaned = scrubPreservedReply(reply, QUESTION);
+    expect(replyContainsProductContent(cleaned)).toBe(false);
+  });
+
+  it("leaves a clean reply untouched", () => {
+    const reply =
+      "We carry the Michelin Road 6 Sport Touring Tires — $214.99, in stock. Our service team will confirm exact fitment right here.";
+    expect(scrubPreservedReply(reply, QUESTION)).toBe(reply);
   });
 });

@@ -42,6 +42,7 @@ import {
   escalationWillPause,
   replyContainsProductContent,
   scrubNarration,
+  scrubPreservedReply,
   shouldPauseForEscalation,
   shouldPreserveReplyWithHandoff,
 } from "./escalationMode";
@@ -270,12 +271,12 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
     if (willPauseThisTurn(hoursFixed)) {
       const handoff = agentsOnline ? HANDOFF_HUMAN_COMING : HANDOFF_AFTER_HOURS;
       // Fitment preserve fix (7/11/2026): when the pause is caused solely by
-      // the rule-mandated escalate_to_human(reason='complex_fitment') call
-      // and the reply contains real product recommendations (data retrieved,
-      // not a punt/non-answer), keep the model's content and append the
-      // handoff line — full replacement was wiping the product options the
-      // service_handoff rule requires the model to show. Every other pause
-      // reason keeps full replacement.
+      // the rule-mandated escalate_to_human(reason='complex_fitment') call,
+      // keep the model's content — full replacement was wiping the product
+      // options the service_handoff rule requires the model to show. The
+      // preserved reply is sanitized (narration + individual punt sentences
+      // removed) and must still carry priced product content afterward;
+      // otherwise, and for every other pause reason, full replacement holds.
       if (
         shouldPreserveReplyWithHandoff({
           toolEscalationReason: toolEscalationReason(),
@@ -283,12 +284,12 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
           isExplicitHumanRequest,
           isTechAirServiceRequest,
           toolDataOutcome: assessToolDataOutcome(toolCalls),
-          replyIsPunt: replyIsPuntEquivalent(hoursFixed),
-          replyHasProductContent: replyContainsProductContent(hoursFixed),
         })
       ) {
-        const cleaned = scrubNarration(hoursFixed).cleaned;
-        if (cleaned.length > 0) return `${cleaned}\n\n${handoff}`;
+        const cleaned = scrubPreservedReply(hoursFixed, latestMessage);
+        if (replyContainsProductContent(cleaned)) {
+          return `${cleaned}\n\n${handoff}`;
+        }
       }
       return handoff;
     }

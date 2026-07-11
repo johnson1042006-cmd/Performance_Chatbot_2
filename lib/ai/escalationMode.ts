@@ -350,28 +350,25 @@ export interface PreserveReplySignals {
   isExplicitHumanRequest: boolean;
   isTechAirServiceRequest: boolean;
   toolDataOutcome: ToolDataOutcome;
-  /** Reply classified as a passive punt / narration-only non-answer. */
-  replyIsPunt: boolean;
-  /** replyContainsProductContent(reply) — priced product recommendations. */
-  replyHasProductContent: boolean;
 }
 
 /**
- * Should this pausing turn's reply be preserved (handoff line appended)
- * instead of fully replaced? True ONLY when the tool's complex_fitment call
- * is the sole cause of the pause AND the reply is a real answer:
+ * Is this pausing turn ELIGIBLE for reply preservation (handoff line
+ * appended) instead of full replacement? True ONLY when the tool's
+ * complex_fitment call is the sole cause of the pause:
  *  - no independent pause trigger (frustration, explicit human request,
  *    Tech-Air service) — those customers asked for a person, not products;
- *  - the reply is not a punt/non-answer;
- *  - the reply visibly recommends products (priced recommendations — see
- *    replyContainsProductContent; products usually come from the prompt's
- *    RELEVANT PRODUCTS section, so tool outcome "no_tools_ran" is the
- *    NORMAL preserve shape, not a disqualifier);
  *  - EXCEPT when a data tool ran and explicitly found nothing — then any
  *    price in the reply is fabricated and full replacement stays the safe
- *    default.
+ *    default. ("no_tools_ran" is the NORMAL preserve shape: fitment openers
+ *    get the catalog search pre-rendered into the prompt, so the model
+ *    often answers without any data-tool round.)
  * Bare low confidence WITH retrieved data is notify-only and never pauses
  * on its own, so it cannot be a hidden co-trigger here.
+ *
+ * Eligibility is only half the decision: the caller must then sanitize the
+ * reply (scrubPreservedReply) and verify priced product content SURVIVED
+ * the scrub (replyContainsProductContent) — otherwise full replacement.
  */
 export function shouldPreserveReplyWithHandoff(
   s: PreserveReplySignals
@@ -389,7 +386,42 @@ export function shouldPreserveReplyWithHandoff(
   ) {
     return false;
   }
-  if (s.replyIsPunt) return false;
-  if (s.toolDataOutcome === "no_data") return false;
-  return s.replyHasProductContent;
+  return s.toolDataOutcome !== "no_data";
+}
+
+/**
+ * Sanitize a reply that is about to be PRESERVED on a complex_fitment
+ * pausing turn: remove narration AND individual punt sentences.
+ *
+ * Rationale: the service_handoff rule's own mandated copy invites a phone
+ * fallback ("If you'd rather not wait, you can also call…"), and models
+ * phrase it in ways the punt detector flags. On the 7/3 full-replacement
+ * paths a punt anywhere kills the whole reply — but on a preserve turn the
+ * reply also carries real product content the customer should keep, and a
+ * deterministic handoff line is appended AFTER it, so a punt sentence here
+ * is a redundant redirect, not a dead end. Sentence-level removal is the
+ * right cost/benefit on THIS path only: a pattern miss leaves a phone
+ * mention next to real products and an active handoff (low harm), while
+ * full replacement re-creates the original bug (products wiped).
+ */
+export function scrubPreservedReply(
+  reply: string,
+  latestCustomerMessage: string | null | undefined
+): string {
+  const punts = new Set(detectPuntSentences(reply, latestCustomerMessage));
+  const withoutPunts =
+    punts.size === 0
+      ? reply
+      : reply
+          .split("\n")
+          .map((line) =>
+            splitIntoSentences(line)
+              .filter((sentence) => !punts.has(sentence))
+              .join(" ")
+          )
+          .join("\n")
+          .replace(/[ \t]+\n/g, "\n")
+          .replace(/\n{3,}/g, "\n\n")
+          .trim();
+  return scrubNarration(withoutPunts).cleaned;
 }
