@@ -1608,6 +1608,41 @@ describe("searchProducts — broad product types", () => {
     );
   });
 
+  it("ranks actual filter elements above filter oils/cleaners for 'air filter' (head-noun bonus)", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const cat = (id: number, name: string) => ({ id, name, parent_id: 0 });
+    const filterProduct = (id: number, name: string, catId: number) => ({
+      id, name, sku: `F-${id}`, description: "Air filtration.",
+      price: 20, sale_price: 0, retail_price: 0, calculated_price: 20,
+      inventory_level: 10, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [catId], brand_id: 40,
+      custom_url: { url: `/f/${id}/` }, variants: [], images: [],
+    });
+    const parent = [
+      // The parent "Air Filters" shelf is dominated by maintenance items.
+      filterProduct(901, "No Toil Foam Air Filter Oil", 90),
+      filterProduct(902, "K&N Power Kleen Air Filter Cleaner", 90),
+    ];
+    const leaves = [filterProduct(903, "Uni Pod Air Filter", 91)];
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => {
+        if (name === "Air Filters") return cat(90, "Air Filters");
+        if (name === "Street Bike Air Filters") return cat(91, "Street Bike Air Filters");
+        return null;
+      }
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => (id === 90 ? parent : id === 91 ? leaves : [])
+    );
+
+    const result = await searchProducts("air filter");
+    expect(result.products.map((p) => p.name)[0]).toBe("Uni Pod Air Filter");
+  });
+
   it("surfaces Sprockets products for 'show me sprockets'", async () => {
     const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
     const { searchProducts } = await import("../productSearch");

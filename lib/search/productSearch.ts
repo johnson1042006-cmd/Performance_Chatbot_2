@@ -538,7 +538,12 @@ const BROAD_TYPE_CATEGORIES: Record<string, string[]> = {
   goggles:  ["Goggles"],
   brake:    ["Brake Pads/Brake Shoes"],
   sprocket: ["Sprockets"],
-  filter:   ["Air Filters", "Oil Filters"],
+  // Leaves FIRST: actual filter elements live in the street/dirt leaves,
+  // while the parent "Air Filters" shelf is dominated by cleaners/oils.
+  // Same-score ties resolve by pool insertion order (stable sort), so the
+  // leaf products must enter the pool before the parent's maintenance items
+  // or the bot clarifies instead of listing filters.
+  filter:   ["Street Bike Air Filters", "Dirt Bike Air Filters", "Air Filters", "Oil Filters"],
 };
 
 // ---------------------------------------------------------------------------
@@ -1114,6 +1119,26 @@ export async function searchProducts(
     ? new Set(expandColorQuery(detectedColor).map((c) => c.toLowerCase()))
     : new Set<string>();
 
+  // Head-noun signal: the last meaningful query token, used to prefer
+  // products that ARE the thing asked for over accessories/consumables OF
+  // that thing ("…Air Filter" beats "…Air Filter Oil" for "air filter";
+  // "…Helmet" beats "…Helmet Bag" for helmet queries). Null when the query
+  // ends in a number (budgets, model codes).
+  const lastKw = (() => {
+    const t = kwTokens[kwTokens.length - 1]?.toLowerCase();
+    if (!t || /^\d+$/.test(t)) return null;
+    return t;
+  })();
+  const headNounMatch = (nameLower: string): boolean => {
+    if (!lastKw) return false;
+    const trimmed = nameLower.replace(/[^a-z0-9]+$/g, "");
+    return (
+      trimmed.endsWith(lastKw) ||
+      trimmed.endsWith(`${lastKw}s`) ||
+      (lastKw.endsWith("s") && trimmed.endsWith(lastKw.slice(0, -1)))
+    );
+  };
+
   // Phase 2c: demote stale tire generations (Road 5 when Road 6 is in the
   // pool) unless the customer named the generation. Tires only — elsewhere
   // single-digit suffixes are concurrent tiers, not generations.
@@ -1152,6 +1177,11 @@ export async function searchProducts(
     // for product-name queries where subcategory/brand/type bonuses don't fire
     // and the only signal is "the customer typed words from the product name".
     score += Math.min(4, kwTokens.filter((kw) => nameLower.includes(kw)).length) * 10;
+
+    // +15: head-noun match — the name ends with the last query token, so the
+    // product IS the thing asked for rather than an accessory/consumable of
+    // it. Breaks the tie between "Uni Pod Air Filter" and "…Air Filter Oil".
+    if (headNounMatch(nameLower)) score += 15;
 
     // -50: off-street bias when customer was ambiguous (not "any", not explicit)
     if (
