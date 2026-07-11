@@ -153,3 +153,11 @@ it touched and why.
 **Rollback candidate if needed:** dpl_9YkxBHPooFq9Ryst24A8fa6nerZP (previous production, e956751).
 **Antonio's remaining one-clicks:** (1) set USE_ROUTING_CLASSIFIER=true in Vercel env to activate 2b; (2) optionally run a live interactive smoke on the production widget (Road 6 query + an escalation probe) — left to him since chat probes write session rows to the production DB; (3) fix `.env.local`'s empty NEXTAUTH_URL/VERCEL_URL lines.
 **Phase 3 backlog** unchanged (bracket-tag/STORE CATALOG leaks, color search, heavy-query latency, session get-or-create race).
+
+---
+
+## [2026-07-11 10:25 MDT] — 2b routing classifier ACTIVATED on Vercel (Production + Preview)
+**Status:** Antonio's go-ahead executed. Vercel CLI 55 installed globally; it was already authenticated as johnson1042006-cmd (no interactive login needed). Repo linked to antonio-johnsons-projects/performance-chatbot-2 (`vercel link` refreshed .env.local's VERCEL_OIDC_TOKEN line only — all 57 original vars intact).
+**Done:** `USE_ROUTING_CLASSIFIER=true` added to **Production** and **Preview** envs (verified via `vercel env ls`); production redeployed (`vercel redeploy`) so the var takes effect — aliased to performance-chatbot-2.vercel.app, READY in ~1 min, /embed serving 200. Sonnet now classifies conversation openers on production; low-confidence/error falls back to the unchanged Haiku-only path by design.
+**Note:** the Vercel CLI is now available for future env work (the MCP has no env endpoint). Expected classifier cost: ≈ +1.8 s on first AI reply per conversation (measured in the 2b gate).
+**Remaining for Antonio:** optional live interactive smoke on the production widget; fix `.env.local`'s empty NEXTAUTH_URL/VERCEL_URL lines.
