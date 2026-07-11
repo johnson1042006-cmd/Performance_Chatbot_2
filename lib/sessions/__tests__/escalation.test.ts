@@ -753,10 +753,14 @@ describe("runAiTurn auto-escalation", () => {
       "and 160/60-17 rear. Our service team monitors this chat and will jump in to " +
       "confirm what'll fit your specific bike.";
 
-    /** Simulate the live-bug turn: search returned real products and the model
-     *  called escalate_to_human(reason='complex_fitment') per service_handoff. */
+    /** Simulate the live-bug turn: product data reached the reply via the
+     *  prompt's RELEVANT PRODUCTS section (buildPrompt runs the catalog
+     *  search before the model call), so by default the ONLY tool call is
+     *  escalate_to_human(reason='complex_fitment') — exactly what the
+     *  Preview-DB chat_events showed for the live repro. Pass searchCount
+     *  to also simulate an explicit search_products round. */
     function mockFitmentTurn(reply: string, opts?: { searchCount?: number }) {
-      const count = opts?.searchCount ?? 2;
+      const count = opts?.searchCount;
       mockCallClaude.mockImplementation(
         async (
           _s: string,
@@ -767,13 +771,15 @@ describe("runAiTurn auto-escalation", () => {
           }
         ) => {
           if (o?.onToolCall) {
-            await o.onToolCall({
-              name: "search_products",
-              input: { query: "michelin road 6" },
-              output: { count, products: Array.from({ length: count }, () => ({})) },
-              durationMs: 80,
-              isError: false,
-            });
+            if (count !== undefined) {
+              await o.onToolCall({
+                name: "search_products",
+                input: { query: "michelin road 6" },
+                output: { count, products: Array.from({ length: count }, () => ({})) },
+                durationMs: 80,
+                isError: false,
+              });
+            }
             await o.onToolCall({
               name: "escalate_to_human",
               input: { reason: "complex_fitment" },
@@ -792,10 +798,10 @@ describe("runAiTurn auto-escalation", () => {
 
     it("preserves product content and APPENDS the handoff line (streamed + persisted identical)", async () => {
       mockAgentsOnline.mockResolvedValue(true);
-      mockFitmentTurn(FITMENT_REPLY);
+      mockFitmentTurn(FITMENT_REPLY); // live shape: escalate tool only, products from the prompt
       const onToken = vi.fn();
-      // tokensEmitted short-circuits humanOwnsSession; got_data + high
-      // confidence + no punt skips loadPreviousAiMessage.
+      // tokensEmitted short-circuits humanOwnsSession; high confidence + no
+      // punt skips loadPreviousAiMessage.
       mockDbSelect.mockResolvedValueOnce([{ content: FITMENT_QUESTION }]); // loadRecentCustomerMessages
       mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
 
@@ -821,9 +827,9 @@ describe("runAiTurn auto-escalation", () => {
       expect(mockPersistHandoff).not.toHaveBeenCalled();
     });
 
-    it("appends the after-hours variant when no agents are online", async () => {
+    it("appends the after-hours variant when no agents are online (search got_data variant)", async () => {
       mockAgentsOnline.mockResolvedValue(false);
-      mockFitmentTurn(FITMENT_REPLY);
+      mockFitmentTurn(FITMENT_REPLY, { searchCount: 2 });
       const onToken = vi.fn();
       mockDbSelect.mockResolvedValueOnce([{ content: FITMENT_QUESTION }]); // loadRecentCustomerMessages
       mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false

@@ -324,6 +324,24 @@ export function escalationWillPause(s: PausePredicateSignals): boolean {
  */
 export const PRESERVE_REPLY_PAUSE_REASONS = new Set(["complex_fitment"]);
 
+/**
+ * Deterministic "the reply contains real product recommendations" proxy:
+ * the base rules require a price with every product recommendation, so a
+ * customer-visible $ amount is the reliable marker. The prompt's RELEVANT
+ * PRODUCTS section is how product data usually reaches a fitment reply —
+ * buildPrompt runs the catalog search BEFORE the model call — so a turn
+ * with real products in the reply often has NO data-tool calls at all
+ * (observed in the live repro: escalate_to_human was the only tool call).
+ */
+const PRODUCT_PRICE_RE = /\$\s?\d/;
+
+export function replyContainsProductContent(
+  reply: string | null | undefined
+): boolean {
+  if (!reply) return false;
+  return PRODUCT_PRICE_RE.test(reply);
+}
+
 export interface PreserveReplySignals {
   /** Validated reason from this turn's successful escalate_to_human tool
    *  call, or null when the tool didn't fire. */
@@ -334,6 +352,8 @@ export interface PreserveReplySignals {
   toolDataOutcome: ToolDataOutcome;
   /** Reply classified as a passive punt / narration-only non-answer. */
   replyIsPunt: boolean;
+  /** replyContainsProductContent(reply) — priced product recommendations. */
+  replyHasProductContent: boolean;
 }
 
 /**
@@ -343,9 +363,13 @@ export interface PreserveReplySignals {
  *  - no independent pause trigger (frustration, explicit human request,
  *    Tech-Air service) — those customers asked for a person, not products;
  *  - the reply is not a punt/non-answer;
- *  - this turn's data tools actually returned products ("real product
- *    recommendations" requires retrieved data behind them — without data
- *    the reply is speculation and full replacement stays the safe default).
+ *  - the reply visibly recommends products (priced recommendations — see
+ *    replyContainsProductContent; products usually come from the prompt's
+ *    RELEVANT PRODUCTS section, so tool outcome "no_tools_ran" is the
+ *    NORMAL preserve shape, not a disqualifier);
+ *  - EXCEPT when a data tool ran and explicitly found nothing — then any
+ *    price in the reply is fabricated and full replacement stays the safe
+ *    default.
  * Bare low confidence WITH retrieved data is notify-only and never pauses
  * on its own, so it cannot be a hidden co-trigger here.
  */
@@ -366,5 +390,6 @@ export function shouldPreserveReplyWithHandoff(
     return false;
   }
   if (s.replyIsPunt) return false;
-  return s.toolDataOutcome === "got_data";
+  if (s.toolDataOutcome === "no_data") return false;
+  return s.replyHasProductContent;
 }

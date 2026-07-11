@@ -8,6 +8,7 @@ import {
   decideEscalationReason,
   detectPuntSentences,
   escalationWillPause,
+  replyContainsProductContent,
   scrubNarration,
   shouldPauseForEscalation,
   shouldPreserveReplyWithHandoff,
@@ -420,21 +421,51 @@ describe("escalationWillPause — sync pause verdict for the outbound transform"
   });
 });
 
+describe("replyContainsProductContent", () => {
+  it("detects priced product recommendations", () => {
+    expect(
+      replyContainsProductContent(
+        "We carry the Michelin Road 6 Sport Touring Tires at $214.99, in stock."
+      )
+    ).toBe(true);
+    expect(replyContainsProductContent("Two options: $ 89 and $129.95")).toBe(true);
+  });
+
+  it("returns false for unpriced replies and empty input", () => {
+    expect(
+      replyContainsProductContent("Our service team will confirm what fits your bike.")
+    ).toBe(false);
+    expect(replyContainsProductContent("")).toBe(false);
+    expect(replyContainsProductContent(null)).toBe(false);
+    expect(replyContainsProductContent(undefined)).toBe(false);
+  });
+});
+
 describe("shouldPreserveReplyWithHandoff (fitment preserve fix, 7/11/2026)", () => {
-  /** The live-bug shape: full-YMM fitment opener, model recommended real
-   *  products and (per service_handoff) called the tool with
-   *  reason='complex_fitment'. Nothing else is wrong with the turn. */
+  /** The live-bug shape verbatim: full-YMM fitment opener; products came
+   *  from the prompt's RELEVANT PRODUCTS section (no data-tool calls at
+   *  all — escalate_to_human was the only tool call, per the Preview-DB
+   *  chat_events from the live repro); the reply recommends priced
+   *  products; the model called the tool with reason='complex_fitment'.
+   *  Nothing else is wrong with the turn. */
   const fitmentTurn = {
     toolEscalationReason: "complex_fitment",
     sentimentScore: 0,
     isExplicitHumanRequest: false,
     isTechAirServiceRequest: false,
-    toolDataOutcome: "got_data" as const,
+    toolDataOutcome: "no_tools_ran" as const,
     replyIsPunt: false,
+    replyHasProductContent: true,
   };
 
-  it("preserves the reply for a sole complex_fitment escalation with real product data", () => {
+  it("preserves the reply for the live-repro shape (prompt-sourced products, no data tools)", () => {
     expect(shouldPreserveReplyWithHandoff(fitmentTurn)).toBe(true);
+  });
+
+  it("also preserves when data tools DID return products", () => {
+    expect(
+      shouldPreserveReplyWithHandoff({ ...fitmentTurn, toolDataOutcome: "got_data" })
+    ).toBe(true);
   });
 
   it("only complex_fitment is a preserve reason", () => {
@@ -482,12 +513,15 @@ describe("shouldPreserveReplyWithHandoff (fitment preserve fix, 7/11/2026)", () 
     );
   });
 
-  it("keeps full replacement without retrieved product data behind the reply", () => {
+  it("keeps full replacement when the reply has no priced product content", () => {
+    expect(
+      shouldPreserveReplyWithHandoff({ ...fitmentTurn, replyHasProductContent: false })
+    ).toBe(false);
+  });
+
+  it("keeps full replacement when a data tool ran and found NOTHING (prices would be fabricated)", () => {
     expect(
       shouldPreserveReplyWithHandoff({ ...fitmentTurn, toolDataOutcome: "no_data" })
-    ).toBe(false);
-    expect(
-      shouldPreserveReplyWithHandoff({ ...fitmentTurn, toolDataOutcome: "no_tools_ran" })
     ).toBe(false);
   });
 });

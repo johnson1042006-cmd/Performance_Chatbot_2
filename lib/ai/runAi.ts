@@ -40,6 +40,7 @@ import {
   decideEscalationReason,
   detectPuntSentences,
   escalationWillPause,
+  replyContainsProductContent,
   scrubNarration,
   shouldPauseForEscalation,
   shouldPreserveReplyWithHandoff,
@@ -283,6 +284,7 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
           isTechAirServiceRequest,
           toolDataOutcome: assessToolDataOutcome(toolCalls),
           replyIsPunt: replyIsPuntEquivalent(hoursFixed),
+          replyHasProductContent: replyContainsProductContent(hoursFixed),
         })
       ) {
         const cleaned = scrubNarration(hoursFixed).cleaned;
