@@ -163,6 +163,57 @@ export default function ChatWidget() {
     []
   );
 
+  // Single-flight guard for POST /api/sessions. The mount-time init effect and
+  // a fast first sendMessage (or quick-reply chip) can otherwise race and
+  // create TWO sessions for the same customer identifier ~20-50 ms apart,
+  // splitting the conversation across them — turn 2 then lands on a
+  // history-less twin and the bot loses all context (observed in e2e 7/10/2026).
+  // Every session-create path goes through here; concurrent callers share one
+  // in-flight request. A failed create clears the guard so the next attempt
+  // can retry.
+  const sessionCreatePromiseRef = useRef<Promise<{
+    id: string;
+    status?: string;
+  } | null> | null>(null);
+
+  const ensureDbSession = useCallback(async (): Promise<{
+    id: string;
+    status?: string;
+  } | null> => {
+    if (dbSessionIdRef.current) return { id: dbSessionIdRef.current };
+    if (!sessionCreatePromiseRef.current) {
+      sessionCreatePromiseRef.current = (async () => {
+        const res = await fetchWithTimeout(
+          "/api/sessions",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ customerIdentifier, pageContext }),
+          },
+          SESSION_FETCH_MS
+        );
+        const data = await res.json().catch(() => ({}));
+        if (data.session?.id) {
+          dbSessionIdRef.current = data.session.id;
+          setDbSessionId(data.session.id);
+          applySessionToken(data);
+          return {
+            id: data.session.id as string,
+            status: data.session.status as string | undefined,
+          };
+        }
+        return null;
+      })()
+        .catch(() => null)
+        .then((result) => {
+          if (!result) sessionCreatePromiseRef.current = null;
+          return result;
+        });
+    }
+    return sessionCreatePromiseRef.current;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerIdentifier, pageContext]);
+
   // ── Page context from parent frame ─────────────────────────────────────────
   useEffect(() => {
     const handler = (event: MessageEvent) => {
@@ -204,26 +255,18 @@ export default function ChatWidget() {
 
     async function initSession() {
       try {
-        const res = await fetchWithTimeout(
-          "/api/sessions",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ customerIdentifier }),
-          },
-          SESSION_FETCH_MS
-        );
-        const data = await res.json();
-        if (data.session?.id) {
-          setDbSessionId(data.session.id);
-          applySessionToken(data);
-          const status = data.session.status;
+        // Shared single-flight create: if the customer sends a message before
+        // this resolves, sendMessage awaits the SAME request instead of
+        // creating a duplicate session.
+        const created = await ensureDbSession();
+        if (created) {
+          const status = created.status;
           if (status === "active_human") setSessionState("active_human");
           else if (status === "active_ai") setSessionState("active_ai");
           else if (status === "waiting") setSessionState("waiting");
           else if (status === "closed") setSessionState("closed");
 
-          const msgRes = await fetch(`/api/sessions/${data.session.id}/messages`, {
+          const msgRes = await fetch(`/api/sessions/${created.id}/messages`, {
             headers: tokenHeaders(),
           });
           if (msgRes.ok) {
@@ -232,11 +275,11 @@ export default function ChatWidget() {
           }
         }
       } catch {
-        // sendMessage will POST /api/sessions again
+        // sendMessage will retry via ensureDbSession
       }
     }
     initSession();
-  }, [customerIdentifier, applySessionToken, tokenHeaders]);
+  }, [customerIdentifier, ensureDbSession, tokenHeaders]);
 
   // ── Customer heartbeat ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -445,6 +488,8 @@ export default function ChatWidget() {
     }
     setMessages([]);
     setDbSessionId(null);
+    dbSessionIdRef.current = null;
+    sessionCreatePromiseRef.current = null;
     setSessionState("idle");
     setWaitingForReply(false);
     setInput("");
@@ -729,30 +774,7 @@ export default function ChatWidget() {
       lower.includes("what tires fit");
     if (wantsTires) {
       if (!override) setInput("");
-      const ensureSession = async (): Promise<string | null> => {
-        if (dbSessionIdRef.current) return dbSessionIdRef.current;
-        try {
-          const sRes = await fetchWithTimeout(
-            "/api/sessions",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ customerIdentifier, pageContext }),
-            },
-            SESSION_FETCH_MS
-          );
-          const sData = await sRes.json().catch(() => ({}));
-          if (sData.session?.id) {
-            setDbSessionId(sData.session.id);
-            applySessionToken(sData);
-            return sData.session.id as string;
-          }
-          return null;
-        } catch {
-          return null;
-        }
-      };
-      const sid = await ensureSession();
+      const sid = (await ensureDbSession())?.id ?? null;
       if (sid) setChipForm("tire_fitment");
       else
         appendLocalError(
@@ -780,30 +802,9 @@ export default function ChatWidget() {
     try {
       let sid = dbSessionId;
       if (!sid) {
-        let sRes: Response;
-        try {
-          sRes = await fetchWithTimeout(
-            "/api/sessions",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ customerIdentifier, pageContext }),
-            },
-            SESSION_FETCH_MS
-          );
-        } catch {
-          appendLocalError(
-            "Could not reach the server to start chat (timed out). Check your connection and try again."
-          );
-          setMessages((prev) => prev.filter((m) => m.id !== tempMsg.id));
-          return;
-        }
-        const sData = await sRes.json().catch(() => ({}));
-        if (sData.session?.id) {
-          sid = sData.session.id;
-          setDbSessionId(sid);
-          applySessionToken(sData);
-        }
+        // Awaits the mount-time create when one is already in flight instead
+        // of racing it with a second POST /api/sessions.
+        sid = (await ensureDbSession())?.id ?? null;
       }
 
       if (!sid) {
@@ -930,22 +931,8 @@ export default function ChatWidget() {
       }
       if (id === "find_tires") {
         if (!dbSessionIdRef.current) {
-          try {
-            const sRes = await fetchWithTimeout(
-              "/api/sessions",
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ customerIdentifier, pageContext }),
-              },
-              SESSION_FETCH_MS
-            );
-            const sData = await sRes.json().catch(() => ({}));
-            if (sData.session?.id) {
-              setDbSessionId(sData.session.id);
-              applySessionToken(sData);
-            }
-          } catch {
+          const created = await ensureDbSession();
+          if (!created) {
             appendLocalError(
               "We couldn't start your chat session. Please try again."
             );
@@ -1184,6 +1171,7 @@ export default function ChatWidget() {
               }}
               placeholder="Type your message..."
               data-testid="chat-input"
+              data-session-ready={dbSessionId ? "true" : "false"}
               autoComplete="off"
               className="flex-1 px-3.5 py-2.5 text-sm border border-border rounded-none focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent bg-background"
             />
