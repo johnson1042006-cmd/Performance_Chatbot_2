@@ -212,9 +212,9 @@ export function routingDirective(
       const partLabel =
         category === "tire_fitment" ? "tires" : "bike-specific parts";
       if (missing.length > 0) {
-        return `This conversation opened with a ${partLabel} fitment question, and the customer has NOT yet provided: ${missing.join(", ")}. Before recommending any specific ${partLabel}, ask ONE friendly question collecting the missing details (year, make, and model together in a single question). Do not guess sizes or fitment. Once they answer, recommend by model and let our service team confirm exact fitment.`;
+        return `This conversation opened with a ${partLabel} fitment question, and the customer has NOT yet provided: ${missing.join(", ")}. In ONE message, do BOTH: (1) show the relevant options we carry from the RELEVANT PRODUCTS section with prices and links, presented by model — do NOT claim any of them fits the customer's bike yet; and (2) ask ONE friendly question collecting the missing details (year, make, and model together). Never guess sizes or fitment. Once they answer, narrow to what fits and route exact-fit confirmation to the service team.`;
       }
-      return `This conversation opened with a ${partLabel} fitment question and the customer has already stated their bike. Do not guess sizes or exact fitment — recommend matching product models and route exact-fit confirmation to the service team per the fitment rules.`;
+      return `This conversation opened with a ${partLabel} fitment question and the customer has already stated their bike. Do not guess sizes or exact fitment — recommend matching product models with prices and links, and route exact-fit confirmation to the service team per the fitment rules.`;
     }
     case "order_support": {
       if (missing.length > 0) {

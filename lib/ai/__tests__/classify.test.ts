@@ -115,13 +115,17 @@ describe("routingDirective", () => {
     missingFields: RoutingClassification["missingFields"] = []
   ): RoutingClassification => ({ category, confidence: "high", missingFields });
 
-  it("tire_fitment with missing fields instructs one collecting question first", () => {
+  it("tire_fitment with missing fields instructs show-and-ask in one message", () => {
     const d = routingDirective(
       make("tire_fitment", ["bike_year", "bike_make", "bike_model"])
     );
     expect(d).toMatch(/bike year, bike make, bike model/);
+    // Both halves required: products with prices AND the one collecting
+    // question — a clarify-only reply and a products-only reply both violate
+    // the directive.
+    expect(d).toMatch(/prices and links/i);
     expect(d).toMatch(/ask ONE friendly question/i);
-    expect(d).toMatch(/Do not guess sizes/i);
+    expect(d).toMatch(/Never guess sizes/i);
   });
 
   it("parts_fitment with fields already provided routes to service-team confirmation", () => {
