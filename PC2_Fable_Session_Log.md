@@ -70,3 +70,18 @@ it touched and why.
 **Merge-prep checks (done during gate):** main untouched (local = origin = e956751; all work branch-only) · migration 0007 verified FULLY APPLIED on production Neon — both sessions columns AND both chat_event_type enum values — via credential-free read-only MCP schema inspection (the auto-mode classifier correctly refused to materialize the production connection string; no credentials were exposed).
 **Test gate results:** unit 606/606 PASS · lint clean · fast Playwright rerun IN PROGRESS with the race fix; then step 4 (live browser pass), then Phase 2b on a child branch.
 **Waiting on:** nothing — proceeding per the full-autonomy mandate; hard stop remains before merge/production.
+
+---
+
+## [2026-07-10 23:00 MDT] — Item 1 / Phase 2a: FULL GATE GREEN — merge-ready, awaiting go-ahead
+**Status:** Phase 2a complete and merge-ready. Hard stop honored: nothing merged, nothing production.
+**Branch:** fix/escalation-modes-2a at 56f9534, pushed; Preview deployment dpl_4Z8BCbLYLEKKagXdrQoYqj7qNUfJ READY.
+**Fixes landed this session (after the earlier entries):** 05732d9 bot-quality per-reply wait 25s→45s (test-config; latency data: 315 replies measured — p50 6.5s, p90 9.8s, 4.1% >25s, heavy-fan-out query shapes consistently 27–42s; content assertions untouched; Antonio-directed after latency review) · 56a1030 STYLE PREFERENCE explicit branch requires products in "closest alternative" replies (race-boots clarify-only flip-flop) · 56f9534 duplicate holding-ack bubble fix (paused branch persists+Pushers BEFORE streaming; widget now skips the streaming bubble when the identical real message already landed — found live in gate step 4).
+**Final gate results (all against Preview Neon br-rough-leaf/ep-dark-rice, per-run env only):**
+1. Unit: **606/606** (595 baseline + 11 new this session) · lint clean
+2. e2e:slow: **46/50 PASS** (threshold ≤5; soft fails: 1 cold-start timeout, jacket clarify-first, one borderline 2a pause on "do you do service", color must-phrase [Phase 3]); bracket-tag leak did NOT recur
+3. Fast Playwright: **111 passed / 1 flaky / 0 failed** (take 5; flake passed on retry)
+4. Live browser pass on deployed Preview (commit 56f9534, real Claude turns, screenshots in session scratchpad live-pass-shots/): jacob-1 fitment → structured tire-fitment form (designed flow) ✓ · jacob-2 Stage 2 M2 spec + top-speed follow-up → real product answer, then **undeliverable_offer pause** with handoff copy ✓ · jacob-3 Shoei stock → 8 helmets with prices/stock ✓ · 5w40 oil → **no_data pause** with handoff copy + email-capture form ✓ · paused follow-up → exactly ONE holding ack ✓ · store hours → canonical hours, no escalation ✓. DB verification: pause reasons no_data / undeliverable_offer recorded on exactly the right sessions.
+**Merge-prep:** main untouched (e956751) · migration 0007 fully applied on production Neon (columns + enum values; credential-free read-only check) · deploy order therefore already satisfied.
+**Flagged for Phase 3 (not fixed now, per Antonio):** bracket-tag/STORE CATALOG scaffolding leaks (two observations early tonight) · color search · query-shape latency (customer-visible 27–42s turns on heavy search fan-outs) · server-side get-or-create session race (widget-side fixed; a unique-constraint fix needs a migration).
+**Waiting on:** Antonio's merge go-ahead for Phase 2a (per policy). Proceeding to Phase 2b on child branch feat/routing-classifier-2b per the full-autonomy mandate.
