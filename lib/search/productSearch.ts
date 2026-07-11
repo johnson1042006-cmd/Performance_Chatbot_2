@@ -636,6 +636,95 @@ function diversifyByBrand(
 }
 
 // ---------------------------------------------------------------------------
+// Stale-generation demotion (Phase 2c, Jacob #3)
+// ---------------------------------------------------------------------------
+//
+// Tire lines version generationally — Michelin (Pilot) Road 5 → Road 6,
+// Commander 2 → 3 — and the stale generation often stays live in BC alongside
+// the current one. Same-family products otherwise score identically (brand,
+// type, stock, keyword bonuses all tie) and the winner falls to arbitrary
+// catalog insertion order, which is how Road 5 kept beating Road 6.
+//
+// A "family" is (brand_id, the word immediately before a standalone single
+// digit 1-9 in the product name) — this correctly unifies "Pilot Road 5" and
+// "Road 6" under family "road". When a family has 2+ generations in the pool,
+// every non-newest member is demoted, UNLESS the customer's query names that
+// generation digit explicitly ("road 5" stays undemoted).
+//
+// Tires ONLY: outside tires, single-digit suffixes are concurrent product
+// TIERS, not generations (Alpinestars Tech 3/7/10 boots coexist), so this is
+// gated on productType === "tire" at the call site.
+//
+// The demotion (25) is deliberately smaller than the in-stock bonus (30): an
+// in-stock older generation still outranks a sold-out newer one.
+
+export const STALE_GENERATION_DEMOTION = 25;
+
+const GENERATION_NAME_RE = /(^|[^a-z0-9'])([a-z][a-z'&-]{2,})\s+([1-9])(?![0-9])/gi;
+
+interface GenerationInfo {
+  familyKey: string;
+  generation: number;
+}
+
+function extractGenerationInfo(p: BCProduct): GenerationInfo | null {
+  GENERATION_NAME_RE.lastIndex = 0;
+  // Use the LAST match in the name: "Pilot Road 5" should family on "road",
+  // and trailing size/spec text after the generation never matches the
+  // pattern's word+single-digit shape.
+  let match: RegExpExecArray | null;
+  let last: RegExpExecArray | null = null;
+  while ((match = GENERATION_NAME_RE.exec(p.name)) !== null) last = match;
+  if (!last) return null;
+  return {
+    familyKey: `${p.brand_id ?? "unknown"}::${last[2].toLowerCase()}`,
+    generation: Number(last[3]),
+  };
+}
+
+/**
+ * Map of productId → penalty for pool members that are a stale generation of
+ * a family whose newer generation is also in the pool. Pure — unit-tested
+ * directly. `kwTokens` suppresses demotion for a family when the query names
+ * one of its generation digits explicitly.
+ */
+export function computeStaleGenerationPenalties(
+  products: BCProduct[],
+  kwTokens: string[]
+): Map<number, number> {
+  const families = new Map<
+    string,
+    { maxGen: number; members: Array<{ id: number; generation: number }> }
+  >();
+  for (const p of products) {
+    const info = extractGenerationInfo(p);
+    if (!info) continue;
+    const fam = families.get(info.familyKey) ?? { maxGen: 0, members: [] };
+    fam.maxGen = Math.max(fam.maxGen, info.generation);
+    fam.members.push({ id: p.id, generation: info.generation });
+    families.set(info.familyKey, fam);
+  }
+
+  const queryDigits = new Set(kwTokens.filter((t) => /^[1-9]$/.test(t)));
+  const penalties = new Map<number, number>();
+  for (const fam of Array.from(families.values())) {
+    const distinctGens = new Set(fam.members.map((m) => m.generation));
+    if (distinctGens.size < 2) continue;
+    // Customer named a generation from this family — respect their choice.
+    const explicit = Array.from(distinctGens).some((g) =>
+      queryDigits.has(String(g))
+    );
+    if (explicit) continue;
+    for (const m of fam.members) {
+      if (m.generation < fam.maxGen) {
+        penalties.set(m.id, STALE_GENERATION_DEMOTION);
+      }
+    }
+  }
+  return penalties;
+}
+
+// ---------------------------------------------------------------------------
 // searchProducts — single scored pipeline
 // ---------------------------------------------------------------------------
 
@@ -1025,6 +1114,14 @@ export async function searchProducts(
     ? new Set(expandColorQuery(detectedColor).map((c) => c.toLowerCase()))
     : new Set<string>();
 
+  // Phase 2c: demote stale tire generations (Road 5 when Road 6 is in the
+  // pool) unless the customer named the generation. Tires only — elsewhere
+  // single-digit suffixes are concurrent tiers, not generations.
+  const staleGenPenalties =
+    productType === "tire"
+      ? computeStaleGenerationPenalties(finalPool, kwTokens)
+      : new Map<number, number>();
+
   // Step 5: Single scoring pass
   function scoreProduct(p: BCProduct): number {
     let score = 0;
@@ -1063,6 +1160,11 @@ export async function searchProducts(
       sub &&
       OFF_STREET_SUBCATEGORIES.has(sub)
     ) score -= 50;
+
+    // -25: stale tire generation with a newer sibling in the pool (Phase 2c).
+    // Smaller than the +30 stock bonus so an in-stock Road 5 still beats a
+    // sold-out Road 6.
+    score -= staleGenPenalties.get(p.id) ?? 0;
 
     // -1000: hard budget penalty (effectively a filter via sort + slice)
     if (budget?.max && price > budget.max) score -= 1000;
