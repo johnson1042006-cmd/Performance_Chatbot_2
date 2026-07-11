@@ -450,9 +450,13 @@ async function ask(page: Page, question: string): Promise<string> {
   await page.locator('[data-testid="chat-input"]').fill(question);
   await page.locator('[data-testid="chat-send"]').click();
 
+  // 45 s: the first token only arrives after buildPrompt's BigCommerce
+  // fan-out, and real turns were measured at 27-42 s under BC load
+  // (7/10/2026). This is a latency allowance only — every content
+  // assertion below still applies to whatever reply arrives.
   await page.locator(aiSelector).nth(beforeCount).waitFor({
     state: "visible",
-    timeout: 25_000,
+    timeout: 45_000,
   });
 
   // Let any final streaming settle (the widget renders the full reply at once,
