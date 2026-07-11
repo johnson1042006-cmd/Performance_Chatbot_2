@@ -8,6 +8,8 @@ import {
   extractBrand,
   extractProductType,
   stripBrandFromQuery,
+  computeStaleGenerationPenalties,
+  STALE_GENERATION_DEMOTION,
 } from "../productSearch";
 import { extractSubcategoryRequest } from "../subcategory";
 import {
@@ -1367,6 +1369,89 @@ describe("searchProducts", () => {
 // ---------------------------------------------------------------------------
 // searchProducts — broad product types (comm / brake / sprocket)
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// computeStaleGenerationPenalties (Phase 2c, Jacob #3)
+// ---------------------------------------------------------------------------
+describe("computeStaleGenerationPenalties", () => {
+  const makeTire = (id: number, name: string, brand_id = 7) =>
+    ({
+      id, name, sku: `T-${id}`, description: "",
+      price: 200, sale_price: 0, retail_price: 0, calculated_price: 200,
+      inventory_level: 5, inventory_tracking: "product",
+      availability: "available", is_visible: true, categories: [],
+      brand_id, custom_url: { url: `/t-${id}/` }, variants: [], images: [],
+    }) as never;
+
+  it("demotes Pilot Road 5 when Road 6 is in the pool (family unification across the renamed line)", () => {
+    const penalties = computeStaleGenerationPenalties(
+      [
+        makeTire(1, "Michelin Pilot Road 5 Sport Touring Tires"),
+        makeTire(2, "Michelin Road 6 Sport Touring Tires"),
+      ],
+      ["michelin", "road", "tire"]
+    );
+    expect(penalties.get(1)).toBe(STALE_GENERATION_DEMOTION);
+    expect(penalties.has(2)).toBe(false);
+  });
+
+  it("demotes Commander 2 when Commander 3 is in the pool", () => {
+    const penalties = computeStaleGenerationPenalties(
+      [
+        makeTire(3, "Michelin Commander 2 Touring Tire"),
+        makeTire(4, "Michelin Commander 3 Touring Tires"),
+        makeTire(5, "Michelin Commander 3 Cruiser Tires"),
+      ],
+      ["michelin", "commander"]
+    );
+    expect(penalties.get(3)).toBe(STALE_GENERATION_DEMOTION);
+    expect(penalties.has(4)).toBe(false);
+    expect(penalties.has(5)).toBe(false);
+  });
+
+  it("does NOT demote when the customer names the generation explicitly", () => {
+    const penalties = computeStaleGenerationPenalties(
+      [
+        makeTire(1, "Michelin Pilot Road 5 Sport Touring Tires"),
+        makeTire(2, "Michelin Road 6 Sport Touring Tires"),
+      ],
+      ["michelin", "road", "5"]
+    );
+    expect(penalties.size).toBe(0);
+  });
+
+  it("does not demote single-generation families", () => {
+    const penalties = computeStaleGenerationPenalties(
+      [makeTire(2, "Michelin Road 6 Sport Touring Tires")],
+      ["road"]
+    );
+    expect(penalties.size).toBe(0);
+  });
+
+  it("does not group across brands", () => {
+    const penalties = computeStaleGenerationPenalties(
+      [
+        makeTire(1, "Michelin Pilot Road 5 Sport Touring Tires", 7),
+        makeTire(2, "Shinko Road 6 Tires", 9),
+      ],
+      ["road"]
+    );
+    expect(penalties.size).toBe(0);
+  });
+
+  it("ignores multi-digit model numbers (tiers, not generations)", () => {
+    // Tech 10 has a two-digit suffix — "tech" family only sees gen 7, a
+    // single member, so nothing is demoted.
+    const penalties = computeStaleGenerationPenalties(
+      [
+        makeTire(1, "Alpinestars Tech 7 Boots"),
+        makeTire(2, "Alpinestars Tech 10 Boots"),
+      ],
+      ["boots"]
+    );
+    expect(penalties.size).toBe(0);
+  });
+});
+
 describe("searchProducts — broad product types", () => {
   vi.mock("@/lib/bigcommerce/client", () => ({
     searchProductsBC: vi.fn().mockResolvedValue([]),
@@ -1453,6 +1538,109 @@ describe("searchProducts — broad product types", () => {
     const names = result.products.map((p) => p.name);
     expect(names).toContain("EBC FA600HH");
     expect(names).toContain("EBC FA229HH");
+  });
+
+  // Phase 2c regression (Jacob #3): when the customer does NOT specify a
+  // generation, the current one (Road 6) must outrank the stale one (Road 5)
+  // through the full pipeline — previously they tied and arbitrary catalog
+  // insertion order let Road 5 win.
+  it("REGRESSION: Road 6 beats Road 5 through searchProducts when generation is unspecified", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const tireCat = { id: 88, name: "Tires", parent_id: 0 };
+    const tire = (id: number, name: string, price: number) => ({
+      id, name, sku: `TIRE-${id}`, description: "Sport touring motorcycle tire.",
+      price, sale_price: 0, retail_price: 0, calculated_price: price,
+      inventory_level: 4, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [88], brand_id: 7,
+      custom_url: { url: `/tires/${id}/` }, variants: [], images: [],
+    });
+    // Stale generation deliberately FIRST in catalog order — the pre-fix
+    // failure mode was insertion order deciding the tie.
+    const fixtures = [
+      tire(801, "Michelin Pilot Road 5 Sport Touring Tires", 351.99),
+      tire(802, "Michelin Road 6 Sport Touring Tires", 213.99),
+    ];
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => (name === "Tires" ? tireCat : null)
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => (id === 88 ? fixtures : [])
+    );
+
+    const result = await searchProducts("michelin sport touring tires");
+    const names = result.products.map((p) => p.name);
+    expect(names[0]).toBe("Michelin Road 6 Sport Touring Tires");
+    expect(names).toContain("Michelin Pilot Road 5 Sport Touring Tires");
+  });
+
+  it("keeps Road 5 available when the customer names it explicitly", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const tireCat = { id: 88, name: "Tires", parent_id: 0 };
+    const tire = (id: number, name: string, price: number) => ({
+      id, name, sku: `TIRE-${id}`, description: "Sport touring motorcycle tire.",
+      price, sale_price: 0, retail_price: 0, calculated_price: price,
+      inventory_level: 4, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [88], brand_id: 7,
+      custom_url: { url: `/tires/${id}/` }, variants: [], images: [],
+    });
+    const fixtures = [
+      tire(801, "Michelin Pilot Road 5 Sport Touring Tires", 351.99),
+      tire(802, "Michelin Road 6 Sport Touring Tires", 213.99),
+    ];
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => (name === "Tires" ? tireCat : null)
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => (id === 88 ? fixtures : [])
+    );
+
+    const result = await searchProducts("michelin road 5 tires");
+    expect(result.products.map((p) => p.name)[0]).toBe(
+      "Michelin Pilot Road 5 Sport Touring Tires"
+    );
+  });
+
+  it("ranks actual filter elements above filter oils/cleaners for 'air filter' (head-noun bonus)", async () => {
+    const { findCategoryByName, getProductsByCategory } = await import("@/lib/bigcommerce/client");
+    const { searchProducts } = await import("../productSearch");
+
+    const cat = (id: number, name: string) => ({ id, name, parent_id: 0 });
+    const filterProduct = (id: number, name: string, catId: number) => ({
+      id, name, sku: `F-${id}`, description: "Air filtration.",
+      price: 20, sale_price: 0, retail_price: 0, calculated_price: 20,
+      inventory_level: 10, inventory_tracking: "product",
+      availability: "available", is_visible: true,
+      categories: [catId], brand_id: 40,
+      custom_url: { url: `/f/${id}/` }, variants: [], images: [],
+    });
+    const parent = [
+      // The parent "Air Filters" shelf is dominated by maintenance items.
+      filterProduct(901, "No Toil Foam Air Filter Oil", 90),
+      filterProduct(902, "K&N Power Kleen Air Filter Cleaner", 90),
+    ];
+    const leaves = [filterProduct(903, "Uni Pod Air Filter", 91)];
+
+    (findCategoryByName as ReturnType<typeof vi.fn>).mockImplementation(
+      async (name: string) => {
+        if (name === "Air Filters") return cat(90, "Air Filters");
+        if (name === "Street Bike Air Filters") return cat(91, "Street Bike Air Filters");
+        return null;
+      }
+    );
+    (getProductsByCategory as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: number) => (id === 90 ? parent : id === 91 ? leaves : [])
+    );
+
+    const result = await searchProducts("air filter");
+    expect(result.products.map((p) => p.name)[0]).toBe("Uni Pod Air Filter");
   });
 
   it("surfaces Sprockets products for 'show me sprockets'", async () => {
