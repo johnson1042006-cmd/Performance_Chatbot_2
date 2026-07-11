@@ -6,7 +6,10 @@ import {
   extractDiscussedProductSubject,
   isLikelyProductFollowUp,
   extractBrand,
+  extractProductType,
+  stripBrandFromQuery,
 } from "../productSearch";
+import { extractSubcategoryRequest } from "../subcategory";
 import {
   extractColorFromQuery,
   expandColorQuery,
@@ -455,6 +458,60 @@ describe("extractBrand", () => {
 
   it("returns null when no brand is present", () => {
     expect(extractBrand("show me some gloves")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractProductType — chain vs sprocket
+// ---------------------------------------------------------------------------
+describe("extractProductType — chain vs sprocket", () => {
+  it("keeps the broad sprocket type for sprocket-only queries", () => {
+    expect(extractProductType("sprocket set")).toBe("sprocket");
+    expect(extractProductType("rear sprocket for a YZ450F")).toBe("sprocket");
+  });
+
+  it("does not collapse chain+sprocket queries to sprocket-only", () => {
+    expect(extractProductType("chain and sprocket kit")).toBe("chain");
+    expect(extractProductType("need a new chain and sprockets")).toBe("chain");
+  });
+
+  it("keeps the chain type for chain-only queries", () => {
+    expect(extractProductType("motorcycle chain")).toBe("chain");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// stripBrandFromQuery — brand words must not read as subcategory intent
+// ---------------------------------------------------------------------------
+describe("stripBrandFromQuery", () => {
+  it("removes the brand phrase so 'Racing' brands don't register as a racing request", () => {
+    const query = "Fly Racing youth helmet";
+    const brand = extractBrand(query);
+    expect(brand).toBe("fly racing");
+    // Old bug: the un-stripped query reads "racing" as an explicit race-helmet
+    // request, burying the real youth helmets under +100 racing-classified items.
+    expect(extractSubcategoryRequest(query, "helmet")).toEqual({
+      explicit: true,
+      value: "racing",
+    });
+    expect(
+      extractSubcategoryRequest(stripBrandFromQuery(query, brand), "helmet")
+    ).toBeNull();
+  });
+
+  it("preserves genuine subcategory words outside the brand phrase", () => {
+    const query = "Alpinestars race boots";
+    const brand = extractBrand(query);
+    expect(brand).toBe("alpinestars");
+    expect(
+      extractSubcategoryRequest(stripBrandFromQuery(query, brand), "boots")
+    ).toEqual({ explicit: true, value: "racing" });
+  });
+
+  it("is a no-op when no brand was detected", () => {
+    expect(stripBrandFromQuery("open face helmets", null)).toBe(
+      "open face helmets"
+    );
   });
 });
 

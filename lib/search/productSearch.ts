@@ -263,7 +263,10 @@ export function extractProductType(query: string): string | null {
   if (/\b(communicator|intercom|bluetooth|comm system|comms?)\b/i.test(query)) return "comm";
   if (/\b(goggles?|moto goggles?)\b/i.test(query)) return "goggles";
   if (/\b(brake pads?|brake shoes?)\b/i.test(query)) return "brake";
-  if (/\b(sprockets?|front sprocket|rear sprocket)\b/i.test(query)) return "sprocket";
+  // A query naming BOTH chain and sprocket ("chain and sprocket kit") must not
+  // collapse to sprocket-only — the map's "chain" type covers both terms, so
+  // scoring and the type filter accept chains and sprockets alike.
+  if (!/\bchains?\b/i.test(query) && /\b(sprockets?|front sprocket|rear sprocket)\b/i.test(query)) return "sprocket";
   if (/\b(chain lube|chain wax)\b/i.test(query)) return "chemical";
   if (/\b(air filters?|oil filters?|filter)\b/i.test(query)) return "filter";
 
@@ -589,6 +592,19 @@ export function extractBrand(query: string): string | null {
   return null;
 }
 
+/**
+ * Remove the detected brand phrase from a query before subcategory-intent
+ * extraction. Brand names like "Fly Racing" and "Fox Racing" contain style
+ * words ("racing") that extractSubcategoryRequest would otherwise read as an
+ * explicit subcategory request, giving +100 to any product that classifies as
+ * that style and burying the products the customer actually asked for.
+ */
+export function stripBrandFromQuery(query: string, brand: string | null): string {
+  if (!brand) return query;
+  const escaped = brand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return query.replace(new RegExp(escaped, "gi"), " ");
+}
+
 // ---------------------------------------------------------------------------
 // Brand diversification helper
 // ---------------------------------------------------------------------------
@@ -639,13 +655,18 @@ export async function searchProducts(
     if (skuProduct?.is_visible) return { products: [skuProduct], detectedColor };
   }
 
-  // Step 2: Extract signals
+  // Step 2: Extract signals. Brand first — its phrase is stripped before
+  // subcategory extraction so brand words ("Fly Racing") can't register as a
+  // style request.
   const productType = extractProductType(normalizedQuery);
+  const brand = extractBrand(normalizedQuery);
   const subRequest: SubcategoryRequest = isSupportedProductType(productType)
-    ? extractSubcategoryRequest(normalizedQuery, productType)
+    ? extractSubcategoryRequest(
+        stripBrandFromQuery(normalizedQuery, brand),
+        productType
+      )
     : null;
   const budget = extractBudget(normalizedQuery);
-  const brand = extractBrand(normalizedQuery);
 
   const allKeywords = extractKeywords(normalizedQuery);
   const keywords = detectedColor
@@ -662,7 +683,7 @@ export async function searchProducts(
 
   // Step 3: Build ONE candidate pool via four parallel strategies.
   // All four run concurrently; results are unioned and deduplicated (≤ 200).
-  const [subCatResults, brandResults, brandTypeNameMatches, bcKwResults, localMatches, nameMatches] = await Promise.all([
+  const [subCatResults, brandResults, brandTypeNameMatches, bcKwResults, localMatches, nameMatches, driveChainResults] = await Promise.all([
 
     // 3a: canonical subcategory/type/broad-type category
     // Try ALL candidate category names in parallel and union results.
@@ -866,6 +887,24 @@ export async function searchProducts(
 
       return collected;
     })(),
+
+    // 3g: drive chains by name. BC has no chain category shelf (only Chain
+    // Lube / Chain Tools), and both BC keyword search and the local FTS rank
+    // short-named lube/locks/tools above actual drive chains — so a "chain"
+    // query never surfaces one without this source. Drive chains are the
+    // chain-named products carrying a pitch number (420/428/520/525/530…);
+    // locks, lube, and tools don't.
+    (async (): Promise<BCProduct[]> => {
+      if (!/\bchains?\b/i.test(normalizedQuery)) return [];
+      try {
+        const byName = await getProductByNameLike("chain", 100);
+        return byName.filter(
+          (p) => /\bchains?\b/i.test(p.name) && /\b[2-6]\d{2}\b/.test(p.name)
+        );
+      } catch {
+        return [];
+      }
+    })(),
   ]);
 
   // Enrich local matches in parallel
@@ -892,6 +931,7 @@ export async function searchProducts(
   // add them before broader keyword results to guarantee pool inclusion.
   addProducts(nameMatches);
   addProducts(subCatResults);
+  addProducts(driveChainResults);
   addProducts(brandResults);
   addProducts(brandTypeNameMatches);
   addProducts(bcKwResults);
@@ -1041,6 +1081,7 @@ export async function searchProducts(
     sources: {
       nameMatches: nameMatches.length,
       subCat: subCatResults.length,
+      driveChain: driveChainResults.length,
       brand: brandResults.length,
       brandTypeNameMatches: brandTypeNameMatches.length,
       bcKw: bcKwResults.length,
