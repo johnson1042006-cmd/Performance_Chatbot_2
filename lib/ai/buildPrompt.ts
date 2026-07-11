@@ -257,7 +257,8 @@ export async function buildPrompt(
   latestMessage: string,
   pageContext?: PageContext | null,
   latestMessageRaw?: string,
-  agentsOnline?: boolean
+  agentsOnline?: boolean,
+  routingDirective?: string | null
 ): Promise<PromptResult> {
   // Caller passes the un-redacted current-turn message as `latestMessageRaw`
   // so the model can answer about PII in this turn (e.g. "your card 4111…")
@@ -414,6 +415,13 @@ export async function buildPrompt(
 
 ${AI_BEHAVIOR_RULES.map((r, i) => `${i + 1}. ${r.rule}`).join("\n\n")}
 `;
+
+  // Phase 2b: deterministic dispatch text from the Sonnet routing
+  // classification (first turn of a conversation only; null when the
+  // classifier is off, fell back, or the category needs no directive).
+  if (routingDirective) {
+    system += `\n## ROUTING DIRECTIVE\n${routingDirective}\n`;
+  }
 
   if (agentsOnline === true) {
     system += `\n## AGENT AVAILABILITY\n`;

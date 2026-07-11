@@ -49,6 +49,12 @@ import {
   HANDOFF_HUMAN_COMING,
   HANDOFF_AFTER_HOURS,
 } from "@/lib/sessions/aiPause";
+import {
+  classifyRouting,
+  routingClassifierEnabled,
+  routingDirective,
+  shouldClassifyTurn,
+} from "./classify";
 import { anyAgentsOnline } from "@/lib/presence";
 import { log, serializeError } from "@/lib/log";
 
@@ -101,6 +107,15 @@ export function isHumanTakeoverError(err: unknown): boolean {
     typeof err === "object" &&
     (err as { isHumanTakeover?: boolean }).isHumanTakeover === true
   );
+}
+
+async function hasPriorAiMessage(sessionId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: messages.id })
+    .from(messages)
+    .where(and(eq(messages.sessionId, sessionId), eq(messages.role, "ai")))
+    .limit(1);
+  return !!row;
 }
 
 async function loadRecentCustomerMessages(sessionId: string): Promise<string[]> {
@@ -263,12 +278,38 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
       }
     : undefined;
 
+  // Phase 2b: Sonnet routes the FIRST AI turn of a conversation only. Any
+  // classifier failure or low-confidence result returns null and the turn
+  // proceeds exactly as the Haiku-only path (locked fallback, 7/9/2026 —
+  // never an escalation trigger). Flag-gated; zero extra queries when off.
+  let directive: string | null = null;
+  if (routingClassifierEnabled()) {
+    try {
+      if (shouldClassifyTurn(await hasPriorAiMessage(sessionId))) {
+        const classification = await classifyRouting(latestMessage, {
+          requestId,
+          sessionId,
+        });
+        if (classification) directive = routingDirective(classification);
+      }
+    } catch (err) {
+      // Defensive: even an unexpected throw in the gating query must not
+      // break the turn — fall back to the unrouted path.
+      log.warn("ai.classify.gate_failed", {
+        requestId,
+        sessionId,
+        error: serializeError(err),
+      });
+    }
+  }
+
   const { system, conversationMessages } = await buildPrompt(
     sessionId,
     latestMessage,
     pageContext as never,
     latestMessageRaw,
-    agentsOnline
+    agentsOnline,
+    directive
   );
 
   const rawAiResponse = await callClaude(system, conversationMessages, {

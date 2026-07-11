@@ -412,6 +412,28 @@ describe("buildPrompt", () => {
     }
   });
 
+  it("renders a ROUTING DIRECTIVE section when a directive is passed (Phase 2b)", async () => {
+    const { buildPrompt } = await import("../buildPrompt");
+    const directive =
+      "This conversation opened with a tires fitment question — collect year, make, and model first.";
+    const result = await buildPrompt(
+      "session-1",
+      "what tires should I get?",
+      null,
+      undefined,
+      undefined,
+      directive
+    );
+    expect(result.system).toContain("## ROUTING DIRECTIVE");
+    expect(result.system).toContain(directive);
+  });
+
+  it("renders no ROUTING DIRECTIVE section without a directive (Phase 2b)", async () => {
+    const { buildPrompt } = await import("../buildPrompt");
+    const result = await buildPrompt("session-1", "what tires should I get?");
+    expect(result.system).not.toContain("## ROUTING DIRECTIVE");
+  });
+
   // -------------------------------------------------------------------------
   // Catalog index injection
   // -------------------------------------------------------------------------
