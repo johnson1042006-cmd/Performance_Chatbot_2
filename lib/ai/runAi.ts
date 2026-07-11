@@ -322,6 +322,7 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
   // proceeds exactly as the Haiku-only path (locked fallback, 7/9/2026 —
   // never an escalation trigger). Flag-gated; zero extra queries when off.
   let directive: string | null = null;
+  let includeProductContext = false;
   if (routingClassifierEnabled()) {
     try {
       if (shouldClassifyTurn(await hasPriorAiMessage(sessionId))) {
@@ -329,7 +330,18 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
           requestId,
           sessionId,
         });
-        if (classification) directive = routingDirective(classification);
+        if (classification) {
+          directive = routingDirective(classification);
+          // Full year/make/model fitment opener: pre-render the catalog
+          // search into the prompt even in tool mode. The model frequently
+          // escalates (complex_fitment) without searching first, and a
+          // directive can't make it show products it never retrieved —
+          // deterministic injection can (fitment preserve gate, 7/11/2026).
+          includeProductContext =
+            (classification.category === "tire_fitment" ||
+              classification.category === "parts_fitment") &&
+            classification.missingFields.length === 0;
+        }
       }
     } catch (err) {
       // Defensive: even an unexpected throw in the gating query must not
@@ -348,7 +360,8 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
     pageContext as never,
     latestMessageRaw,
     agentsOnline,
-    directive
+    directive,
+    { includeProductContext }
   );
 
   const rawAiResponse = await callClaude(system, conversationMessages, {
@@ -402,6 +415,22 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
   // reconciliation.
   const assessedText = rewriteStoreHours(rawAiResponse);
   const aiResponse = transformOutbound(rawAiResponse);
+
+  // TEMP DIAGNOSTIC (fitment preserve gate, 7/11/2026) — remove before merge.
+  // On pausing turns, record what the model actually wrote and which preserve
+  // signal gated the outcome, so gate failures are attributable.
+  if (useTools && willPauseThisTurn(assessedText)) {
+    log.info("ai.pause.reply_transform_debug", {
+      requestId,
+      sessionId,
+      toolEscalationReason: toolEscalationReason(),
+      replyIsPunt: replyIsPuntEquivalent(assessedText),
+      replyHasProductContent: replyContainsProductContent(assessedText),
+      toolDataOutcome: assessToolDataOutcome(toolCalls),
+      preserved: aiResponse !== HANDOFF_HUMAN_COMING && aiResponse !== HANDOFF_AFTER_HOURS,
+      rawExcerpt: assessedText.slice(0, 400),
+    });
+  }
 
   // Post-generation takeover check: a human may have claimed mid-stream.
   // If nothing was shown to the customer yet, abort without persisting so

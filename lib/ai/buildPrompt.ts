@@ -258,7 +258,18 @@ export async function buildPrompt(
   pageContext?: PageContext | null,
   latestMessageRaw?: string,
   agentsOnline?: boolean,
-  routingDirective?: string | null
+  routingDirective?: string | null,
+  opts?: {
+    /** Fitment preserve gate (7/11/2026): render the pre-retrieved RELEVANT
+     *  PRODUCTS section even in tool mode. On full year/make/model fitment
+     *  openers the model often calls escalate_to_human WITHOUT searching
+     *  first, leaving it nothing to show — the directive's "show products
+     *  with prices" half then can't be satisfied. The catalog search is
+     *  already computed here either way; injecting it makes the product
+     *  data deterministically available instead of hoping the model
+     *  searches. */
+    includeProductContext?: boolean;
+  }
 ): Promise<PromptResult> {
   // Caller passes the un-redacted current-turn message as `latestMessageRaw`
   // so the model can answer about PII in this turn (e.g. "your card 4111…")
@@ -571,6 +582,13 @@ ${AI_BEHAVIOR_RULES.map((r, i) => `${i + 1}. ${r.rule}`).join("\n\n")}
     // get_product_details / etc. on demand. Page-context-product, follow-up
     // product block, knowledge base, and taxonomy still appear above.
     system += TOOL_MODE_INSTRUCTIONS;
+    if (opts?.includeProductContext && displayProducts.length > 0) {
+      system += `\n## RELEVANT PRODUCTS FROM CATALOG (pre-retrieved for this turn)\n\n`;
+      system += `EXCEPTION to the tools note above: the catalog search for the customer's request has ALREADY been run for you — the results are below, exactly as search_products would return them. Use them directly (names, prices, links, stock); you do not need to call search_products again for this request.\n\n`;
+      for (const p of displayProducts) {
+        system += renderProductEntry(p) + `\n\n`;
+      }
+    }
   } else if (displayProducts.length > 0) {
     system += `\n## RELEVANT PRODUCTS FROM CATALOG\n\n`;
     for (const p of displayProducts) {

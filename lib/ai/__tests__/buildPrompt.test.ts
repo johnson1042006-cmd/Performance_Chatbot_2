@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { AI_BEHAVIOR_RULES } from "../rules";
 
 // ---------------------------------------------------------------------------
@@ -432,6 +432,82 @@ describe("buildPrompt", () => {
     const { buildPrompt } = await import("../buildPrompt");
     const result = await buildPrompt("session-1", "what tires should I get?");
     expect(result.system).not.toContain("## ROUTING DIRECTIVE");
+  });
+
+  describe("tool mode + includeProductContext (fitment preserve gate, 7/11/2026)", () => {
+    const tire = {
+      id: 9, name: "Michelin Road 6 Sport Touring Tires", sku: "MRT-6",
+      description: "", price: 214.99, sale_price: 0, retail_price: 0,
+      calculated_price: 214.99, inventory_level: 45,
+      inventory_tracking: "product", availability: "available",
+      is_visible: true, categories: [], brand_id: 2,
+      custom_url: { url: "/michelin-road-6/" }, variants: [], images: [],
+    };
+
+    beforeEach(() => {
+      process.env.USE_AI_TOOLS = "true";
+    });
+    afterEach(() => {
+      delete process.env.USE_AI_TOOLS;
+    });
+
+    it("injects the pre-retrieved products section when the flag is set", async () => {
+      const search = await import("@/lib/search/productSearch");
+      (search.searchProducts as any).mockResolvedValue({
+        products: [tire],
+        detectedColor: null,
+      });
+      const { buildPrompt } = await import("../buildPrompt");
+      const result = await buildPrompt(
+        "session-1",
+        "does the Michelin Road 6 fit a 2021 Kawasaki Ninja 650?",
+        null,
+        undefined,
+        undefined,
+        "directive text",
+        { includeProductContext: true }
+      );
+      expect(result.system).toContain("## TOOLS");
+      expect(result.system).toContain(
+        "## RELEVANT PRODUCTS FROM CATALOG (pre-retrieved for this turn)"
+      );
+      expect(result.system).toContain("ALREADY been run for you");
+    });
+
+    it("does NOT inject the section in tool mode without the flag (existing behavior)", async () => {
+      const search = await import("@/lib/search/productSearch");
+      (search.searchProducts as any).mockResolvedValue({
+        products: [tire],
+        detectedColor: null,
+      });
+      const { buildPrompt } = await import("../buildPrompt");
+      const result = await buildPrompt(
+        "session-1",
+        "does the Michelin Road 6 fit a 2021 Kawasaki Ninja 650?"
+      );
+      expect(result.system).toContain("## TOOLS");
+      expect(result.system).not.toContain("pre-retrieved for this turn");
+    });
+
+    it("omits the section when the search found nothing (no empty shell to hallucinate from)", async () => {
+      const search = await import("@/lib/search/productSearch");
+      (search.searchProducts as any).mockResolvedValue({
+        products: [],
+        detectedColor: null,
+      });
+      const { buildPrompt } = await import("../buildPrompt");
+      const result = await buildPrompt(
+        "session-1",
+        "does the Michelin Road 6 fit a 2021 Kawasaki Ninja 650?",
+        null,
+        undefined,
+        undefined,
+        "directive text",
+        { includeProductContext: true }
+      );
+      expect(result.system).toContain("## TOOLS");
+      expect(result.system).not.toContain("pre-retrieved for this turn");
+    });
   });
 
   // -------------------------------------------------------------------------
