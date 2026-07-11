@@ -42,3 +42,7 @@ test-results/
 # generated artifacts
 tmp/catalog-dump.json
 .env*
+
+# claude code — personal settings stay local
+.claude/settings.local.json
+.cursor/

@@ -7,6 +7,8 @@ const REASON_LABELS: Record<string, string> = {
   explicit_request: "Customer asked for a human",
   policy_exception: "Policy exception",
   unsupported: "Unsupported / escalated",
+  no_data: "Bot has no data — customer waiting",
+  undeliverable_offer: "Bot offered info it can't deliver",
 };
 
 // Dedupe window: if the same sessionId fires within this many ms,

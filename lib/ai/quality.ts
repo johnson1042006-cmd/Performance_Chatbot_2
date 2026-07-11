@@ -76,6 +76,18 @@ const FRUSTRATION_PATTERNS: { re: RegExp; reason: string }[] = [
   { re: /\bthird time\b/i, reason: "phrase: third time" },
 ];
 
+// Phase 2a (approved 7/2/2026): DIRECT frustration — the customer explicitly
+// saying the bot is failing them. Unlike the ambient markers above, ONE
+// direct hit scores -1 immediately (no 2-of-4 threshold): "this isn't
+// helping, I just need a real answer" must escalate on the first message.
+const DIRECT_FRUSTRATION_PATTERNS: { re: RegExp; reason: string }[] = [
+  { re: /\b(isn'?t|is not|not|ain'?t) helping\b/i, reason: "direct: isn't helping" },
+  { re: /\b(need|get|want|give me) (a|an) (real|actual|straight|proper|direct) answer\b/i, reason: "direct: need a real answer" },
+  { re: /\bnot what I asked\b/i, reason: "direct: not what I asked" },
+  { re: /\byou'?re not (listening|understanding|getting it|helping)\b/i, reason: "direct: you're not listening" },
+  { re: /\bgetting (us |me )?nowhere\b/i, reason: "direct: getting nowhere" },
+];
+
 const POSITIVE_PATTERNS: { re: RegExp; reason: string }[] = [
   { re: /\bthanks\b/i, reason: "phrase: thanks" },
   { re: /\bgreat\b/i, reason: "phrase: great" },
@@ -92,14 +104,24 @@ function messageHasPositive(text: string): string[] {
 
 /**
  * `recentCustomerMessages` should be in chronological order; we look at the
- * last 4. Score is -1 if 2 or more of the last 4 have a frustration marker;
- * otherwise +1 if any of them carry a positive marker; otherwise 0.
+ * last 4. Score is -1 if ANY of the last 4 carries a DIRECT frustration
+ * marker (single message suffices), or if 2 or more of the last 4 have an
+ * ambient frustration marker; otherwise +1 if any of them carry a positive
+ * marker; otherwise 0.
  */
 export function assessSentiment(recentCustomerMessages: string[]): {
   score: Sentiment;
   reasons: string[];
 } {
   const last4 = recentCustomerMessages.slice(-4).map((s) => s || "");
+
+  const directHits = last4.flatMap((m) =>
+    DIRECT_FRUSTRATION_PATTERNS.filter(({ re }) => re.test(m)).map((p) => p.reason)
+  );
+  if (directHits.length > 0) {
+    return { score: -1, reasons: Array.from(new Set(directHits)) };
+  }
+
   const frustrationHits = last4.map((m) => messageHasFrustration(m));
   const negativeCount = frustrationHits.filter((h) => h.length > 0).length;
 

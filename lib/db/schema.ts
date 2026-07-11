@@ -59,6 +59,8 @@ export const chatEventTypeEnum = pgEnum("chat_event_type", [
   "stale_closed",
   "tool_call",
   "auto_escalated",
+  "ai_paused",
+  "ai_pause_cleared",
   "internal_note",
   "ticket_created",
   "ticket_status_changed",
@@ -95,6 +97,12 @@ export const sessions = pgTable("sessions", {
   claimedByKind: claimKindEnum("claimed_by_kind"),
   // When this timestamp is in the past and claimedByUserId IS NULL, the AI auto-claims
   aiClaimDueAt: timestamp("ai_claim_due_at"),
+  // Phase 2a escalation mode split: when set (and younger than the pause
+  // timeout), the AI is paused on this session — a human owes the customer an
+  // answer, so inline AI turns are suppressed. Cleared by human claim/release,
+  // or lazily when the timeout elapses. Reason mirrors the escalation reason.
+  aiPausedAt: timestamp("ai_paused_at"),
+  aiPauseReason: varchar("ai_pause_reason", { length: 40 }),
   // Used to detect stale/abandoned customer sessions
   lastCustomerActivityAt: timestamp("last_customer_activity_at").defaultNow().notNull(),
   // Heartbeat from the embed widget while the tab is open

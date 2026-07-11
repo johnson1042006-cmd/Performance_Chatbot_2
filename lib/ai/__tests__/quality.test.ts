@@ -157,3 +157,39 @@ describe("assessSentiment", () => {
     expect(result.score).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 2a: DIRECT frustration tier — one explicit "you are failing me"
+// message scores -1 immediately, no 2-of-4 threshold. Keyed to Antonio's
+// 7/2/2026 live-test miss verbatim.
+// ---------------------------------------------------------------------------
+describe("assessSentiment — direct frustration (single message)", () => {
+  it("live case 3 verbatim: 'this isn't helping, I just need a real answer' scores -1 alone", () => {
+    const result = assessSentiment(["this isn't helping, I just need a real answer"]);
+    expect(result.score).toBe(-1);
+    expect(result.reasons.some((r) => r.startsWith("direct:"))).toBe(true);
+  });
+
+  const directPhrases = [
+    "you're not helping",
+    "this is not helping at all",
+    "that's not what I asked",
+    "you're not listening to me",
+    "we're getting nowhere",
+    "can I get an actual answer?",
+  ];
+  for (const phrase of directPhrases) {
+    it(`scores -1 on a single message: "${phrase}"`, () => {
+      expect(assessSentiment([phrase]).score).toBe(-1);
+    });
+  }
+
+  it("ambient markers still require 2 of the last 4 (single '!!' message stays 0)", () => {
+    expect(assessSentiment(["where did my order go!!"]).score).toBe(0);
+  });
+
+  it("normal questions stay at 0", () => {
+    expect(assessSentiment(["do you have 5w40 oil?"]).score).toBe(0);
+    expect(assessSentiment(["what helps with fogging on this visor?"]).score).toBe(0);
+  });
+});

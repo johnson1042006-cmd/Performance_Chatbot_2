@@ -106,4 +106,44 @@ export default async function globalSetup() {
     // Non-fatal: test will be slower on cold start but not broken.
     console.warn("[e2e/global-setup] warm-up request skipped:", String(err));
   }
+
+  // Warm the AI reply path with one throwaway turn: the first Claude turn
+  // after boot pays for the BigCommerce category-map build, catalog HTTP
+  // connections, and the Anthropic client — observed at 30-37 s cold, which
+  // blows the 25 s per-question reply wait in bot-quality/catalog specs when
+  // that first turn lands inside a real test. Costs one Haiku call per run.
+  try {
+    const sRes = await fetch(`${serverBase}/api/sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ customerIdentifier: `e2e-warmup-${Date.now()}` }),
+    });
+    const sData = (await sRes.json()) as {
+      session?: { id?: string };
+      sessionToken?: string;
+    };
+    if (sData.session?.id) {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 90_000);
+      await fetch(`${serverBase}/api/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(sData.sessionToken
+            ? { "x-session-token": sData.sessionToken }
+            : {}),
+        },
+        body: JSON.stringify({
+          sessionId: sData.session.id,
+          message: "warmup: do you carry helmets?",
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(t);
+      console.log("[e2e/global-setup] warmed AI reply path");
+    }
+  } catch (err) {
+    // Non-fatal: the first test just eats the cold-start latency.
+    console.warn("[e2e/global-setup] AI warm-up skipped:", String(err));
+  }
 }

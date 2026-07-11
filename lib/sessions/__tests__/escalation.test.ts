@@ -112,6 +112,22 @@ vi.mock("@/lib/presence", () => ({
   anyAgentsOnline: mockAgentsOnline,
 }));
 
+// Phase 2a: pause machinery is mocked so tests can assert WHEN runAiTurn
+// pauses without exercising the (separately unit-tested) DB writes.
+// persistHandoffMessage only fires on the NON-tools path since the 7/3
+// structural fix — on the tools path the pausing turn's reply is REPLACED
+// with the handoff copy instead.
+const mockPauseAi = vi.fn().mockResolvedValue(undefined);
+const mockPersistHandoff = vi.fn().mockResolvedValue(null);
+vi.mock("@/lib/sessions/aiPause", () => ({
+  pauseAi: mockPauseAi,
+  persistHandoffMessage: mockPersistHandoff,
+  HANDOFF_HUMAN_COMING:
+    "Let me get someone from our team on this — hang tight one moment, they'll pick up right here in this chat.",
+  HANDOFF_AFTER_HOURS:
+    "I've flagged this for the team, but nobody's available at the moment — if you share your email, they'll reach out directly rather than leaving you hanging.",
+}));
+
 vi.mock("@/lib/log", () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   serializeError: (err: unknown) =>
@@ -157,9 +173,10 @@ describe("runAiTurn auto-escalation", () => {
     it("does NOT update session status to closed", async () => {
       mockAgentsOnline.mockResolvedValue(false);
       mockAssessSentiment.mockReturnValue({ score: -1, reasons: ["phrase: this is ridiculous"] });
-      // First select → loadRecentCustomerMessages; second → hasAutoEscalated (empty)
-      mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
+      // Select order: loadRecentCustomerMessages (pre-call, 7/3 structural
+      // fix) → humanOwnsSession → hasAutoEscalated
       mockDbSelect.mockResolvedValueOnce([{ content: "this is ridiculous" }, { content: "useless" }]);
+      mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
       mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
 
       const { runAiTurn } = await import("@/lib/ai/runAi");
@@ -173,8 +190,8 @@ describe("runAiTurn auto-escalation", () => {
     it("fires request-contact Pusher event when no agents online", async () => {
       mockAgentsOnline.mockResolvedValue(false);
       mockAssessSentiment.mockReturnValue({ score: -1, reasons: ["phrase: this is ridiculous"] });
+      mockDbSelect.mockResolvedValueOnce([{ content: "this is ridiculous" }, { content: "useless" }]); // loadRecentCustomerMessages
       mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
-      mockDbSelect.mockResolvedValueOnce([{ content: "this is ridiculous" }, { content: "useless" }]);
       mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
 
       const { runAiTurn } = await import("@/lib/ai/runAi");
@@ -191,8 +208,8 @@ describe("runAiTurn auto-escalation", () => {
     it("fires session-update on dashboard when agents are online", async () => {
       mockAgentsOnline.mockResolvedValue(true);
       mockAssessSentiment.mockReturnValue({ score: -1, reasons: [] });
+      mockDbSelect.mockResolvedValueOnce([{ content: "speak to a manager" }, { content: "ridiculous" }]); // loadRecentCustomerMessages
       mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
-      mockDbSelect.mockResolvedValueOnce([{ content: "speak to a manager" }, { content: "ridiculous" }]);
       mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
 
       const { runAiTurn } = await import("@/lib/ai/runAi");
@@ -215,8 +232,8 @@ describe("runAiTurn auto-escalation", () => {
     it("returns autoEscalated metadata for SSE caller", async () => {
       mockAgentsOnline.mockResolvedValue(false);
       mockAssessSentiment.mockReturnValue({ score: -1, reasons: [] });
+      mockDbSelect.mockResolvedValueOnce([{ content: "this is ridiculous" }, { content: "where is my order" }]); // loadRecentCustomerMessages
       mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
-      mockDbSelect.mockResolvedValueOnce([{ content: "this is ridiculous" }, { content: "where is my order" }]);
       mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
 
       const { runAiTurn } = await import("@/lib/ai/runAi");
@@ -235,8 +252,8 @@ describe("runAiTurn auto-escalation", () => {
       mockAgentsOnline.mockResolvedValue(false);
       // Sentiment stays 0 — single message, normal score
       mockAssessSentiment.mockReturnValue({ score: 0, reasons: [] });
-      mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
       mockDbSelect.mockResolvedValueOnce([]); // loadRecentCustomerMessages: empty prior history
+      mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
       mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
 
       const { runAiTurn } = await import("@/lib/ai/runAi");
@@ -258,9 +275,9 @@ describe("runAiTurn auto-escalation", () => {
     it("fires request-contact for 'talk to a human'", async () => {
       mockAgentsOnline.mockResolvedValue(false);
       mockAssessSentiment.mockReturnValue({ score: 0, reasons: [] });
+      mockDbSelect.mockResolvedValueOnce([]); // loadRecentCustomerMessages
       mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
-      mockDbSelect.mockResolvedValueOnce([]);
-      mockDbSelect.mockResolvedValueOnce([]);
+      mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
 
       const { runAiTurn } = await import("@/lib/ai/runAi");
       const result = await runAiTurn({
@@ -274,9 +291,9 @@ describe("runAiTurn auto-escalation", () => {
     it("does NOT close the session for an explicit human request", async () => {
       mockAgentsOnline.mockResolvedValue(false);
       mockAssessSentiment.mockReturnValue({ score: 0, reasons: [] });
+      mockDbSelect.mockResolvedValueOnce([]); // loadRecentCustomerMessages
       mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
-      mockDbSelect.mockResolvedValueOnce([]);
-      mockDbSelect.mockResolvedValueOnce([]);
+      mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
 
       const { runAiTurn } = await import("@/lib/ai/runAi");
       await runAiTurn({
@@ -302,8 +319,8 @@ describe("runAiTurn auto-escalation", () => {
         mockAgentsOnline.mockResolvedValue(false);
         mockAssessSentiment.mockReturnValue({ score: 0, reasons: [] });
         mockAssessConfidence.mockReturnValue({ confidence: "high", reasons: [] });
-        mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
         mockDbSelect.mockResolvedValueOnce([]); // loadRecentCustomerMessages
+        mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
         mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
 
         const { runAiTurn } = await import("@/lib/ai/runAi");
@@ -321,12 +338,12 @@ describe("runAiTurn auto-escalation", () => {
       mockAgentsOnline.mockResolvedValue(false);
       mockAssessSentiment.mockReturnValue({ score: 0, reasons: [] });
       mockAssessConfidence.mockReturnValue({ confidence: "high", reasons: [] });
-      // No escalation trigger fires, so only humanOwnsSession +
-      // loadRecentCustomerMessages run (hasAutoEscalated is guarded behind
+      // No escalation trigger fires, so only loadRecentCustomerMessages +
+      // humanOwnsSession run (hasAutoEscalated is guarded behind
       // shouldEscalate) — queue exactly two values so we don't leave a
       // dangling mockResolvedValueOnce that would poison the next test.
+      mockDbSelect.mockResolvedValueOnce([{ content: "do you sell helmets" }]); // loadRecentCustomerMessages
       mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
-      mockDbSelect.mockResolvedValueOnce([{ content: "do you sell helmets" }]);
 
       const { runAiTurn } = await import("@/lib/ai/runAi");
       const result = await runAiTurn({
@@ -373,9 +390,9 @@ describe("runAiTurn auto-escalation", () => {
           return "I'm connecting you now.";
         }
       );
+      mockDbSelect.mockResolvedValueOnce([]); // loadRecentCustomerMessages
       mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
-      mockDbSelect.mockResolvedValueOnce([]);
-      mockDbSelect.mockResolvedValueOnce([]);
+      mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
 
       const { runAiTurn } = await import("@/lib/ai/runAi");
       const result = await runAiTurn({
@@ -419,9 +436,9 @@ describe("runAiTurn auto-escalation", () => {
           return "Connecting you.";
         }
       );
+      mockDbSelect.mockResolvedValueOnce([]); // loadRecentCustomerMessages
       mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
-      mockDbSelect.mockResolvedValueOnce([]);
-      mockDbSelect.mockResolvedValueOnce([]);
+      mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
 
       const { runAiTurn } = await import("@/lib/ai/runAi");
       await runAiTurn({
@@ -444,9 +461,8 @@ describe("runAiTurn auto-escalation", () => {
     it("does NOT insert auto_escalated event or fire request-contact on second turn", async () => {
       mockAgentsOnline.mockResolvedValue(false);
       mockAssessSentiment.mockReturnValue({ score: -1, reasons: [] });
-      // First select → loadRecentCustomerMessages; second → hasAutoEscalated returns existing row
+      mockDbSelect.mockResolvedValueOnce([{ content: "this is ridiculous" }, { content: "useless" }]); // loadRecentCustomerMessages
       mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
-      mockDbSelect.mockResolvedValueOnce([{ content: "this is ridiculous" }, { content: "useless" }]);
       mockDbSelect.mockResolvedValueOnce([{ id: "evt-existing" }]); // already escalated
 
       const { runAiTurn } = await import("@/lib/ai/runAi");
@@ -469,8 +485,8 @@ describe("runAiTurn auto-escalation", () => {
     it("returns autoEscalated: null when already escalated", async () => {
       mockAgentsOnline.mockResolvedValue(false);
       mockAssessSentiment.mockReturnValue({ score: -1, reasons: [] });
+      mockDbSelect.mockResolvedValueOnce([{ content: "still angry" }]); // loadRecentCustomerMessages
       mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
-      mockDbSelect.mockResolvedValueOnce([{ content: "still angry" }]);
       mockDbSelect.mockResolvedValueOnce([{ id: "evt-existing" }]);
 
       const { runAiTurn } = await import("@/lib/ai/runAi");
@@ -480,14 +496,246 @@ describe("runAiTurn auto-escalation", () => {
     });
   });
 
-  // ── 5. Happy-path (no escalation) sanity check ──────────────────────────
+  // ── 5. Phase 2a mode split: no_data / undeliverable_offer / pause ────────
+
+  describe("Phase 2a mode split", () => {
+    beforeEach(() => {
+      process.env.USE_AI_TOOLS = "true";
+    });
+    afterEach(() => {
+      delete process.env.USE_AI_TOOLS;
+    });
+
+    /** Simulate a turn whose data tools returned nothing and whose reply
+     *  hedges. Mirrors the real tools path: the full final answer is emitted
+     *  in ONE stream.onToken call after all tool rounds complete. */
+    function mockNoDataTurn(reply: string) {
+      mockCallClaude.mockImplementation(
+        async (
+          _s: string,
+          _m: unknown[],
+          opts: {
+            onToolCall?: (e: any) => Promise<void>;
+            stream?: { onToken: (t: string) => void };
+          }
+        ) => {
+          if (opts?.onToolCall) {
+            await opts.onToolCall({
+              name: "search_products",
+              input: { query: "5w40 oil" },
+              output: { count: 0, products: [] },
+              durationMs: 80,
+              isError: false,
+            });
+          }
+          opts?.stream?.onToken(reply);
+          return reply;
+        }
+      );
+      mockAssessConfidence.mockReturnValue({
+        confidence: "low",
+        reasons: ["phrase: I don't have"],
+      });
+      mockAssessSentiment.mockReturnValue({ score: 0, reasons: [] });
+    }
+
+    it("mode (a): low confidence + empty search + no prior offer => no_data, paused, reply replaced", async () => {
+      mockAgentsOnline.mockResolvedValue(true);
+      mockNoDataTurn("I don't have that in our system — you could check the chemical page.");
+      mockDbSelect.mockResolvedValueOnce([{ content: "do you have 5w40 oil?" }]); // loadRecentCustomerMessages
+      mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession
+      mockDbSelect.mockResolvedValueOnce([{ id: "msg-001", content: "irrelevant" }]); // loadPreviousAiMessage (only this turn's reply)
+      mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
+
+      const { runAiTurn } = await import("@/lib/ai/runAi");
+      const result = await runAiTurn({
+        sessionId: SESSION_ID,
+        latestMessage: "do you have 5w40 oil?",
+      });
+
+      expect(result.autoEscalated).toMatchObject({ reason: "no_data", paused: true });
+      expect(mockEscalateToHuman).toHaveBeenCalledWith(SESSION_ID, "no_data", "normal");
+      expect(mockPauseAi).toHaveBeenCalledWith(SESSION_ID, "no_data");
+      // Tools path: the visible reply IS the handoff copy (full replacement),
+      // so no separate handoff message is appended.
+      expect(mockPersistHandoff).not.toHaveBeenCalled();
+    });
+
+    it("structural fix (7/3): pausing turn streams + persists the handoff copy verbatim", async () => {
+      mockAgentsOnline.mockResolvedValue(true);
+      mockNoDataTurn("I don't have that in our system — you could check the chemical page.");
+      const onToken = vi.fn();
+      // tokensEmitted short-circuits humanOwnsSession, so only 3 selects run.
+      mockDbSelect.mockResolvedValueOnce([{ content: "do you have 5w40 oil?" }]); // loadRecentCustomerMessages
+      mockDbSelect.mockResolvedValueOnce([{ id: "msg-001", content: "irrelevant" }]); // loadPreviousAiMessage
+      mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
+
+      const { HANDOFF_HUMAN_COMING } = await import("@/lib/sessions/aiPause");
+      const { runAiTurn } = await import("@/lib/ai/runAi");
+      const result = await runAiTurn({
+        sessionId: SESSION_ID,
+        latestMessage: "do you have 5w40 oil?",
+        stream: { onToken, onToolUse: vi.fn() },
+      });
+
+      // The customer never sees the model's hedge/punt — the streamed copy is
+      // the deterministic handoff copy, byte-identical to the persisted one.
+      expect(onToken).toHaveBeenCalledTimes(1);
+      expect(onToken).toHaveBeenCalledWith(HANDOFF_HUMAN_COMING);
+      expect(result.autoEscalated).toMatchObject({ reason: "no_data", paused: true });
+      expect(mockPersistHandoff).not.toHaveBeenCalled();
+    });
+
+    it("mode (b): prior AI message offered the info => undeliverable_offer", async () => {
+      mockAgentsOnline.mockResolvedValue(true);
+      mockNoDataTurn("Hmm, I don't have the top speed on hand.");
+      mockDbSelect.mockResolvedValueOnce([{ content: "what's the top speed?" }]); // loadRecentCustomerMessages
+      mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession
+      mockDbSelect.mockResolvedValueOnce([
+        { id: "msg-001", content: "Hmm, I don't have the top speed on hand." },
+        { id: "msg-prev", content: "Would you like to know the specs on the Stage 2 M2?" },
+      ]); // loadPreviousAiMessage → prior offer
+      mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
+
+      const { runAiTurn } = await import("@/lib/ai/runAi");
+      const result = await runAiTurn({
+        sessionId: SESSION_ID,
+        latestMessage: "what's the top speed?",
+      });
+
+      expect(result.autoEscalated).toMatchObject({
+        reason: "undeliverable_offer",
+        paused: true,
+      });
+      expect(mockPauseAi).toHaveBeenCalledWith(SESSION_ID, "undeliverable_offer");
+    });
+
+    it("bare low confidence WITH retrieved data stays notify-only (no pause)", async () => {
+      mockAgentsOnline.mockResolvedValue(true);
+      mockCallClaude.mockImplementation(
+        async (_s: string, _m: unknown[], opts: { onToolCall?: (e: any) => Promise<void> }) => {
+          if (opts?.onToolCall) {
+            await opts.onToolCall({
+              name: "search_products",
+              input: { query: "helmets" },
+              output: { count: 3, products: [{}, {}, {}] },
+              durationMs: 90,
+              isError: false,
+            });
+          }
+          return "I'm not sure which of these fits best, but here are three options.";
+        }
+      );
+      mockAssessConfidence.mockReturnValue({
+        confidence: "low",
+        reasons: ["phrase: I'm not sure"],
+      });
+      mockAssessSentiment.mockReturnValue({ score: 0, reasons: [] });
+      mockDbSelect.mockResolvedValueOnce([{ content: "which helmet?" }]); // loadRecentCustomerMessages
+      mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession
+      mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false (no priorAi select — got_data)
+
+      const { runAiTurn } = await import("@/lib/ai/runAi");
+      const result = await runAiTurn({
+        sessionId: SESSION_ID,
+        latestMessage: "which helmet?",
+      });
+
+      expect(result.autoEscalated).toMatchObject({ reason: "unsupported", paused: false });
+      expect(mockPauseAi).not.toHaveBeenCalled();
+      expect(mockPersistHandoff).not.toHaveBeenCalled();
+    });
+
+    it("explicit human request pauses; no separate handoff appended (reply replaced instead)", async () => {
+      mockAgentsOnline.mockResolvedValue(true);
+      mockAssessConfidence.mockReturnValue({ confidence: "high", reasons: [] });
+      mockAssessSentiment.mockReturnValue({ score: 0, reasons: [] });
+      mockCallClaude.mockResolvedValue("Connecting you to a teammate now — they'll have full context.");
+      mockDbSelect.mockResolvedValueOnce([]); // loadRecentCustomerMessages
+      mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession
+      mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
+
+      const { runAiTurn } = await import("@/lib/ai/runAi");
+      const result = await runAiTurn({
+        sessionId: SESSION_ID,
+        latestMessage: "let me talk to a human please",
+      });
+
+      expect(result.autoEscalated).toMatchObject({ reason: "explicit_request", paused: true });
+      expect(mockPauseAi).toHaveBeenCalledWith(SESSION_ID, "explicit_request");
+      expect(mockPersistHandoff).not.toHaveBeenCalled();
+    });
+
+    it("live case 1 (7/2 re-test): polite phone punt + irrelevant search hits => no_data, paused", async () => {
+      mockAgentsOnline.mockResolvedValue(true);
+      mockAssessConfidence.mockReturnValue({ confidence: "high", reasons: [] });
+      mockAssessSentiment.mockReturnValue({ score: 0, reasons: [] });
+      mockCallClaude.mockImplementation(
+        async (_s: string, _m: unknown[], opts: { onToolCall?: (e: any) => Promise<void> }) => {
+          if (opts?.onToolCall) {
+            await opts.onToolCall({
+              name: "search_products",
+              input: { query: "5w40 oil" },
+              output: { count: 8, products: [{}] }, // irrelevant hits — got_data
+              durationMs: 50,
+              isError: false,
+            });
+          }
+          return (
+            "We carry a range of motorcycle oils from Motorex and Bel-Ray. " +
+            "I can also suggest you call the shop at 303-744-2011 or check our Parts section."
+          );
+        }
+      );
+      mockDbSelect.mockResolvedValueOnce([{ content: "Do you have 5w40 oil?" }]); // loadRecentCustomerMessages
+      mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession
+      mockDbSelect.mockResolvedValueOnce([{ id: "msg-001", content: "x" }]); // loadPreviousAiMessage (punt branch)
+      mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated: false
+
+      const { runAiTurn } = await import("@/lib/ai/runAi");
+      const result = await runAiTurn({
+        sessionId: SESSION_ID,
+        latestMessage: "Do you have 5w40 oil?",
+      });
+
+      // High confidence + got_data would have slipped through before — the
+      // punt classifier alone must carry this.
+      expect(result.autoEscalated).toMatchObject({ reason: "no_data", paused: true });
+      expect(mockPauseAi).toHaveBeenCalledWith(SESSION_ID, "no_data");
+      // Tools path: reply replaced with the handoff copy, no append.
+      expect(mockPersistHandoff).not.toHaveBeenCalled();
+    });
+
+    it("re-pauses on a repeat wall even though notify already fired (once-per-session)", async () => {
+      mockAgentsOnline.mockResolvedValue(true);
+      mockNoDataTurn("I still don't have that information available, sorry.");
+      mockDbSelect.mockResolvedValueOnce([{ content: "any update?" }]); // loadRecentCustomerMessages
+      mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession
+      mockDbSelect.mockResolvedValueOnce([{ id: "msg-001", content: "x" }]); // loadPreviousAiMessage
+      mockDbSelect.mockResolvedValueOnce([{ id: "evt-existing" }]); // hasAutoEscalated: TRUE
+
+      const { runAiTurn } = await import("@/lib/ai/runAi");
+      const result = await runAiTurn({
+        sessionId: SESSION_ID,
+        latestMessage: "any update?",
+      });
+
+      // Notify is deduped…
+      expect(result.autoEscalated).toBeNull();
+      expect(mockEscalateToHuman).not.toHaveBeenCalled();
+      // …but the pause still re-arms so suppression holds.
+      expect(mockPauseAi).toHaveBeenCalledWith(SESSION_ID, "no_data");
+    });
+  });
+
+  // ── 6. Happy-path (no escalation) sanity check ──────────────────────────
 
   it("does not fire request-contact for a normal message with no escalation trigger", async () => {
     mockAgentsOnline.mockResolvedValue(false);
     mockAssessSentiment.mockReturnValue({ score: 0, reasons: [] });
     mockAssessConfidence.mockReturnValue({ confidence: "high", reasons: [] });
+    mockDbSelect.mockResolvedValueOnce([{ content: "do you sell helmets?" }]); // loadRecentCustomerMessages
     mockDbSelect.mockResolvedValueOnce([]); // humanOwnsSession: not claimed
-    mockDbSelect.mockResolvedValueOnce([{ content: "do you sell helmets?" }]);
     mockDbSelect.mockResolvedValueOnce([]); // hasAutoEscalated not reached
 
     const { runAiTurn } = await import("@/lib/ai/runAi");

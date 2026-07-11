@@ -65,6 +65,11 @@ export default defineConfig({
             TAGGER_TEST_MODE: "1",
             TICKET_AUTO_CREATE_TEST_MODE: "1",
             E2E_EMAIL_MOCK: "1",
+            // `next start` runs with NODE_ENV=production, which disables the
+            // limiter's dev-only localhost bypass — without this flag every
+            // browser-driven request shares one localhost bucket and the
+            // session-heavy suites 429 after 5 sessions/min (lib/rateLimit.ts).
+            E2E_RATE_LIMIT_BYPASS: "1",
           },
         },
 });

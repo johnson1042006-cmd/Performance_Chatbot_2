@@ -37,17 +37,23 @@ export async function enforce(
   windowSeconds: number,
   opts?: EnforceOptions
 ): Promise<EnforceResult> {
-  // Dev-only bypass for traffic that originates from localhost. The Playwright
-  // dev server has no upstream proxy, so browser-driven requests come in as
-  // ::1 / 127.0.0.1 (Next.js dev synthesizes x-forwarded-for from the socket)
-  // or — when no header is set at all — as the literal "unknown". Either way
-  // they all collapse onto a single bucket and bot-quality.spec.ts /
+  // Bypass for traffic that originates from localhost. The Playwright server
+  // has no upstream proxy, so browser-driven requests come in as ::1 /
+  // 127.0.0.1 (Next.js synthesizes x-forwarded-for from the socket) or — when
+  // no header is set at all — as the literal "unknown". Either way they all
+  // collapse onto a single bucket and bot-quality.spec.ts /
   // hallucination.spec.ts (each creating dozens of sessions in a tight window)
-  // would tank on the 5/60s ceiling. Production traffic always carries a real
-  // client IP from Vercel's edge, so this branch never fires there. Synthetic
-  // IPs used by security.spec.ts (e.g. 203.0.113.42) still hit the real
-  // limiter, so the 21st-call 429 assertion still holds.
-  if (process.env.NODE_ENV !== "production" && isLocalKey(key)) {
+  // would tank on the 5/60s ceiling. The e2e suite runs `next start`
+  // (NODE_ENV=production), so playwright.config.ts sets E2E_RATE_LIMIT_BYPASS=1
+  // on its webServer to reach this branch. Both paths still require a local
+  // key: deployed traffic always carries a real client IP from Vercel's edge,
+  // so a stray env var can't open the limiter in production, and synthetic IPs
+  // used by security.spec.ts (e.g. 203.0.113.42) still hit the real limiter,
+  // so the 21st-call 429 assertion still holds.
+  const allowLocalBypass =
+    process.env.NODE_ENV !== "production" ||
+    process.env.E2E_RATE_LIMIT_BYPASS === "1";
+  if (allowLocalBypass && isLocalKey(key)) {
     return { ok: true };
   }
 

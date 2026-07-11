@@ -38,24 +38,28 @@ test.describe("Markdown rendering — no raw syntax in rendered DOM", () => {
     page,
     request,
   }) => {
-    const sessionId = `markdown-render-${Date.now()}`;
+    const customerIdentifier = `markdown-render-${Date.now()}`;
 
-    // First create a session so the embed page recognises it.
-    await request.post("/api/sessions", {
-      data: { customerIdentifier: sessionId, pageContext: null },
+    // First create a session so the embed page recognises it. seed-messages
+    // inserts into messages.session_id (uuid FK), so it needs the real
+    // session id from the create response — not the customer identifier.
+    const createRes = await request.post("/api/sessions", {
+      data: { customerIdentifier, pageContext: null },
     });
+    expect(createRes.ok(), "session create must succeed").toBe(true);
+    const { session } = (await createRes.json()) as { session: { id: string } };
 
     // Seed the crafted AI message directly — no Claude call needed.
     const seedRes = await request.post("/api/e2e/seed-messages", {
       data: {
-        sessionId,
+        sessionId: session.id,
         role: "ai",
         messages: [{ content: MARKDOWN_BODY }],
       },
     });
     expect(seedRes.ok(), "seed-messages endpoint must succeed").toBe(true);
 
-    await page.goto(`/embed?sessionId=${sessionId}`);
+    await page.goto(`/embed?sessionId=${customerIdentifier}`);
 
     const bubble = page.locator('[data-testid="message-ai"]').first();
     await bubble.waitFor({ state: "visible", timeout: 10_000 });

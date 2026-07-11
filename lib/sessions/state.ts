@@ -59,6 +59,10 @@ export async function claimByHuman({
       claimedAt: now,
       status: "active_human",
       aiClaimDueAt: null,
+      // Phase 2a: a human taking over is the unconditional pause-clear —
+      // the claimed_by_human chat event doubles as the audit trail.
+      aiPausedAt: null,
+      aiPauseReason: null,
     })
     .where(
       and(
@@ -148,6 +152,10 @@ export async function releaseToQueue({
       claimedAt: null,
       status: "waiting",
       aiClaimDueAt: aiClaimDueAt ?? null,
+      // Phase 2a: releasing back to the queue means the human decided the AI
+      // may resume — clear any pause so the next AI claim can answer.
+      aiPausedAt: null,
+      aiPauseReason: null,
       // Reset activity so the stale-sweep gives the freshly-queued session
       // a full window to be reclaimed (by AI or another agent) before it
       // could possibly be closed.

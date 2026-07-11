@@ -242,8 +242,8 @@ describe("toolHandlers", () => {
 //   - the returned text equals the final assistant text
 
 const mockAnthropicCreate = vi.fn();
-const mockAnthropicStream = vi.fn(() => {
-  throw new Error("stream() not exercised in this test");
+const mockAnthropicStream = vi.fn((...args: any[]): any => {
+  throw new Error(`stream() not exercised in this test (got ${args.length} args)`);
 });
 
 vi.mock("@anthropic-ai/sdk", () => {

@@ -11,6 +11,7 @@ import { AI_BEHAVIOR_RULES } from "../rules";
 const EXPECTED_RULE_IDS = [
   "no_unsolicited_hours_footer",
   "no_internal_section_labels",
+  "no_unretrieved_offers",
   "color_availability_redirect",
   "multiple_recommendations",
   "no_discontinued",

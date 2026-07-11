@@ -5,15 +5,17 @@
  *  - lib/sessions/state.ts processDueAiClaims (cron sweep)
  *
  * Responsibilities (in order):
- *   1. buildPrompt
- *   2. callClaude (with tools when USE_AI_TOOLS=true)
+ *   1. compute sentiment + request-classification signals (pre-call, so the
+ *      outbound transform can decide handoff replacement at stream time)
+ *   2. buildPrompt
+ *   3. callClaude (with tools when USE_AI_TOOLS=true)
  *      - tool calls are persisted as chat_events rows (type "tool_call")
  *      - streaming hook forwards tokens + tool_use events to the caller
- *   3. compute confidence + sentiment heuristics
- *   4. insert messages row with confidence + sentiment
- *   5. fire Pusher new-message (session) + session-update (dashboard)
- *   6. auto-escalate at most once per session when sentiment === -1 OR
- *      confidence === "low"; emits "request-contact" when no agents online
+ *   4. compute confidence; on a pausing turn the visible reply is REPLACED
+ *      with the deterministic handoff copy (structural fix, 7/3/2026)
+ *   5. insert messages row with confidence + sentiment
+ *   6. fire Pusher new-message (session) + session-update (dashboard)
+ *   7. auto-escalate (notify once per session; pause per Phase 2a policy)
  *
  * Returns the saved AI message and the metadata needed by callers.
  */
@@ -32,6 +34,21 @@ import {
 import { tools as toolCatalog, toolHandlers, escalateToHuman } from "./tools";
 import { rewriteStoreHours } from "./storeHours";
 import { assessConfidence, assessSentiment } from "./quality";
+import {
+  assessToolDataOutcome,
+  containsOffer,
+  decideEscalationReason,
+  detectPuntSentences,
+  escalationWillPause,
+  scrubNarration,
+  shouldPauseForEscalation,
+} from "./escalationMode";
+import {
+  pauseAi,
+  persistHandoffMessage,
+  HANDOFF_HUMAN_COMING,
+  HANDOFF_AFTER_HOURS,
+} from "@/lib/sessions/aiPause";
 import { anyAgentsOnline } from "@/lib/presence";
 import { log, serializeError } from "@/lib/log";
 
@@ -52,7 +69,12 @@ interface RunAiResult {
   message: typeof messages.$inferSelect;
   confidence: ReturnType<typeof assessConfidence>;
   sentiment: ReturnType<typeof assessSentiment>;
-  autoEscalated: { reason: string; agentsOnline: boolean } | null;
+  autoEscalated: {
+    reason: string;
+    agentsOnline: boolean;
+    /** Phase 2a: true when this escalation also paused the session's AI. */
+    paused: boolean;
+  } | null;
   toolCalls: ToolCallEvent[];
 }
 
@@ -93,6 +115,37 @@ async function loadRecentCustomerMessages(sessionId: string): Promise<string[]> 
   return rows.reverse().map((r) => r.content);
 }
 
+/**
+ * The AI message BEFORE this turn's reply — used by the mode (a)/(b) split
+ * to detect whether the bot previously OFFERED the information it now can't
+ * deliver. Only queried on the low-confidence/no-data branch.
+ */
+async function loadPreviousAiMessage(
+  sessionId: string,
+  excludeMessageId: string
+): Promise<string | null> {
+  const rows = await db
+    .select({ id: messages.id, content: messages.content })
+    .from(messages)
+    .where(and(eq(messages.sessionId, sessionId), eq(messages.role, "ai")))
+    .orderBy(desc(messages.sentAt))
+    .limit(2);
+  const prior = rows.find((r) => r.id !== excludeMessageId);
+  return prior?.content ?? null;
+}
+
+const EXPLICIT_HUMAN_REQUEST_PATTERNS: RegExp[] = [
+  /\b(real|actual|live) (human|person)\b/i,
+  /\btalk to (a |an )?(human|person|agent|rep|representative|teammate|team\s*member|staff|employee|associate|someone)\b/i,
+  /\bspeak (to|with) (a |an )?(human|person|agent|rep|representative|manager|teammate|team\s*member|staff|employee|associate|someone)\b/i,
+  /\bchat with (a |an )?(human|person|agent|rep|representative|teammate|team\s*member|staff|someone)\b/i,
+  /\bconnect (me )?(to|with) (a |an )?(human|person|agent|rep|representative|teammate|team\s*member|staff|someone)\b/i,
+  /\bget (me )?(a |an )?(human|person|agent|rep|teammate|team\s*member|manager)\b/i,
+  /\blive agent\b/i,
+  /\bhuman agent\b/i,
+  /\b(customer )?service rep(resentative)?\b/i,
+];
+
 async function hasAutoEscalated(sessionId: string): Promise<boolean> {
   const [row] = await db
     .select({ id: chatEvents.id })
@@ -117,6 +170,77 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
     stream,
   } = opts;
 
+  // Look up agent presence ONCE per turn so buildPrompt can tell the model
+  // whether it's safe to promise human follow-up. Same value is reused below
+  // for the auto-escalation branch — saves a duplicate query and guarantees
+  // the prompt and the escalation routing agree on what "online" means.
+  const agentsOnline = await anyAgentsOnline();
+  const useTools = aiToolsEnabled();
+
+  // Escalation signals hoisted BEFORE the model call: the outbound transform
+  // needs the full pause verdict synchronously at stream time (structural
+  // fix, 7/3/2026 — a pausing turn's visible reply is REPLACED with the
+  // handoff copy, not scrubbed sentence by sentence). The customer's latest
+  // message is persisted by the caller before runAiTurn, so computing
+  // sentiment here matches the old post-generation result.
+  const recentCustomer = await loadRecentCustomerMessages(sessionId);
+  const sentiment = assessSentiment(recentCustomer);
+  const isExplicitHumanRequest = EXPLICIT_HUMAN_REQUEST_PATTERNS.some((re) =>
+    re.test(latestMessage)
+  );
+  const isTechAirServiceRequest =
+    /tech.?air/i.test(latestMessage) &&
+    /\b(service|send.+in|recharge|recertif|deployed|expir|replac|fix|broken|warranty|repair|fired)\b/i.test(latestMessage);
+
+  // Populated by onToolCall as tool rounds complete. On the tools path the
+  // final answer arrives in ONE onToken call AFTER every tool round, so the
+  // transform below reads a fully-populated array at call time.
+  const toolCalls: ToolCallEvent[] = [];
+
+  // A reply is punt-equivalent when it contains a punt sentence, or (tools
+  // path) when scrubbing narration leaves nothing — a reply that is nothing
+  // but retrieval narration has nothing to answer with. Shared by the
+  // transform's pause verdict and the escalation block so they cannot drift.
+  const replyIsPuntEquivalent = (assessed: string): boolean =>
+    detectPuntSentences(assessed, latestMessage).length > 0 ||
+    (useTools && scrubNarration(assessed).cleaned.length === 0);
+
+  const willPauseThisTurn = (assessed: string): boolean =>
+    escalationWillPause({
+      sentimentScore: sentiment.score,
+      confidence: assessConfidence(assessed).confidence,
+      isExplicitHumanRequest,
+      isTechAirServiceRequest,
+      toolDataOutcome: assessToolDataOutcome(toolCalls),
+      replyIsPunt: replyIsPuntEquivalent(assessed),
+      aiEscalatedViaTool: toolCalls.some(
+        (tc) => tc.name === "escalate_to_human" && !tc.isError
+      ),
+    });
+
+  // Single deterministic transform applied to BOTH the streamed and the
+  // persisted copy so they stay byte-identical for ChatWidget reconciliation:
+  //  1. rewriteStoreHours — canonical hours (item 1.1).
+  //  2. Full handoff-copy replacement when this turn's escalation will pause
+  //     the AI (structural fix, 7/3/2026): no punt phrasing, phone number,
+  //     or self-serve redirect can reach the customer on a pausing turn,
+  //     regardless of how the model worded it. Replaces the old sentence-
+  //     level punt scrub, which required predicting every punt phrasing.
+  //  3. Otherwise, narration-only scrub (bounded vocabulary, still safe to
+  //     police per sentence).
+  //  Only safe on the tools path, where the full final answer arrives in
+  //  ONE onToken call (same limitation as the hours guard); the
+  //  token-by-token non-tools path passes through and the escalation block
+  //  appends the handoff message instead.
+  const transformOutbound = (text: string): string => {
+    const hoursFixed = rewriteStoreHours(text);
+    if (!useTools) return hoursFixed;
+    if (willPauseThisTurn(hoursFixed)) {
+      return agentsOnline ? HANDOFF_HUMAN_COMING : HANDOFF_AFTER_HOURS;
+    }
+    return scrubNarration(hoursFixed).cleaned;
+  };
+
   // Track whether any tokens actually reached the SSE client. Used by the
   // post-generation takeover check: if nothing streamed, we can abort
   // cleanly; if the customer already saw text, persist it so the transcript
@@ -126,24 +250,18 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
     ? {
         onToken: (text: string) => {
           tokensEmitted = true;
-          // Correct the STREAMED copy with the same guard applied to the
+          // Correct the STREAMED copy with the same transform applied to the
           // persisted copy below, so the live text byte-matches the saved
           // message. ChatWidget.mergeRealMessage reconciles the streaming bubble
           // against the Pusher message by exact content equality; if the two
-          // differed it would show the streamed (wrong) hours AND a duplicate
+          // differed it would show the streamed (wrong) text AND a duplicate
           // corrected bubble. The tools path emits the full final answer in one
-          // onToken call, so the whole hours statement is visible here.
-          stream.onToken(rewriteStoreHours(text));
+          // onToken call, so the whole reply is visible here.
+          stream.onToken(transformOutbound(text));
         },
         onToolUse: stream.onToolUse,
       }
     : undefined;
-
-  // Look up agent presence ONCE per turn so buildPrompt can tell the model
-  // whether it's safe to promise human follow-up. Same value is reused below
-  // for the auto-escalation branch — saves a duplicate query and guarantees
-  // the prompt and the escalation routing agree on what "online" means.
-  const agentsOnline = await anyAgentsOnline();
 
   const { system, conversationMessages } = await buildPrompt(
     sessionId,
@@ -152,13 +270,6 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
     latestMessageRaw,
     agentsOnline
   );
-
-  const useTools = aiToolsEnabled();
-  const toolCalls: ToolCallEvent[] = [];
-
-  const isTechAirServiceRequest =
-    /tech.?air/i.test(latestMessage) &&
-    /\b(service|send.+in|recharge|recertif|deployed|expir|replac|fix|broken|warranty|repair|fired)\b/i.test(latestMessage);
 
   const rawAiResponse = await callClaude(system, conversationMessages, {
     ...(useTools
@@ -202,13 +313,15 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
       : undefined,
   });
 
-  // Deterministic store-hours guard. The store_hours KB entry already holds the
-  // correct values, but the model intermittently drifts ("Sat 9–5", "Sat–Fri")
-  // when it appends hours as an unsolicited footer. Rewrite any hours statement
-  // to the canonical string before the reply is persisted, broadcast, or scored.
-  // The streamed copy was already corrected in guardedStream.onToken using the
-  // same function, so the two stay byte-identical for ChatWidget reconciliation.
-  const aiResponse = rewriteStoreHours(rawAiResponse);
+  // `assessedText` is the hours-corrected but UNREPLACED reply — confidence
+  // and punt detection run on what the model actually wrote (a replaced-away
+  // hedge or punt must still count as an escalation signal). `aiResponse` is
+  // the customer-facing copy: same transform the streamed copy already went
+  // through in guardedStream.onToken (possibly the handoff copy verbatim on
+  // a pausing turn), so the two stay byte-identical for ChatWidget
+  // reconciliation.
+  const assessedText = rewriteStoreHours(rawAiResponse);
+  const aiResponse = transformOutbound(rawAiResponse);
 
   // Post-generation takeover check: a human may have claimed mid-stream.
   // If nothing was shown to the customer yet, abort without persisting so
@@ -219,9 +332,7 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
     throw makeHumanTakeoverError();
   }
 
-  const confidence = assessConfidence(aiResponse);
-  const recentCustomer = await loadRecentCustomerMessages(sessionId);
-  const sentiment = assessSentiment(recentCustomer);
+  const confidence = assessConfidence(assessedText);
 
   const [savedMessage] = await db
     .insert(messages)
@@ -273,42 +384,61 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
   // escalation-requested, but we still insert the auto_escalated chat event
   // and fire the correct per-session Pusher event so the widget can render
   // EmailCaptureForm or the connecting banner.
-  const EXPLICIT_HUMAN_REQUEST_PATTERNS: RegExp[] = [
-    /\b(real|actual|live) (human|person)\b/i,
-    /\btalk to (a |an )?(human|person|agent|rep|representative|teammate|team\s*member|staff|employee|associate|someone)\b/i,
-    /\bspeak (to|with) (a |an )?(human|person|agent|rep|representative|manager|teammate|team\s*member|staff|employee|associate|someone)\b/i,
-    /\bchat with (a |an )?(human|person|agent|rep|representative|teammate|team\s*member|staff|someone)\b/i,
-    /\bconnect (me )?(to|with) (a |an )?(human|person|agent|rep|representative|teammate|team\s*member|staff|someone)\b/i,
-    /\bget (me )?(a |an )?(human|person|agent|rep|teammate|team\s*member|manager)\b/i,
-    /\blive agent\b/i,
-    /\bhuman agent\b/i,
-    /\b(customer )?service rep(resentative)?\b/i,
-  ];
   const aiEscalatedViaTool = toolCalls.some(
     (tc) => tc.name === "escalate_to_human" && !tc.isError
   );
-  const isExplicitHumanRequest = EXPLICIT_HUMAN_REQUEST_PATTERNS.some((re) =>
-    re.test(latestMessage)
-  );
 
   let autoEscalated: RunAiResult["autoEscalated"] = null;
+  // Phase 2a: a reply that punts the customer to the phone/contact form for
+  // something the bot should have answered is an escalation trigger in its
+  // own right — the punt phrasings ("suggest you call the shop…") often
+  // score high on the confidence heuristic and would otherwise slip through
+  // (observed live, 7/2/2026). Detection runs on the PRE-replacement text
+  // via the same predicate the outbound transform used, so this block and
+  // the visible reply always agree on whether the turn pauses.
+  const isPassivePunt = replyIsPuntEquivalent(assessedText);
   const shouldEscalate =
     sentiment.score === -1 ||
     confidence.confidence === "low" ||
     aiEscalatedViaTool ||
     isExplicitHumanRequest ||
-    isTechAirServiceRequest;
+    isTechAirServiceRequest ||
+    isPassivePunt;
   if (shouldEscalate) {
+    // Phase 2a mode split. The two new reasons refine what used to collapse
+    // into "unsupported": mode (a) no_data — the bot has nothing to answer
+    // with; mode (b) undeliverable_offer — same, but the bot's previous
+    // message offered the info it now can't deliver. The prior-message
+    // lookup only runs on that branch, so other triggers cost no extra query.
+    const toolDataOutcome = assessToolDataOutcome(toolCalls);
+    const baseTriggerHit =
+      sentiment.score === -1 || isExplicitHumanRequest || isTechAirServiceRequest;
+    let priorAiOffer = false;
+    if (
+      !baseTriggerHit &&
+      ((confidence.confidence === "low" && toolDataOutcome !== "got_data") ||
+        isPassivePunt)
+    ) {
+      priorAiOffer = containsOffer(
+        await loadPreviousAiMessage(sessionId, savedMessage.id)
+      );
+    }
+    const reason = decideEscalationReason({
+      sentimentScore: sentiment.score,
+      confidence: confidence.confidence,
+      isExplicitHumanRequest,
+      isTechAirServiceRequest,
+      toolDataOutcome,
+      priorAiOffer,
+      replyIsPunt: isPassivePunt,
+    });
+    // Pause policy (Antonio 7/2/2026): pause on no_data, undeliverable_offer,
+    // explicit_request, frustrated_customer, and tool-initiated escalations;
+    // bare low confidence with data in hand stays notify-only.
+    const shouldPause = shouldPauseForEscalation(reason, aiEscalatedViaTool);
+
     const already = await hasAutoEscalated(sessionId);
     if (!already) {
-      const reason: "frustrated_customer" | "unsupported" | "explicit_request" | "tech_air_service" =
-        sentiment.score === -1
-          ? "frustrated_customer"
-          : isExplicitHumanRequest
-          ? "explicit_request"
-          : isTechAirServiceRequest
-          ? "tech_air_service"
-          : "unsupported";
       // Skip escalateToHuman when the tool already called it this turn —
       // aiClaimDueAt was already cleared and escalation-requested already
       // fired on the dashboard channel.
@@ -335,6 +465,9 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
             sentimentReasons: sentiment.reasons,
             aiEscalatedViaTool,
             isExplicitHumanRequest,
+            isPassivePunt,
+            toolDataOutcome,
+            paused: shouldPause,
           },
         });
       } catch (err) {
@@ -370,7 +503,28 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
         });
       }
 
-      autoEscalated = { reason, agentsOnline };
+      autoEscalated = { reason, agentsOnline, paused: shouldPause };
+    }
+
+    // Pause even when the once-per-session notify already fired (e.g. the
+    // bot hit a second wall after a pause timed out) — suppression must hold
+    // every time, notification stays deduped. On the tools path the saved
+    // message already IS the handoff copy (transformOutbound replaced it),
+    // so no separate handoff message is appended; the non-tools path can't
+    // replace mid-stream, so it appends one instead.
+    if (shouldPause) {
+      try {
+        await pauseAi(sessionId, reason);
+        if (!useTools) {
+          await persistHandoffMessage(sessionId, agentsOnline);
+        }
+      } catch (err) {
+        log.warn("ai.run.pause_failed", {
+          requestId,
+          sessionId,
+          error: serializeError(err),
+        });
+      }
     }
   }
 
