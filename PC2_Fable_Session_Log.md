@@ -131,3 +131,16 @@ it touched and why.
 - Antonio's pending one-click: USE_ROUTING_CLASSIFIER=true in Vercel env to activate the 2b layer on deployments; also consider fixing `.env.local`'s empty NEXTAUTH_URL/VERCEL_URL lines (breaks bare `next build` locally — worked around per-run all session).
 - Phase 3 backlog flagged in the 00:55 entry above.
 **Waiting on:** Antonio — merge go-aheads (2a → 2b → 2c, in order) or further instructions next session.
+
+---
+
+## [2026-07-11 10:05 MDT] — Merge go-ahead executed LOCALLY; push to origin/main held pending explicit production-deploy confirmation
+**Status:** Antonio confirmed the 46/50 soft-fail sets match across the 2a and 2c slow runs (side-by-side raw failure lists verified identical: helmet-default 45s timeout, jacket clarify-first, "do you do service" pause copy, color must-phrase — bracket-tag leak was NOT in either final set) and gave the merge go-ahead.
+**Done:**
+- Local working-tree artifacts (playwright-report/index.html, test-results/.last-run.json) restored to HEAD; tree clean.
+- Merged into local main in order, --no-ff with descriptive messages: c705ee8 (2a: fix/escalation-modes-2a @ 27065dd) → a9f8024 (2b: feat/routing-classifier-2b @ ad918f5) → 4510da8 (2c: fix/road6-ranking-2c @ 2e14a11). All three clean, no conflicts.
+- Verified `git diff main fix/road6-ranking-2c` is EMPTY — merged main is byte-identical to the fully-gated 2c tree.
+- Unit suite on merged main: **632/632 PASS**.
+**Held:** `git push origin main` — pushing main on this Vercel-connected repo triggers a PRODUCTION deployment; the standing hard stop ("do not push to or deploy production") was never explicitly lifted, so the push is held for Antonio's explicit confirmation. Local main is ahead of origin/main by 34 commits; origin/main still at e956751; production untouched.
+**When approved:** push origin main → Vercel builds production automatically (no migrations run; 0007 already applied; 2b classifier inert until USE_ROUTING_CLASSIFIER=true is set in Vercel env — Antonio's one-click).
+**Waiting on:** Antonio — explicit OK to push main / deploy production.
