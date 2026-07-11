@@ -144,3 +144,12 @@ it touched and why.
 **Held:** `git push origin main` — pushing main on this Vercel-connected repo triggers a PRODUCTION deployment; the standing hard stop ("do not push to or deploy production") was never explicitly lifted, so the push is held for Antonio's explicit confirmation. Local main is ahead of origin/main by 34 commits; origin/main still at e956751; production untouched.
 **When approved:** push origin main → Vercel builds production automatically (no migrations run; 0007 already applied; 2b classifier inert until USE_ROUTING_CLASSIFIER=true is set in Vercel env — Antonio's one-click).
 **Waiting on:** Antonio — explicit OK to push main / deploy production.
+
+---
+
+## [2026-07-11 10:15 MDT] — PRODUCTION DEPLOYED: all three phases live
+**Status:** Antonio explicitly lifted the production hold ("push main and deploy production"). Pushed main `e956751..a0eae62` to origin; Vercel auto-built production deployment `dpl_73RzS2SPW3TNYwBb6BWGFrjSCRJL` from a0eae62 — **READY** in ~1 min, aliased to performance-chatbot-2.vercel.app. `/embed` serving 200.
+**What's live:** Phase 2a (escalation modes + AI pause + handoff copy + catalog fixes), Phase 2b (Sonnet routing classifier — INERT until USE_ROUTING_CLASSIFIER=true is set in Vercel env), Phase 2c (stale tire-generation demotion + air-filter retrieval + head-noun bonus). No migrations ran (0007 was already applied). No production-DB writes were made autonomously at any point; the smoke check was a GET only.
+**Rollback candidate if needed:** dpl_9YkxBHPooFq9Ryst24A8fa6nerZP (previous production, e956751).
+**Antonio's remaining one-clicks:** (1) set USE_ROUTING_CLASSIFIER=true in Vercel env to activate 2b; (2) optionally run a live interactive smoke on the production widget (Road 6 query + an escalation probe) — left to him since chat probes write session rows to the production DB; (3) fix `.env.local`'s empty NEXTAUTH_URL/VERCEL_URL lines.
+**Phase 3 backlog** unchanged (bracket-tag/STORE CATALOG leaks, color search, heavy-query latency, session get-or-create race).
