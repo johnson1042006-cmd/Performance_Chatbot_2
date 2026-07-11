@@ -639,15 +639,32 @@ export default function ChatWidget() {
             assembled += parsed.text;
             if (!bubbleAdded) {
               bubbleAdded = true;
-              setMessages((prev) => [
-                ...prev,
-                {
-                  id: streamingId,
-                  role: "ai",
-                  content: assembled,
-                  sentAt: new Date().toISOString(),
-                },
-              ]);
+              setMessages((prev) => {
+                // The persisted copy can land via Pusher BEFORE this token on
+                // paths that persist first and stream after (the paused
+                // holding-ack branch) — adding a streaming bubble then would
+                // duplicate the reply, and nothing reconciles it later
+                // because the streaming id never finalizes.
+                if (
+                  prev.some(
+                    (m) =>
+                      !isTempId(m.id) &&
+                      m.role === "ai" &&
+                      m.content === assembled
+                  )
+                ) {
+                  return prev;
+                }
+                return [
+                  ...prev,
+                  {
+                    id: streamingId,
+                    role: "ai",
+                    content: assembled,
+                    sentAt: new Date().toISOString(),
+                  },
+                ];
+              });
             } else {
               setMessages((prev) =>
                 prev.map((m) =>
