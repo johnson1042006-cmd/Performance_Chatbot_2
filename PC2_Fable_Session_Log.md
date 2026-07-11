@@ -119,3 +119,15 @@ it touched and why.
 **Final gate results:** unit **632/632** (9 new) · lint clean · fast Playwright **110 passed / 2 flaky / 0 failed** · e2e:slow **46/50** (same known soft-fail set) · live pass on the 2c Preview deployment: "what michelin sport touring tires do you have?" → **Road 6 leads at $214.99** ✓ · "do you carry the michelin road 5?" → Road 5 found ($351.99, 17 in stock) AND the newer Road 6 offered alongside ✓ · "air filter" → 8 actual filter elements with prices, organized by type, plus one narrowing question ✓.
 **Branch topology for merge review:** main ← fix/escalation-modes-2a (2a) ← feat/routing-classifier-2b (2b) ← fix/road6-ranking-2c (2c). Sequential merges in that order; each branch's gate covered everything beneath it. Migration 0007 already applied on production; no new migrations were added by 2b/2c. Enabling the 2b classifier on deployed envs = set USE_ROUTING_CLASSIFIER=true in Vercel.
 **Waiting on:** Antonio's explicit go-ahead — per the hard stop, merge/production is his call alone.
+
+---
+
+## [2026-07-11 01:00 MDT] — Session closed by Antonio; merges HELD
+**Status:** session ended at the hard stop with all three phases gate-green; Antonio held the merges. Nothing on main, nothing on production.
+**Resume state:**
+- Branch stack (all pushed): main (e956751) ← fix/escalation-modes-2a (27065dd) ← feat/routing-classifier-2b (ad918f5) ← fix/road6-ranking-2c (ceaea5a, working tree currently here). Merge in that order when approved; no new migrations in 2b/2c; 0007 already on production.
+- Preview deployments READY per branch; share links expire early 7/12 — mint fresh ones via the Vercel MCP (get_access_to_vercel_url) AFTER any new deployment finishes (tokens die when the branch alias switches builds).
+- Preview Neon connection string: NEVER stored; re-fetch via Neon MCP get_connection_string (projectId fragrant-term-38731407, branchId br-rough-leaf-akxuxfmx; host must start ep-dark-rice-). Run e2e as: `DATABASE_URL=<preview> NEXTAUTH_URL=http://localhost:3050 E2E_ALLOW_REMOTE_DB=1 E2E_RATE_LIMIT_BYPASS=1 npm run test:e2e:slow` (fast suite: `npx playwright test --grep-invert @slow` after a build).
+- Antonio's pending one-click: USE_ROUTING_CLASSIFIER=true in Vercel env to activate the 2b layer on deployments; also consider fixing `.env.local`'s empty NEXTAUTH_URL/VERCEL_URL lines (breaks bare `next build` locally — worked around per-run all session).
+- Phase 3 backlog flagged in the 00:55 entry above.
+**Waiting on:** Antonio — merge go-aheads (2a → 2b → 2c, in order) or further instructions next session.
