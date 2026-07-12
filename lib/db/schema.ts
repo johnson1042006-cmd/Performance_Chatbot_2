@@ -223,6 +223,11 @@ export const productColorways = pgTable("product_colorways", {
   brand: text("brand"),
   colorway: text("colorway").notNull(),
   colorwayLower: text("colorway_lower").notNull(),
+  // Generated column in the DB (see drizzle/0008_colorway_tsv.sql). 'simple'
+  // config = no stemming, so color tokens match verbatim ("olive" stays
+  // "olive"). Powers color-driven product retrieval (lib/search/colorwayIndex).
+  // Declared here so drizzle-kit doesn't attempt destructive drops.
+  colorwayTsv: tsvector("colorway_tsv"),
   baseSku: text("base_sku"),
   price: decimal("price", { precision: 10, scale: 2 }),
   url: text("url"),
