@@ -5,14 +5,17 @@ import {
   getProductBySKU,
   getProductByNameLike,
   getProductsByCategory,
+  getProductsByIds,
   findCategoryByName,
   type BCProduct,
 } from "@/lib/bigcommerce/client";
+import { findColorwayProductIds } from "./colorwayIndex";
 import {
   extractColorFromQuery,
   expandColorQuery,
   colorSynonymMap,
 } from "./colorSynonyms";
+import { variantsHaveColor, matchingColorLabels } from "./colorOptions";
 import {
   classifyProductSubcategoryWithSource,
   extractSubcategoryRequest,
@@ -143,36 +146,18 @@ const ALL_COLOR_WORDS: Set<string> = (() => {
   return s;
 })();
 
-const COLOR_OPTION_NAMES = ["color", "colour", "colorway", "finish", "style", "graphics", "color/graphics"];
-
-function isColorOption(displayName: string): boolean {
-  const lower = displayName.toLowerCase();
-  return COLOR_OPTION_NAMES.some((name) => lower.includes(name));
-}
-
-function colorWordMatch(label: string, colorTerm: string): boolean {
-  const re = new RegExp(`(^|[\\s/\\-_,.(])${colorTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[\\s/\\-_,.)])`, "i");
-  return re.test(label) || label === colorTerm;
-}
-
+/**
+ * Does the product offer a variant in one of the requested colors? Color-option
+ * identification and matching live in `./colorOptions` (value-based, shared with
+ * the colorway seed) so this no longer depends on merchant display-name wording.
+ */
 export function productHasColor(product: BCProduct, expandedColors: Set<string>): boolean {
   if (!product.variants || product.variants.length === 0) return false;
-
-  return product.variants.some((v) =>
-    (v.option_values || []).some((ov) => {
-      if (!ov.label || !ov.option_display_name) return false;
-      if (!isColorOption(ov.option_display_name)) return false;
-      const label = ov.label.toLowerCase();
-      for (const c of Array.from(expandedColors)) {
-        if (colorWordMatch(label, c)) return true;
-      }
-      return false;
-    })
-  );
+  return variantsHaveColor(product.variants, expandedColors);
 }
 
 /**
- * Returns the unique color-option variant labels whose value contains any of the
+ * Returns the unique color-option variant labels whose value matches any of the
  * expanded color terms. Used to surface matching colorways explicitly in the
  * prompt so the LLM can't claim a product "doesn't come in" the requested color.
  */
@@ -181,45 +166,7 @@ export function getMatchingColorLabels(
   expandedColors: Set<string>
 ): string[] {
   if (!product.variants || product.variants.length === 0) return [];
-  const seen = new Set<string>();
-  const matches: string[] = [];
-  for (const v of product.variants) {
-    for (const ov of v.option_values || []) {
-      if (!ov.label || !ov.option_display_name) continue;
-      if (!isColorOption(ov.option_display_name)) continue;
-      const label = ov.label;
-      const lower = label.toLowerCase();
-      let hit = false;
-      for (const c of Array.from(expandedColors)) {
-        if (colorWordMatch(lower, c)) {
-          hit = true;
-          break;
-        }
-      }
-      if (hit && !seen.has(lower)) {
-        seen.add(lower);
-        matches.push(label);
-      }
-    }
-  }
-  return matches;
-}
-
-function boostColorMatches(products: BCProduct[], color: string): BCProduct[] {
-  const expanded = new Set(expandColorQuery(color).map((c) => c.toLowerCase()));
-
-  const matching: BCProduct[] = [];
-  const rest: BCProduct[] = [];
-
-  for (const p of products) {
-    if (productHasColor(p, expanded)) {
-      matching.push(p);
-    } else {
-      rest.push(p);
-    }
-  }
-
-  return matching.length > 0 ? matching : rest;
+  return matchingColorLabels(product.variants, expandedColors);
 }
 
 const PRODUCT_TYPE_MAP: Record<string, string[]> = {
@@ -770,14 +717,9 @@ export async function searchProducts(
 
   if (kwTokens.length === 0) return { products: [], detectedColor };
 
-  const applyColor = (results: BCProduct[]) =>
-    detectedColor && results.length > 0
-      ? boostColorMatches(results, detectedColor)
-      : results;
-
   // Step 3: Build ONE candidate pool via four parallel strategies.
   // All four run concurrently; results are unioned and deduplicated (≤ 200).
-  const [subCatResults, brandResults, brandTypeNameMatches, bcKwResults, localMatches, nameMatches, driveChainResults] = await Promise.all([
+  const [subCatResults, brandResults, brandTypeNameMatches, bcKwResults, localMatches, nameMatches, driveChainResults, colorIndexResults] = await Promise.all([
 
     // 3a: canonical subcategory/type/broad-type category
     // Try ALL candidate category names in parallel and union results.
@@ -999,6 +941,27 @@ export async function searchProducts(
         return [];
       }
     })(),
+
+    // 3h: color-index retrieval (Jacob #1). When the customer named a color,
+    // find bc_product_ids that come in it from the product_colorways index and
+    // pull their LIVE data, so color-matching candidates enter the pool BEFORE
+    // truncation instead of relying on luck to survive scoring. Narrowed by the
+    // detected product type / brand so a common color doesn't flood the pool.
+    // The live color is re-confirmed at final selection.
+    (async (): Promise<BCProduct[]> => {
+      if (!detectedColor) return [];
+      try {
+        const typeTerms =
+          productType && PRODUCT_TYPE_MAP[productType]
+            ? PRODUCT_TYPE_MAP[productType]
+            : undefined;
+        const ids = await findColorwayProductIds(detectedColor, { typeTerms, brand });
+        if (ids.length === 0) return [];
+        return await getProductsByIds(ids);
+      } catch {
+        return [];
+      }
+    })(),
   ]);
 
   // Enrich local matches in parallel
@@ -1024,6 +987,9 @@ export async function searchProducts(
   // Direct name matches are highest-confidence for product-name queries —
   // add them before broader keyword results to guarantee pool inclusion.
   addProducts(nameMatches);
+  // Color-index candidates are the whole point of a color query — add them
+  // high so they're never dropped by the 200-cap on broad-category searches.
+  addProducts(colorIndexResults);
   addProducts(subCatResults);
   addProducts(driveChainResults);
   addProducts(brandResults);
@@ -1217,6 +1183,7 @@ export async function searchProducts(
       brand: brandResults.length,
       brandTypeNameMatches: brandTypeNameMatches.length,
       bcKw: bcKwResults.length,
+      colorIndex: colorIndexResults.length,
       enriched: enriched.length,
     },
     poolSizeBeforeTypeFilter,
@@ -1242,10 +1209,30 @@ export async function searchProducts(
   // Brand diversification: when the customer didn't name a brand, cap any
   // single brand to 3 of the top 12 slots. When a brand was specified
   // (e.g. "KYT racing helmets") the cap is lifted so all matching products show.
-  let results = brand
-    ? withinBudget.slice(0, 12)
-    : diversifyByBrand(withinBudget, 3, 12);
-  results = applyColor(results);
+  const takeTop = (list: BCProduct[]) =>
+    brand ? list.slice(0, 12) : diversifyByBrand(list, 3, 12);
+
+  let results: BCProduct[];
+  if (detectedColor) {
+    // Color is a RETRIEVAL key, not a post-slice filter. Confirm the requested
+    // color against LIVE variant data (source of truth — this drops stale
+    // product_colorways rows whose product no longer offers the color) across
+    // the FULL scored pool, before truncation. Return ONLY the confirmed
+    // matches — don't pad with off-color fillers (an explicit color request
+    // would rather see 4 real greens than 4 greens + 8 wrong colors). If the
+    // pool genuinely offers the color in nothing, fall back to the best type
+    // matches so the bot can still respond ("not available in green, here are
+    // alternatives") instead of returning an empty list.
+    const colorMatches = withinBudget.filter(
+      (p) =>
+        productHasColor(p, expandedColors) ||
+        p.name.toLowerCase().includes(detectedColor)
+    );
+    results =
+      colorMatches.length > 0 ? takeTop(colorMatches) : takeTop(withinBudget);
+  } else {
+    results = takeTop(withinBudget);
+  }
 
   if (results.length === 0) {
     console.warn("[searchProducts] zero_result", {

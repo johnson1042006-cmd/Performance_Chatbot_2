@@ -12,6 +12,13 @@ import {
   type BCProduct,
 } from "@/lib/bigcommerce/client";
 
+/** Raw catalog pull shared by the skeleton dump and the colorway rebuild. */
+export interface CatalogRaw {
+  products: BCProduct[];
+  brandById: Map<number, string>;
+  categoryById: Map<number, string>;
+}
+
 import {
   classifyBroadCategory,
   classifyBroadSubcategory,
@@ -91,16 +98,15 @@ async function fetchAllProducts(): Promise<BCProduct[]> {
 // ---------------------------------------------------------------------------
 
 /**
- * Fetch the entire BigCommerce catalog, resolve brand/category names, and
- * classify each product into a broad type and subcategory.
- *
- * Returns the same shape as tmp/catalog-dump.json so the result can be passed
- * directly to buildSkeletonFromDump() or serialised to disk by the CLI script.
+ * Fetch the entire catalog once: raw products (with variants) plus brand and
+ * category name lookups. Exposed so a single sweep can feed BOTH the skeleton
+ * dump and the product_colorways rebuild (see the catalog-refresh cron).
  */
-export async function dumpCatalog(): Promise<DumpResult> {
-  const [rawBrands, rawCategories] = await Promise.all([
+export async function fetchCatalogRaw(): Promise<CatalogRaw> {
+  const [rawBrands, rawCategories, products] = await Promise.all([
     getBrands(),
     getCategories(),
+    fetchAllProducts(),
   ]);
 
   const brandById = new Map<number, string>();
@@ -109,7 +115,21 @@ export async function dumpCatalog(): Promise<DumpResult> {
   const categoryById = new Map<number, string>();
   for (const c of rawCategories) categoryById.set(c.id, c.name);
 
-  const rawProducts = await fetchAllProducts();
+  return { products, brandById, categoryById };
+}
+
+/**
+ * Fetch the entire BigCommerce catalog, resolve brand/category names, and
+ * classify each product into a broad type and subcategory.
+ *
+ * Returns the same shape as tmp/catalog-dump.json so the result can be passed
+ * directly to buildSkeletonFromDump() or serialised to disk by the CLI script.
+ * Accepts a pre-fetched CatalogRaw so callers that also need the raw products
+ * (colorway rebuild) don't sweep the catalog twice.
+ */
+export async function dumpCatalog(prefetched?: CatalogRaw): Promise<DumpResult> {
+  const { products: rawProducts, brandById, categoryById } =
+    prefetched ?? (await fetchCatalogRaw());
 
   // -------------------------------------------------------------------------
   // Build flat product list

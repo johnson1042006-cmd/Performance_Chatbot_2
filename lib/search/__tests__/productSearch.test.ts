@@ -190,6 +190,18 @@ describe("extractColorFromQuery", () => {
     expect(extractColorFromQuery("brake pads")).toBeNull();
   });
 
+  it("does not match a color embedded inside another word", () => {
+    // Regression: "blue" must not fire on "bluetooth" (comm/communicator
+    // queries), nor a color on any word that merely contains it.
+    expect(extractColorFromQuery("what bluetooth communicators do you have")).toBeNull();
+    expect(extractColorFromQuery("bluetooth intercom")).toBeNull();
+    expect(extractColorFromQuery("greenland touring jacket")).toBeNull();
+  });
+
+  it("still matches a color glued to punctuation", () => {
+    expect(extractColorFromQuery("black/red helmet")).toBe("black");
+  });
+
   it("returns null for empty string", () => {
     expect(extractColorFromQuery("")).toBeNull();
   });
