@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
       });
     }
     const [latestCustomer] = await db
-      .select({ sentAt: messages.sentAt })
+      .select({ content: messages.content, sentAt: messages.sentAt })
       .from(messages)
       .where(and(eq(messages.sessionId, sessionId), eq(messages.role, "customer")))
       .orderBy(desc(messages.sentAt))
@@ -106,6 +106,16 @@ export async function POST(req: NextRequest) {
         reason: "stale_or_already_answered",
       });
     }
+
+    // `latestMessage` in the body is optional (the widget sends it; cron and
+    // legacy callers don't). Fall back to the stored customer message rather
+    // than "" — classifyRouting silently no-ops on empty input, which
+    // disabled the routing directive and the pre-rendered product context on
+    // every turn served without a body message (fitment sweep bug, 7/12/2026).
+    const effectiveLatestMessage =
+      typeof latestMessage === "string" && latestMessage.trim().length > 0
+        ? latestMessage
+        : latestCustomer.content ?? "";
 
     // Race-safe AI claim — a human clicking Claim at the last millisecond wins
     if (!session.claimedByKind) {
@@ -124,7 +134,7 @@ export async function POST(req: NextRequest) {
         try {
           const result = await runAiTurn({
             sessionId,
-            latestMessage: latestMessage || "",
+            latestMessage: effectiveLatestMessage,
             pageContext,
             requestId,
             stream: {
@@ -165,7 +175,7 @@ export async function POST(req: NextRequest) {
     try {
       const result = await runAiTurn({
         sessionId,
-        latestMessage: latestMessage || "",
+        latestMessage: effectiveLatestMessage,
         pageContext,
         requestId,
       });

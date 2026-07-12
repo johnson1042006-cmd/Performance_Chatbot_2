@@ -4,8 +4,14 @@
  * `sessions.status` is always kept in sync by syncStatus() — never set directly.
  */
 import { db } from "@/lib/db";
-import { sessions, users, chatEvents, knowledgeBase } from "@/lib/db/schema";
-import { eq, isNull, lt, and, or, ne } from "drizzle-orm";
+import {
+  sessions,
+  users,
+  chatEvents,
+  knowledgeBase,
+  messages,
+} from "@/lib/db/schema";
+import { eq, isNull, lt, and, or, ne, desc } from "drizzle-orm";
 import { getPusher } from "@/lib/pusher/server";
 import { sessionChannel, DASHBOARD_CHANNEL } from "@/lib/pusher/channels";
 import {
@@ -256,9 +262,27 @@ export async function processDueAiClaims(): Promise<void> {
     // We still need to fire the session-claimed events here because the
     // sweep is the actor that just transitioned the session into AI hands.
     try {
+      // The sweep has no request payload, so load the customer's latest
+      // message from the DB (same lookup shape as the inline path's
+      // freshness guard). Passing "" here disabled the whole Phase 2b
+      // routing layer — classifyRouting silently no-ops on empty input, so
+      // sweep-served fitment openers lost the routing directive AND the
+      // pre-rendered product context (live production bug, 7/12/2026).
+      const [latestCustomer] = await db
+        .select({ content: messages.content })
+        .from(messages)
+        .where(
+          and(
+            eq(messages.sessionId, session.id),
+            eq(messages.role, "customer")
+          )
+        )
+        .orderBy(desc(messages.sentAt))
+        .limit(1);
+
       await runAiTurn({
         sessionId: session.id,
-        latestMessage: "",
+        latestMessage: latestCustomer?.content ?? "",
         pageContext: session.pageContext as Record<string, unknown> | null,
       });
 
