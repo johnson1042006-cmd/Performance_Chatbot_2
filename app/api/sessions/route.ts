@@ -5,6 +5,7 @@ import { asc, desc, eq, ne, sql, inArray, and } from "drizzle-orm";
 import { maybeLazyTick } from "@/lib/sessions/lazyTick";
 import {
   generateSessionToken,
+  requestOwnsSession,
   sessionTokenCookieName,
   SESSION_TOKEN_MAX_AGE,
 } from "@/lib/sessions/verifySessionToken";
@@ -178,7 +179,19 @@ export async function POST(req: NextRequest) {
       .orderBy(desc(sessions.startedAt))
       .limit(1);
 
-    if (existing.length > 0 && existing[0].status !== "closed") {
+    // SECURITY: only ADOPT an existing open session (and hand back a working
+    // token + the session's PII) when the caller proves ownership by presenting
+    // its current token. The customerIdentifier alone is NOT sufficient proof —
+    // it travels in the iframe URL (Referer/log leakage) and integrators may
+    // wire it to an email or storefront customer id, so treating "knows the
+    // identifier" as "owns the session" would let anyone mint a token to a
+    // stranger's live transcript. A caller who cannot prove ownership falls
+    // through to create a brand-new session below.
+    if (
+      existing.length > 0 &&
+      existing[0].status !== "closed" &&
+      requestOwnsSession(req, existing[0].id, existing[0].tokenHash)
+    ) {
       // Touch the activity timestamp so the stale sweep cannot close this
       // session in the window between now and the widget's first heartbeat
       // (which fires ~1 s after dbSessionId is set). Without this, a

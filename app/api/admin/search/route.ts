@@ -36,8 +36,14 @@ interface SearchRow {
  * Postgres full-text search against `messages.content_tsv` (a generated
  * tsvector + GIN index added in Phase 5). Groups matches by session and
  * returns one row per session with a ts_headline-rendered snippet that
- * includes <mark>...</mark> markers — the rest of the snippet is HTML-
- * escaped by Postgres.
+ * wraps matched terms in literal <mark>...</mark> markers.
+ *
+ * SECURITY: ts_headline does NOT HTML-escape the surrounding document text —
+ * it returns the original message content verbatim aside from the configured
+ * StartSel/StopSel. `messages.content` is raw customer/AI text (redactPII does
+ * not strip tags), so this snippet may contain live markup. The client MUST
+ * render it as text (see renderSnippet in the search page) and never via
+ * dangerouslySetInnerHTML.
  */
 export async function GET(req: NextRequest) {
   const requestId = crypto.randomUUID();

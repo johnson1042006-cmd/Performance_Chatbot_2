@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import TopBar from "@/components/ui/TopBar";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
@@ -40,6 +41,43 @@ const STATUS_OPTIONS = [
   { value: "active_ai", label: "Active (AI)" },
   { value: "closed", label: "Closed" },
 ];
+
+/**
+ * Render a ts_headline snippet WITHOUT trusting it as HTML.
+ *
+ * `messages.content` is raw customer/AI text — it is NOT HTML-escaped anywhere
+ * upstream (redactPII does not strip tags), and `ts_headline` leaves the
+ * surrounding text verbatim, so the snippet can contain live markup. We split
+ * on the literal <mark>/</mark> sentinels we configure as StartSel/StopSel and
+ * emit the intervening text as React text nodes, which React escapes. Any HTML
+ * in a stored message therefore renders as inert text; the only thing an
+ * attacker can influence by typing literal "<mark>" is cosmetic highlighting.
+ */
+function renderSnippet(snippet: string): ReactNode {
+  const parts = snippet.split(/(<mark>|<\/mark>)/g);
+  const nodes: ReactNode[] = [];
+  let highlighting = false;
+  let key = 0;
+  for (const part of parts) {
+    if (part === "<mark>") {
+      highlighting = true;
+      continue;
+    }
+    if (part === "</mark>") {
+      highlighting = false;
+      continue;
+    }
+    if (part === "") continue;
+    nodes.push(
+      highlighting ? (
+        <mark key={key++}>{part}</mark>
+      ) : (
+        <span key={key++}>{part}</span>
+      )
+    );
+  }
+  return nodes;
+}
 
 function formatDate(iso: string | null): string {
   if (!iso) return "—";
@@ -305,11 +343,9 @@ export default function ManagerSearchPage() {
                       <td
                         className="px-6 py-3 text-text-primary"
                         data-testid="search-result-snippet"
-                        // ts_headline output is HTML-escaped by Postgres aside
-                        // from the literal <mark>/</mark> tags we configure as
-                        // StartSel/StopSel — safe to render raw here.
-                        dangerouslySetInnerHTML={{ __html: row.snippet }}
-                      />
+                      >
+                        {renderSnippet(row.snippet)}
+                      </td>
                       <td className="px-6 py-3">
                         <Badge variant={statusVariant(row.status)} dot>
                           {row.status.replace("_", " ")}
