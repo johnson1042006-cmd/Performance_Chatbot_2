@@ -79,6 +79,25 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Bound the message: it is persisted to messages.content AND fed verbatim
+    // into the Claude prompt. Without a cap a single request can carry a
+    // multi-megabyte string — an oversized DB row and an unmetered, oversized
+    // (paid) model call that the per-IP rate limit does not constrain. 4000
+    // chars is well beyond any genuine support question.
+    const MAX_MESSAGE_CHARS = 4000;
+    if (typeof message !== "string") {
+      return NextResponse.json(
+        { error: "message must be a string" },
+        { status: 400 }
+      );
+    }
+    if (message.length > MAX_MESSAGE_CHARS) {
+      return NextResponse.json(
+        { error: "message_too_long", maxChars: MAX_MESSAGE_CHARS },
+        { status: 413 }
+      );
+    }
+
     let agentUser: { id: string; role: string } | null = null;
     if (role === "agent") {
       const authSession = await getServerSession(authOptions);

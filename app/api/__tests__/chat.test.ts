@@ -175,6 +175,34 @@ describe("POST /api/chat", () => {
     expect(res.status).toBe(400);
   });
 
+  it("returns 413 when the message exceeds the length cap", async () => {
+    const { NextRequest } = await import("next/server");
+    const { POST } = await import("@/app/api/chat/route");
+
+    const req = new NextRequest("http://localhost/api/chat", {
+      method: "POST",
+      body: JSON.stringify({ sessionId: "abc", message: "x".repeat(4001) }),
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(413);
+    const data = await res.json();
+    expect(data.error).toBe("message_too_long");
+  });
+
+  it("returns 400 when message is not a string", async () => {
+    const { NextRequest } = await import("next/server");
+    const { POST } = await import("@/app/api/chat/route");
+
+    const req = new NextRequest("http://localhost/api/chat", {
+      method: "POST",
+      body: JSON.stringify({ sessionId: "abc", message: { nested: "obj" } }),
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+  });
+
   it("returns 404 when session does not exist", async () => {
     mockDbSelect.mockResolvedValueOnce([]);
 

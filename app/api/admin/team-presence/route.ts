@@ -1,18 +1,20 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requireStaff } from "@/lib/auth/requireStaff";
 import { getAllAgentsWithPresence } from "@/lib/presence";
 import { log, serializeError } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
 
+// Staff-only (agent OR manager), not manager-only: agents legitimately read the
+// presence list to reassign chats to online colleagues (ChatPanel reassign).
+// The prior `!session?.user` check accepted any authenticated session without
+// asserting a valid staff role — requireStaff() makes the guard explicit and
+// consistent with the rest of the surface.
 export async function GET() {
   const requestId = crypto.randomUUID();
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const guard = await requireStaff();
+    if (guard instanceof NextResponse) return guard;
     const agents = await getAllAgentsWithPresence();
     return NextResponse.json({ agents });
   } catch (error) {

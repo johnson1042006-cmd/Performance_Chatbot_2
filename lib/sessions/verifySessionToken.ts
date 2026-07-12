@@ -49,6 +49,27 @@ function constantTimeHashEqual(aHex: string, bHex: string): boolean {
 }
 
 /**
+ * Does this request prove ownership of an EXISTING session by presenting its
+ * current token (cookie / x-session-token / ?st=)? Given the session's stored
+ * hash so the caller (which already loaded the row) avoids a second query.
+ *
+ * Unlike verifySessionAccess this deliberately does NOT grant staff access and
+ * does NOT honor the legacy null-hash grace: it exists for the session-resume
+ * path, where adopting a stranger's open session must require the actual token,
+ * not merely knowing the (URL-borne, integrator-settable) customerIdentifier.
+ */
+export function requestOwnsSession(
+  req: NextRequest,
+  sessionId: string,
+  tokenHash: string | null
+): boolean {
+  if (!tokenHash) return false;
+  const provided = extractToken(req, sessionId);
+  if (!provided) return false;
+  return constantTimeHashEqual(hashSessionToken(provided), tokenHash);
+}
+
+/**
  * Authorize access to a customer session. Returns true when EITHER:
  *   (a) the request carries a valid NextAuth staff session, OR
  *   (b) the request carries the matching session token.

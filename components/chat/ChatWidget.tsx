@@ -50,6 +50,10 @@ interface PageContext {
 }
 
 import { resolveSessionState } from "./sessionState";
+import {
+  readStoredSessionToken,
+  writeStoredSessionToken,
+} from "./sessionTokenStorage";
 
 const EMBED_CUSTOMER_STORAGE_KEY = "pc-embed-customer-id";
 const SESSION_FETCH_MS = 25_000;
@@ -150,9 +154,16 @@ export default function ChatWidget() {
       if (data && typeof data.sessionToken === "string" && data.sessionToken) {
         sessionTokenRef.current = data.sessionToken;
         setSessionToken(data.sessionToken);
+        // Persist to localStorage (widget origin) so a later reload can prove
+        // ownership via the x-session-token header on the resume POST even when
+        // the SameSite=None pc_st_<id> cookie is not presented (Safari ITP /
+        // Firefox ETP-strict / Chrome third-party-cookie partitioning in the
+        // storefront iframe). The token rotates on every resume, so we always
+        // overwrite with the latest.
+        writeStoredSessionToken(customerIdentifier, data.sessionToken);
       }
     },
-    []
+    [customerIdentifier]
   );
 
   const tokenHeaders = useCallback(
@@ -183,11 +194,24 @@ export default function ChatWidget() {
     if (dbSessionIdRef.current) return { id: dbSessionIdRef.current };
     if (!sessionCreatePromiseRef.current) {
       sessionCreatePromiseRef.current = (async () => {
+        // On a fresh load the in-memory token ref is empty, so fall back to the
+        // token persisted in localStorage for this customer. Sending it as the
+        // x-session-token header lets the server verify ownership and resume the
+        // existing session when the pc_st_<id> cookie isn't presented. The
+        // cookie (checked first server-side) remains the primary path; this is
+        // the fallback for third-party-cookie-blocking browsers.
+        const resumeToken =
+          sessionTokenRef.current ?? readStoredSessionToken(customerIdentifier);
         const res = await fetchWithTimeout(
           "/api/sessions",
           {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: resumeToken
+              ? {
+                  "Content-Type": "application/json",
+                  "x-session-token": resumeToken,
+                }
+              : { "Content-Type": "application/json" },
             body: JSON.stringify({ customerIdentifier, pageContext }),
           },
           SESSION_FETCH_MS
