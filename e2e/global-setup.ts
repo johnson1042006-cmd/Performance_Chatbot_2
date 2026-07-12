@@ -31,6 +31,18 @@ const AGENT_EMAIL =
 const e2ePort = process.env.E2E_PORT || "3050";
 const serverBase = process.env.E2E_BASE_URL || `http://localhost:${e2ePort}`;
 
+// Vercel Deployment Protection bypass for the warm-up fetches below. When
+// running against a protected preview (E2E_BASE_URL on *.vercel.app), these
+// server-side requests must carry the bypass header or they hit Vercel's auth
+// wall instead of the app (csrf JSON parse fails, warm-ups no-op). Empty when
+// the secret is unset so local runs are unaffected.
+const bypassHeaders: Record<string, string> = process.env
+  .VERCEL_AUTOMATION_BYPASS_SECRET
+  ? {
+      "x-vercel-protection-bypass": process.env.VERCEL_AUTOMATION_BYPASS_SECRET,
+    }
+  : {};
+
 /**
  * Safety guard: the e2e suite writes into whatever DATABASE_URL points at
  * (it flips mustResetPassword, warms the login path, and individual specs
@@ -80,7 +92,9 @@ export default async function globalSetup() {
   // full login here (before any test runs), we ensure the pool is established
   // and the Neon compute is awake for the actual tests.
   try {
-    const csrfRes = await fetch(`${serverBase}/api/auth/csrf`);
+    const csrfRes = await fetch(`${serverBase}/api/auth/csrf`, {
+      headers: { ...bypassHeaders },
+    });
     const { csrfToken } = (await csrfRes.json()) as { csrfToken: string };
 
     const body = new URLSearchParams({
@@ -96,7 +110,10 @@ export default async function globalSetup() {
     });
     await fetch(`${serverBase}/api/auth/callback/credentials`, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        ...bypassHeaders,
+      },
       body: body.toString(),
       // Don't follow the redirect — we only care that the request was processed.
       redirect: "manual",
@@ -115,7 +132,7 @@ export default async function globalSetup() {
   try {
     const sRes = await fetch(`${serverBase}/api/sessions`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...bypassHeaders },
       body: JSON.stringify({ customerIdentifier: `e2e-warmup-${Date.now()}` }),
     });
     const sData = (await sRes.json()) as {
@@ -129,6 +146,7 @@ export default async function globalSetup() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...bypassHeaders,
           ...(sData.sessionToken
             ? { "x-session-token": sData.sessionToken }
             : {}),
