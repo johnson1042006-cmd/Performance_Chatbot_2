@@ -91,9 +91,21 @@ describe("classifyRouting", () => {
     expect(await classifyRouting("banana")).toBeNull();
   });
 
-  it("returns null for an empty message without calling the API", async () => {
-    expect(await classifyRouting("   ")).toBeNull();
+  it("returns null for an empty message without calling the API — and logs the skip", async () => {
+    const { log } = await import("@/lib/log");
+    vi.mocked(log.warn).mockClear();
+
+    expect(
+      await classifyRouting("   ", { requestId: "req-1", sessionId: "sess-1" })
+    ).toBeNull();
     expect(mockCreate).not.toHaveBeenCalled();
+    // Fitment sweep bug (7/12/2026): a blank opener means the caller lost
+    // the customer's message. The silent bail-out masqueraded as "classifier
+    // ran and chose not to route" — it must be visible in the logs.
+    expect(log.warn).toHaveBeenCalledWith("ai.classify.empty_input_skipped", {
+      requestId: "req-1",
+      sessionId: "sess-1",
+    });
   });
 
   it("filters unknown missing_fields values", async () => {

@@ -333,6 +333,41 @@ describe("POST /api/chat/ai-fallback", () => {
     expect(data.message.role).toBe("ai");
     expect(data.message.content).toBe("AI response text");
   });
+
+  it("falls back to the stored customer message when the body omits latestMessage", async () => {
+    // Fitment sweep bug (7/12/2026): callers without a body message used to
+    // hand runAiTurn latestMessage: "" — which silently disabled the routing
+    // classifier. The route must fall back to the stored customer message
+    // (already selected for the freshness guard).
+    const STORED_QUESTION =
+      "does the Michelin Road 6 fit a 2021 Kawasaki Ninja 650?";
+    mockDbSelect
+      .mockResolvedValueOnce([{ id: "sess-2", status: "waiting" }]) // session lookup
+      .mockResolvedValueOnce([{ role: "customer", sentAt: new Date() }]) // newest: not an AI reply
+      .mockResolvedValueOnce([{ content: STORED_QUESTION, sentAt: new Date() }]); // latest customer message
+    mockDbUpdate.mockResolvedValueOnce([
+      { id: "sess-2", status: "active_ai", claimedByKind: "ai" },
+    ]);
+    mockDbInsert.mockResolvedValueOnce([{
+      id: "ai-msg-2", sessionId: "sess-2", role: "ai",
+      content: "AI response text", sentAt: new Date(),
+    }]);
+
+    const { buildPrompt } = await import("@/lib/ai/buildPrompt");
+    const { NextRequest } = await import("next/server");
+    const { POST } = await import("@/app/api/chat/ai-fallback/route");
+
+    const req = new NextRequest("http://localhost/api/chat/ai-fallback", {
+      method: "POST",
+      body: JSON.stringify({ sessionId: "sess-2" }), // no latestMessage in body
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    // runAiTurn received the stored message, not "" — visible as
+    // buildPrompt's latestMessage argument.
+    expect(vi.mocked(buildPrompt).mock.calls[0][1]).toBe(STORED_QUESTION);
+  });
 });
 
 // ---------------------------------------------------------------------------

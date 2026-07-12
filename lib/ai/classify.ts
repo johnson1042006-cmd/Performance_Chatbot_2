@@ -134,7 +134,16 @@ export async function classifyRouting(
   opts?: { requestId?: string; sessionId?: string }
 ): Promise<RoutingClassification | null> {
   const trimmed = (latestMessage || "").trim();
-  if (!trimmed) return null;
+  if (!trimmed) {
+    // A blank opener means the CALLER lost the customer's message (the
+    // sweep path did exactly this, 7/12/2026) — make it visible instead of
+    // masquerading as "the classifier ran and chose not to route".
+    log.warn("ai.classify.empty_input_skipped", {
+      requestId: opts?.requestId,
+      sessionId: opts?.sessionId,
+    });
+    return null;
+  }
 
   let result: RoutingClassification | null = null;
   try {
