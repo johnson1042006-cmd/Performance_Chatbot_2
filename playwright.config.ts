@@ -28,6 +28,18 @@ export default defineConfig({
   timeout: 30000,
   use: {
     baseURL,
+    // Vercel Deployment Protection bypass: when running against a protected
+    // preview deployment (E2E_BASE_URL on *.vercel.app), every browser request
+    // must carry this header or Vercel returns its auth wall (401/HTML) instead
+    // of the app. Read from VERCEL_AUTOMATION_BYPASS_SECRET; empty object when
+    // unset so local runs are unaffected.
+    extraHTTPHeaders: process.env.VERCEL_AUTOMATION_BYPASS_SECRET
+      ? {
+          "x-vercel-protection-bypass":
+            process.env.VERCEL_AUTOMATION_BYPASS_SECRET,
+          "x-vercel-set-bypass-cookie": "true",
+        }
+      : {},
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     launchOptions: {

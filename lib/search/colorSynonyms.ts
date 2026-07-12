@@ -70,11 +70,19 @@ export function extractColorFromQuery(query: string): string | null {
     }
   }
 
+  // Fallback: color glued to punctuation ("black/red", "matte-blue"). Use word
+  // boundaries (non-alphanumeric or string edge) so a color is never matched
+  // INSIDE another word — e.g. "blue" must not fire on "bluetooth", nor "red"
+  // on "shredder". A plain substring check regressed comm/communicator queries.
+  const lq = query.toLowerCase();
+  const hasColorWord = (term: string): boolean => {
+    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, "i").test(lq);
+  };
   for (const [primary, synonyms] of Object.entries(colorSynonymMap)) {
-    const lq = query.toLowerCase();
-    if (lq.includes(primary)) return primary;
+    if (hasColorWord(primary)) return primary;
     for (const syn of synonyms) {
-      if (lq.includes(syn)) return primary;
+      if (hasColorWord(syn)) return primary;
     }
   }
 

@@ -205,6 +205,25 @@ export async function getProductsByCategory(categoryId: number, limit = 25): Pro
   return results || [];
 }
 
+/**
+ * Batch-fetch products by id (BC v3 `id:in`). Used to pull live data for the
+ * color-index candidates in one request. Capped at 250 (BC's page max); callers
+ * (findColorwayProductIds) cap well below that.
+ */
+export async function getProductsByIds(ids: number[]): Promise<BCProduct[]> {
+  if (ids.length === 0) return [];
+  const results = await bcFetch<BCProduct[]>({
+    path: "/catalog/products",
+    params: {
+      "id:in": ids.slice(0, 250).join(","),
+      is_visible: 1,
+      include: "variants,images",
+      limit: Math.min(250, ids.length),
+    },
+  });
+  return results || [];
+}
+
 export async function getProductsByBrand(brandId: number, limit = 25): Promise<BCProduct[]> {
   const results = await bcFetch<BCProduct[]>({
     path: "/catalog/products",

@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { knowledgeBase } from "@/lib/db/schema";
-import { dumpCatalog } from "@/lib/catalog/dump";
+import { dumpCatalog, fetchCatalogRaw } from "@/lib/catalog/dump";
 import {
   buildSkeletonFromDump,
   formatSkeletonForPrompt,
 } from "@/lib/catalog/skeleton";
+import { buildColorwayRows, rebuildProductColorways } from "@/lib/catalog/colorways";
 import { log, serializeError } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
@@ -43,8 +44,11 @@ export async function GET(req: NextRequest) {
   const t0 = Date.now();
 
   try {
-    const dump = await dumpCatalog();
+    // Single catalog sweep feeds BOTH the prompt skeleton and the colorway
+    // index — no extra BigCommerce pagination for colorways.
+    const raw = await fetchCatalogRaw();
 
+    const dump = await dumpCatalog(raw);
     const skeleton = buildSkeletonFromDump(dump);
     const content = formatSkeletonForPrompt(skeleton);
 
@@ -56,11 +60,23 @@ export async function GET(req: NextRequest) {
         set: { content, updatedAt: new Date() },
       });
 
+    // Rebuild product_colorways from the same in-memory products (powers
+    // color-driven retrieval, lib/search/colorwayIndex). Best-effort: a
+    // colorway failure must not fail the skeleton refresh.
+    let colorwayRows = 0;
+    try {
+      const rows = buildColorwayRows(raw.products, raw.brandById, raw.categoryById);
+      colorwayRows = await rebuildProductColorways(rows);
+    } catch (error) {
+      log.error("cron.colorway_rebuild_failed", { error: serializeError(error) });
+    }
+
     const durationMs = Date.now() - t0;
 
     log.info("cron.catalog_refresh_done", {
       totalProducts: dump.totalProducts,
       skeletonChars: content.length,
+      colorwayRows,
       durationMs,
     });
 
@@ -68,6 +84,7 @@ export async function GET(req: NextRequest) {
       success: true,
       totalProducts: dump.totalProducts,
       skeletonChars: content.length,
+      colorwayRows,
       durationMs,
     });
   } catch (error) {
