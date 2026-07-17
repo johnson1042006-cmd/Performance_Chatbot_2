@@ -242,3 +242,15 @@ it touched and why.
 **"do you do service" (46/50 slow-run failure) — confirmed unrelated:** after-hours handoff copy ⇒ agents offline ⇒ inline path (auto-claim with the real message); Preview chat_events for the turn show punt→`no_data` pause (`isPassivePunt: true`, `no_tools_ran`, no tool escalation) — the pre-existing Phase 2a variance class; KB topics `service_info`/`tire_wheel_services` exist and the same question passed 7/11. Track if it recurs.
 **Gate on `82e028a`:** full fast e2e **111 passed / 2 flaky-passed (known variance pair) / 0 failed**, exit 0 — markdown-render now green inside the full suite; fitment probe passed clean. RUNBOOK change is docs-only.
 **Waiting on:** Antonio's go-ahead to merge `fix/e2e-resume-token-spec` → main.
+
+---
+
+## [2026-07-17 09:40 MDT] — Pre-Monday wrap-up: cleanup, re-verified gate, spec-fix merged + deployed + prod-smoked
+**Status:** done — `main` = `a665008` on origin, production deploy READY, post-deploy smoke PASS. Repo is launch-ready for Monday.
+**Cleanup (Antonio-directed, verified each step):**
+- Prod test session `7a71302e…` needed no manual close — it had already closed itself: widget end-of-visit beacon + stale sweep (`stale_closed` chat event at 23:21:24Z on 7/12, matching `closed_at` exactly). Genuinely closed through the state machine.
+- `~/Desktop/pc2-main-check` worktree removed (`git worktree remove --force`; directory gone, only the primary checkout remains). Local `main` re-pointed at `origin/main` and tracking restored — `git rev-parse main origin/main` byte-equal.
+**Merge candidate re-verified before merge:** fresh full fast e2e on `fix/e2e-resume-token-spec` — **109 passed / 4 flaky-passed (known live-model variance family) / 0 failed**, exit 0 (second consecutive zero-hard-failure run on the branch; first was 111/0). Diff re-confirmed test/docs-only: `e2e/markdown-render.spec.ts`, `docs/RUNBOOK.md`, `PC2_Fable_Session_Log.md` — no runtime surface.
+**Merge + deploy (Antonio's explicit go):** `git merge --no-ff` → merge commit **`a665008`** pushed to `origin/main` (normal checkout merge this time — the worktree pin was gone). Vercel production deploy `dpl_59Wk9hK7…` built from `a665008`, READY in ~87s, aliased to performance-chatbot-2.vercel.app, no alias errors.
+**Post-deploy production smoke (same procedure as the incident verification): PASS.** Agent dashboard logged in (presence online) + fresh /embed session → Michelin/Ninja full-YMM opener answered after **34s** (>10s fallback timer ⇒ sweep path) with "Michelin Road 6 Sport Touring Tires — $214.99" + in-stock size options + service-team language + appended HANDOFF_HUMAN_COMING. The smoke's own session will self-close via beacon + stale sweep as before.
+**Standing watch items for launch week (unchanged):** web-push 403 warns (stale VAPID subscription — Pusher realtime unaffected); "do you do service" punt variance (recurred once 7/12, inline path); Vercel Firewall rate-limit rule still log-only; post-launch backlog per the 7/11 entry (LOW-sev security items, Bot Protection, query latency, session-race durable fix, pause-reason label).
