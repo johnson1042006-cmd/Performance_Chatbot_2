@@ -47,7 +47,27 @@ test.describe("Markdown rendering — no raw syntax in rendered DOM", () => {
       data: { customerIdentifier, pageContext: null },
     });
     expect(createRes.ok(), "session create must succeed").toBe(true);
-    const { session } = (await createRes.json()) as { session: { id: string } };
+    const { session, sessionToken } = (await createRes.json()) as {
+      session: { id: string };
+      sessionToken: string;
+    };
+
+    // Session-resume hardening (security fix #2, c9ee93e): POST /api/sessions
+    // only adopts an existing session when the caller PROVES ownership via the
+    // pc_st_<id> cookie or the x-session-token header — the identifier alone
+    // no longer resumes. The cookie from the API request context never reaches
+    // the browser, so hand the widget the raw token the create response
+    // returned, via its localStorage fallback (sessionTokenStorage.ts,
+    // key "pc-st:<customerIdentifier>"), BEFORE the page loads. Without this
+    // the widget silently starts a fresh session and the seeded AI message
+    // never renders.
+    expect(sessionToken, "create response must include sessionToken").toBeTruthy();
+    await page.addInitScript(
+      ([key, token]) => {
+        window.localStorage.setItem(key, token);
+      },
+      [`pc-st:${customerIdentifier}`, sessionToken]
+    );
 
     // Seed the crafted AI message directly — no Claude call needed.
     const seedRes = await request.post("/api/e2e/seed-messages", {

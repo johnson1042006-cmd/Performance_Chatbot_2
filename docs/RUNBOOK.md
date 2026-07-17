@@ -37,6 +37,24 @@ Source of truth for what’s required locally is `.env.example`.
 - **RESEND_API_KEY / RESEND_FROM_EMAIL**: Email sending via Resend (Phase 5.5). Rotate in Resend dashboard.
 - **SUPPORT_INBOX**: Offline “talk to a human” callback inbox (Phase 3/5.5).
 
+### Local env files — pull safely
+
+Local env lives in `.env.local` only. Do NOT keep a `.env.production.local` in
+the repo directory: `next build`/`next start` run with NODE_ENV=production and
+prefer that file over `.env.local`, so (a) Vercel "Sensitive" vars pull as
+empty strings — an empty `NEXTAUTH_URL=""` makes next-auth throw `Invalid URL`
+and fails every page at prerender — and (b) its `DATABASE_URL` points local
+servers (including the e2e webServer) at the PRODUCTION database. This exact
+footgun broke local builds on 2026-07-12.
+
+To refresh local env: `vercel env pull .env.local --environment=preview`, then
+fix up the values that pull empty (Sensitive-type vars — Pusher, VAPID,
+CRON_SECRET, `USE_ROUTING_CLASSIFIER`) from their dashboards, and make sure
+`NEXTAUTH_URL="http://localhost:3000"` and `DATABASE_URL` targets the Preview
+Neon branch (`ep-dark-rice…`), never production (`ep-withered-silence…`). If
+you need production values for an incident, pull to a file OUTSIDE the repo
+and delete it when done.
+
 ## Verification suite (`npm run verify`)
 
 `npm run verify` chains lint + unit tests + e2e (Playwright). The default e2e
