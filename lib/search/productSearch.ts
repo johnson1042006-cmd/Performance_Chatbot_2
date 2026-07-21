@@ -11,6 +11,10 @@ import {
 } from "@/lib/bigcommerce/client";
 import { findColorwayProductIds } from "./colorwayIndex";
 import {
+  computeCuratedStalePenalties,
+  yearRecencyBoost,
+} from "./freshness";
+import {
   extractColorFromQuery,
   expandColorQuery,
   colorSynonymMap,
@@ -1113,7 +1117,26 @@ export async function searchProducts(
       ? computeStaleGenerationPenalties(finalPool, kwTokens)
       : new Map<number, number>();
 
-  // Step 5: Single scoring pass
+  // Phase B (7/20/2026): same demotion for curated non-tire lineages (RF-1200
+  // vs RF-1400, GT-Air II vs GT-Air 3, Sand 4 vs Sand 5, …) — see
+  // lib/search/freshness.ts for the audit-derived family table and why
+  // non-tire families must be curated rather than pattern-guessed.
+  const curatedStalePenalties = computeCuratedStalePenalties(
+    finalPool,
+    normalizedQuery.toLowerCase()
+  );
+
+  // Step 5: Single scoring pass.
+  //
+  // Precedence ladder (B3, Antonio-approved 7/20/2026) as realized by the
+  // additive weights — match signals > freshness > raw text rank:
+  //   explicit subcategory +100 > brand +120 > type +60 > color +40
+  //   > in-stock +30 > keyword overlap ≤+40 > head-noun +15
+  //   > generation freshness −25 (below +30 stock: an in-stock older
+  //     generation still beats a sold-out newer one)
+  //   > model-year recency ≤+5 (below every real signal; no year = neutral)
+  //   > raw pool order. Budget −1000 is a hard gate, and the brand-diversity
+  //   cap + color-confirm branch apply after scoring (Step 6).
   function scoreProduct(p: BCProduct): number {
     let score = 0;
     const nameLower = p.name.toLowerCase();
@@ -1157,10 +1180,18 @@ export async function searchProducts(
       OFF_STREET_SUBCATEGORIES.has(sub)
     ) score -= 50;
 
-    // -25: stale tire generation with a newer sibling in the pool (Phase 2c).
-    // Smaller than the +30 stock bonus so an in-stock Road 5 still beats a
-    // sold-out Road 6.
-    score -= staleGenPenalties.get(p.id) ?? 0;
+    // -25: stale generation with a newer sibling in the pool — tire families
+    // (Phase 2c, generic) or a curated non-tire lineage (Phase B). Max, not
+    // sum: one demotion per product. Smaller than the +30 stock bonus so an
+    // in-stock older generation still beats a sold-out newer one.
+    score -= Math.max(
+      staleGenPenalties.get(p.id) ?? 0,
+      curatedStalePenalties.get(p.id) ?? 0
+    );
+
+    // +0..5: model-year recency (Phase B) — "2025 …" edges ahead of
+    // "2023 …" all else equal; titles with no year are neutral.
+    score += yearRecencyBoost(p.name);
 
     // -1000: hard budget penalty (effectively a filter via sort + slice)
     if (budget?.max && price > budget.max) score -= 1000;
