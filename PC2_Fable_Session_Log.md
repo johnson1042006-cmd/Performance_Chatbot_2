@@ -322,3 +322,21 @@ Antonio asked for real browser tests. Ran headless Chromium against the live wid
 Added `scripts/prod-browser-smoke.mjs` (env-tunable: SMOKE_BASE_URL / SMOKE_QUERY / SMOKE_SCREENSHOT; exit 2 + warn when a reply renders zero links) as the standing live-smoke step for future merge gates. Verified twice against prod. Each run costs one real customer turn (one Haiku call; session self-closes via stale sweep).
 
 **Phase A fully closed, production-verified. Holding for Phase B kickoff.**
+
+## [2026-07-20 20:00 MDT] — Phase B: FULL GATE GREEN on feat/phase-b-freshness-ranking @ 7f4f2ac — HARD STOP, merge-ready
+
+**Change:** B1 curated generation demotion beyond tires (`lib/search/freshness.ts` — audit-derived families: Shoei RF/X/GT-Air/Neotec, Scorpion EXO-R4x0/AT9x0, REV'IT Sand/Hydra/Quantum/Tracer Air/Acid/Hyperspeed, Sidi Crossfire; roman numerals, unnumbered-gen-1, fraction guards) + B2 model-year recency boost (0..5, fitment ranges excluded, no-year neutral) + B3 precedence ladder documented at the scoring pass. Tire mechanism untouched. Debug tool `scripts/check-freshness-ranking.ts` added.
+
+**Design ground truth:** the 7/20 catalog audit killed the generic approach for non-tires — Tech 3/5/7, Tech-Air 3/5, Leatt 2.5–9.5, Vision 3/5/8, Klim x.0 weights, Freecom 2X/4X are all CONCURRENT tiers a naive matcher would demote. Every curated family has both generations physically in the catalog.
+
+**Gate results:**
+- Unit: 745/745 green (28 new freshness tests — real pairs, tier non-pairs, escape hatches, year-range traps), lint + typecheck clean.
+- Direct pipeline verification (real searchProducts, live BC data): Neotec 3 ×5 lead "shoei modular helmet"; 2025 EXO-R430 leads with R420 at #6 (demoted, present); no demotion among Tech/SMX boots; chain lube unchanged; 520/530 chain sizes don't trip year boost. GT-Air II low rank on explicit query traced to inventory_level=0 (pre-existing stock bonus, correct precedence) — demotion suppression confirmed working.
+- Fast e2e (Preview Neon): **110 passed / 3 flaky-passed / 0 failed** (flakes = known catalog-coverage live-model family).
+- Slow bot-quality: **47/50, suite green (exit 0)**. Three failures all pre-existing variance families, none ranking-caused: one 45s no-reply timeout; one clarify-first jacket reply (no bold → mentionsProduct miss); one link/bold-format slip on "blue helmet under $500" (correct blue premium helmets + prices surfaced — this is precisely the Phase E compliance variance A5's reply_link_audit now measures in prod).
+- Real-browser widget smoke (Gate B spec a/b/c, `scripts/prod-browser-smoke.mjs` vs local build):
+  (a) "shoei modular helmet" → five Neotec 3 recommendations, 5 links ✅
+  (b) "do you have the gt-air ii in stock" → bot presents GT-Air 3 AND articulates lineage: "The GT-Air II is an older generation — we're carrying the newer GT-Air 3" ✅ (core Phase 3 goal behavior, achieved from ranking alone before any Phase D KB seeding)
+  (c) "what chain lube do you recommend" → Motorex, linked, 6.3s ✅
+
+**HARD STOP: holding for Antonio's merge go-ahead.** On go: merge --no-ff to main, push (auto-deploy), prod browser smoke + runtime-log check, then Phase D next per accepted sequencing (C/E stay gated on A5 data).
