@@ -348,3 +348,20 @@ Merge commit `5ec7366` pushed (Antonio's explicit go); Vercel auto-deploy Ready 
 **Follow-up candidates surfaced by prod logs (for a future curated-table pass, not urgent):** Schuberth C4 Pro ↔ C5 (both live in the pool — attached-token lineage the table doesn't cover yet) and Shoei J-Cruise 1 ↔ 2. Add with the same both-gens-in-catalog evidence rule.
 
 **Phase B closed. Next: Phase D (KB lineage enrichment — tires, flagship helmets, Tech-Air, top jackets per accepted scope). C/E remain gated on accumulating A5 production data.**
+
+## [2026-07-21 15:40 MDT] — Lineage additions: FULL GATE GREEN on feat/lineage-schuberth-jcruise — HARD STOP, merge-ready
+
+**Antonio's plan executed (independent item, not Phase D):** Schuberth C-series added to CURATED_GENERATION_FAMILIES; Shoei J-Cruise deliberately NOT added; accessory-ranking item stays PARKED per the plan (trigger now concretely greppable: ai.ranking_snapshot leadName matching shield/pinlock/visor/warmer/liner/pads on a primary-gear productType, organic traffic only).
+
+**Evidence run (BC live, run day):** C3 (shields ×2), C4 (C4/C4 Pro shield, pinlock, C4 Pro Helmet), C5 (×4 helmets) all visible → family qualifies. J-Cruise: ONLY the J-Cruise 2 exists (checked "J-Cruise"/"J Cruise"/"JCruise"/"Cruise") → entry would be inert, excluded per the mandatory both-generations rule; documented in-code with a revisit note.
+
+**Change @ commit on branch:** `schuberth-c` family (`/\bc([3-5])\b/` + brandHint; "Pro" = refresh, not generation) + max-generation combo parsing in extractCuratedGenerations (a "C4/C5 Face Shield" parses gen 5, never demoted for fitting the older model — benefits all families' combo accessory names).
+
+**Gate results:**
+- Unit: 752/752 (7 new tests: C-series pairs, escape hatches incl. "c4 helmet", SC2/E-series/TC-5 non-matches, combo max-gen, J-Cruise exclusion), lint + typecheck clean.
+- Direct pipeline (live BC): "schuberth modular helmet" → C5 ×3 lead, C4 Pro #6 (demoted, present), C3 shields lower, SC2/E2 untouched. "schuberth c4 pro" → NO demotion (C4/C4 Pro shield #1; C4 Pro Helmet #9 explained entirely by its inventory_level=0 vs in-stock siblings — pre-existing stock precedence).
+- Fast e2e: **109 passed / 4 flaky-passed / 0 failed** (known families).
+- Slow bot-quality: **46/50, suite green** — same four variance families as the last two runs (timeout, clarify-first, escalate-instead-of-show, link-format slip); none involve Schuberth or any curated family.
+- Browser smoke (local build): "looking for a schuberth modular helmet" → four C5 recommendations, 4 links, C5 called "flagship" ✅; "do you have the schuberth c4 pro" → honest zero-stock answer + C5/E2 alternatives with links ✅ (raw-ranking escape hatch separately proven above).
+
+**HARD STOP: holding for merge go-ahead.**
