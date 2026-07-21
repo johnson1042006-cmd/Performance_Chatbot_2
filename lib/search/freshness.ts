@@ -86,6 +86,17 @@ export const CURATED_GENERATION_FAMILIES: GenerationFamily[] = [
   // Sidi Crossfire MX boots: Crossfire (1) → 2 → 3. NOT unnumberedIsGen1 —
   // "Crossfire 1/4 Turn Screws" is a fraction, and the tail guard skips it.
   { key: "sidi-crossfire", brandHint: "sidi", re: /\bcrossfire\s+([1-9])(?![0-9/])/ },
+  // Schuberth C-series modulars: C3 → C4/C4 Pro → C5 (confirmed live
+  // 7/20/2026: C3 shields, C4 Pro helmet + shields, four C5 helmets). "Pro"
+  // is a refresh token, not a generation — C4 and C4 Pro are both gen 4.
+  // \b keeps this off Shoei TC-x colorway codes and the SC1/SC2 intercoms
+  // (no boundary inside "tc"/"sc"); brandHint keeps it off everything
+  // non-Schuberth including their own E/S series.
+  { key: "schuberth-c", brandHint: "schuberth", re: /\bc([3-5])\b/ },
+  // NOT ADDED — Shoei J-Cruise: only the J-Cruise 2 is catalog-live as of
+  // 7/20/2026 (gen-1 base model gone), so the entry would be inert per the
+  // both-generations-in-catalog evidence rule. Revisit if a J-Cruise 3
+  // lands or the original returns.
 ];
 
 const ROMAN: Record<string, number> = { ii: 2, iii: 3, iv: 4 };
@@ -98,7 +109,10 @@ function parseGenerationToken(token: string): number {
 /**
  * Which curated family (if any) a product name belongs to, and its parsed
  * generation. A name can belong to multiple families (combo accessory names
- * like "RF-1200/X-14/RFSR Shields") — all matches are returned.
+ * like "RF-1200/X-14/RFSR Shields") — all families are returned. Within ONE
+ * family, a name carrying several generation tokens ("C4/C5 Shield" fits
+ * both) parses as the MAX generation so a multi-gen accessory is never
+ * demoted for also fitting the older model.
  */
 export function extractCuratedGenerations(
   name: string
@@ -107,13 +121,20 @@ export function extractCuratedGenerations(
   const out: Array<{ key: string; generation: number }> = [];
   for (const fam of CURATED_GENERATION_FAMILIES) {
     if (fam.brandHint && !lower.includes(fam.brandHint)) continue;
-    const m = lower.match(fam.re);
-    if (!m) continue;
-    if (m[1]) {
-      out.push({ key: fam.key, generation: parseGenerationToken(m[1]) });
-    } else if (fam.unnumberedIsGen1) {
-      out.push({ key: fam.key, generation: 1 });
+    const global = new RegExp(fam.re.source, "g");
+    let best: number | null = null;
+    let m: RegExpExecArray | null;
+    while ((m = global.exec(lower)) !== null) {
+      const gen = m[1]
+        ? parseGenerationToken(m[1])
+        : fam.unnumberedIsGen1
+          ? 1
+          : null;
+      if (gen !== null && (best === null || gen > best)) best = gen;
+      // Zero-width safety for optional-number patterns
+      if (m.index === global.lastIndex) global.lastIndex++;
     }
+    if (best !== null) out.push({ key: fam.key, generation: best });
   }
   return out;
 }
