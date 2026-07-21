@@ -18,6 +18,8 @@ import {
   type SupportedProductType,
 } from "@/lib/search/productSearch";
 import { expandColorQuery } from "@/lib/search/colorSynonyms";
+import { log } from "@/lib/log";
+import { brandTierOf, type BrandTier } from "./brandTiers";
 import { AI_BEHAVIOR_RULES } from "./rules";
 import { PRODUCT_TAXONOMY } from "./taxonomy";
 import type { Message } from "@/lib/db/schema";
@@ -191,9 +193,32 @@ interface PageContext {
   searchQuery?: string | null;
 }
 
+/**
+ * Phase A5 (7/20/2026): per-turn ranking measurement, surfaced to runAi so
+ * the reply-side link audit can correlate against what was shown. Telemetry
+ * only — nothing here feeds back into ranking or the prompt.
+ */
+export interface RankingMeta {
+  productType: string | null;
+  detectedColor: string | null;
+  budgetMax: number | null;
+  budgetMin: number | null;
+  featureCount: number;
+  /** product IDs in raw search-rank order (post-searchProducts, pre-re-rank) */
+  preSortIds: number[];
+  /** product IDs in final displayProducts order */
+  postSortIds: number[];
+  leadBrandTier: BrandTier | null;
+  /** among displayProducts, how many match the requested color */
+  colorMatchCount: number;
+  otherColorsOnlyCount: number;
+  displayNames: string[];
+}
+
 interface PromptResult {
   system: string;
   conversationMessages: { role: "user" | "assistant"; content: string }[];
+  rankingMeta?: RankingMeta;
 }
 
 /**
@@ -403,6 +428,59 @@ export async function buildPrompt(
   const subcategoryRequest = subcategoryProductType
     ? extractSubcategoryRequest(effectiveLatest, subcategoryProductType)
     : null;
+
+  // ---- Phase A5 ranking telemetry (measurement only, no behavior change) ----
+  // Captures what ranking actually did this turn: detected signals, pre- vs
+  // post-sort ID order, whether a premium/budget brand leads, and the color
+  // branch. Grep `event="ai.ranking_snapshot"` in Vercel logs. Wrapped so a
+  // telemetry bug can never take down a customer turn.
+  let rankingMeta: RankingMeta | undefined;
+  try {
+    // Same predicate as renderProductEntry's [COLOR MATCH] tag below, so the
+    // logged counts mirror exactly what the model was shown.
+    const colorMatchCount = expandedColorSet
+      ? displayProducts.filter((p) => productHasColor(p, expandedColorSet))
+          .length
+      : 0;
+    rankingMeta = {
+      productType: latestType ?? null,
+      detectedColor,
+      budgetMax: budget?.max ?? null,
+      budgetMin: budget?.min ?? null,
+      featureCount: detectedFeatures.length,
+      preSortIds: productResults.slice(0, 20).map((p) => p.id),
+      postSortIds: displayProducts.map((p) => p.id),
+      leadBrandTier:
+        displayProducts.length > 0 ? brandTierOf(displayProducts[0].name) : null,
+      colorMatchCount,
+      otherColorsOnlyCount: expandedColorSet
+        ? displayProducts.length - colorMatchCount
+        : 0,
+      displayNames: displayProducts.map((p) => p.name),
+    };
+    log.info("ai.ranking_snapshot", {
+      sessionId,
+      productType: rankingMeta.productType,
+      detectedColor: rankingMeta.detectedColor,
+      budgetMax: rankingMeta.budgetMax,
+      budgetMin: rankingMeta.budgetMin,
+      featureCount: rankingMeta.featureCount,
+      preSortIds: rankingMeta.preSortIds,
+      postSortIds: rankingMeta.postSortIds,
+      reordered:
+        rankingMeta.postSortIds.join(",") !==
+        rankingMeta.preSortIds
+          .slice(0, rankingMeta.postSortIds.length)
+          .join(","),
+      leadBrandTier: rankingMeta.leadBrandTier,
+      leadName: displayProducts[0]?.name?.slice(0, 60) ?? null,
+      colorMatchCount: rankingMeta.colorMatchCount,
+      otherColorsOnlyCount: rankingMeta.otherColorsOnlyCount,
+      toolMode: aiToolsEnabled(),
+    });
+  } catch (err) {
+    console.error("Non-fatal ranking telemetry error in buildPrompt:", err);
+  }
 
   let system = `You are an agent at Performance Cycle — Colorado's largest independent motorcycle gear, parts, and accessories retailer in Centennial, CO. Do not give yourself a personal name. Do not sign your messages with a name. Never say you are an AI unless directly asked, in which case answer honestly.
 
@@ -659,5 +737,5 @@ ${AI_BEHAVIOR_RULES.map((r, i) => `${i + 1}. ${r.rule}`).join("\n\n")}
     }
   }
 
-  return { system, conversationMessages };
+  return { system, conversationMessages, rankingMeta };
 }
