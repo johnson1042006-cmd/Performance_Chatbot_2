@@ -254,3 +254,57 @@ it touched and why.
 **Merge + deploy (Antonio's explicit go):** `git merge --no-ff` → merge commit **`a665008`** pushed to `origin/main` (normal checkout merge this time — the worktree pin was gone). Vercel production deploy `dpl_59Wk9hK7…` built from `a665008`, READY in ~87s, aliased to performance-chatbot-2.vercel.app, no alias errors.
 **Post-deploy production smoke (same procedure as the incident verification): PASS.** Agent dashboard logged in (presence online) + fresh /embed session → Michelin/Ninja full-YMM opener answered after **34s** (>10s fallback timer ⇒ sweep path) with "Michelin Road 6 Sport Touring Tires — $214.99" + in-stock size options + service-team language + appended HANDOFF_HUMAN_COMING. The smoke's own session will self-close via beacon + stale sweep as before.
 **Standing watch items for launch week (unchanged):** web-push 403 warns (stale VAPID subscription — Pusher realtime unaffected); "do you do service" punt variance (recurred once 7/12, inline path); Vercel Firewall rate-limit rule still log-only; post-launch backlog per the 7/11 entry (LOW-sev security items, Bot Protection, query latency, session-race durable fix, pause-reason label).
+
+## [2026-07-20 18:23 MDT] — Phase 3 / Phase A audit (A1–A4): read-only verification COMPLETE — no code changes, holding for decisions
+
+**A1 — Confirmed ranking pipeline (corrects the snapshot hypothesis).** The stale-generation penalty does NOT live in `buildPrompt.ts` — it is inside `searchProducts()` itself (`lib/search/productSearch.ts:1111-1114`), applied as a `-25` term in the single `scoreProduct()` pass, gated on `productType === "tire"`. Confirmed end-to-end order:
+
+```
+searchProducts(query)                       [lib/search/productSearch.ts]
+  1. SKU exact-match short-circuit
+  2. Signal extraction: productType, brand, subcategory, budget, color, keywords
+  3. Candidate pool: 8 parallel strategies, unioned + deduped (≤200)
+  4. ProductType compatibility filter (only applies if ≥5 survivors)
+  5. scoreProduct() single pass:
+       +120 brand · +100 explicit subcategory · +60 type term · +40 color
+       +30 in-stock · +10/kw (max 40) · +15 head-noun · −50 off-street bias
+       −25 stale tire generation (tires only, newer sibling in pool,
+            suppressed if query names the generation digit)
+       −1000 over stated budget max
+  6. Sort desc → hard budget filter → brand diversify (cap 3/brand, top 12;
+     cap lifted when brand named) → color-confirm branch
+                                            [lib/ai/buildPrompt.ts:340-395]
+  7. primarySearch + latestSearch union; discussedProduct unshifted to front
+  8. featureSorted (MIPS/waterproof re-rank, stable)
+  9. sortByBudget
+ 10. capByBrand(…, 10) → displayProducts → RELEVANT PRODUCTS block
+```
+
+Key implication for Phase B: the generation-penalty anchor is in `productSearch.ts` scoring, not `buildPrompt` — B1 generalization extends `computeStaleGenerationPenalties()` (`productSearch.ts:643`, pure, unit-testable) and its call-site gate. Comment at :606-611 documents WHY it's tire-gated: single-digit suffixes elsewhere are concurrent tiers (Alpinestars Tech 3/7/10), exactly the false-positive class B1 must design around. Penalty (25) deliberately < in-stock bonus (30).
+
+**A2 — CONFIRMED: premium-first is prompt-only.** No premium/tier weighting anywhere in the scoring path. The only brand list in code is `KNOWN_BRANDS_LOWER` (`productSearch.ts:503`) — used solely by `extractBrand()` for query parsing, tier-unaware. Premium ordering exists only as the `brand_preference` rule (`lib/ai/rules.ts:141-142`) plus the budget rule's cross-reference (`rules.ts:162`). Phase C's premise holds; whether it's *needed* still depends on A5 drift measurement.
+
+**A3 — CONFIRMED: USE_AI_TOOLS=true in Production.** Direct env read blocked (classifier denied `vercel env pull` — full secret dump), so confirmed from ground truth instead: production `chat_events` has 257 `type='tool_call'` rows, latest **today (7/20)** — `search_products` 171, `escalate_to_human` 41, `get_product_details` 38, `get_product_by_variant_sku` 3, `lookup_helmet_sizing` 3, `lookup_order` 1. Tools are live and firing daily ⇒ ranking changes must be verified on BOTH injection paths (pre-retrieved RELEVANT PRODUCTS block and tool-returned results); both share `searchProducts`, so a scoring-level change covers both — but gate smokes should exercise both. `USE_ROUTING_CLASSIFIER` also present (Production, added 7/11).
+
+**A4 — KB inventory: 21 rows, ZERO lineage facts.** Live prod `knowledge_base` topics: arai_vas_system, bicycles_disclaimer, bopis, bot_persona, bot_settings, ebike_info, financing, gift_cards, helmet_sizing_guide, jacket_sizing, motobucks, payment_methods, return_policy, service_info, shipping_geography, shipping_policy, store_catalog, store_catalog_index (refreshed 7/20), store_hours, tire_wheel_services, what_we_sell. No FAQ rows (`is_faq=true` count: 0). No model-lineage / "current generation" knowledge exists for ANY family — the tire freshness win was purely ranking-side. Phase D is greenfield.
+
+**Gate A status:** A1–A4 were read-only — zero diffs, nothing to test. A5 (measurement logging) NOT started: it is the phase's only code change and Antonio's decision list (#1: merge A5 early vs. keep on-branch) precedes any code. Holding at the decision gate.
+
+## [2026-07-20 19:05 MDT] — Phase A5: ranking + link telemetry implemented, GATE GREEN — merging early per Antonio's go
+
+**Antonio's decisions (this session):** A5 merge early ✅; B3 precedence proposal accepted; C and E gated on A5 data; D scope (tires/flagship helmets/Tech-Air/top jackets) accepted. Working phase-by-phase; hard stop before Phase B.
+
+**Change (branch `feat/a5-ranking-telemetry`) — telemetry only, zero behavior change:**
+- `lib/ai/brandTiers.ts` (new, pure): premium/budget tier lookup mirroring the `brand_preference` rule lists; unit test enforces sync with rules.ts prose. Becomes Phase C's single source of truth if tiering is promoted to a ranking signal.
+- `lib/ai/replyAudit.ts` (new, pure): reply link/bold scanner — link count, bold count, unlinked-bold count, and per-shown-product mentioned/linked status via a key-phrase matcher (leading year stripped, generic tail nouns trimmed so "the Shoei RF-1400" matches "Shoei RF-1400 Helmet").
+- `lib/ai/buildPrompt.ts`: emits `event="ai.ranking_snapshot"` per turn (productType, color, budgetMax/Min, featureCount, preSortIds vs postSortIds + `reordered` flag, leadBrandTier, leadName, colorMatchCount/otherColorsOnlyCount — same predicate as the rendered [COLOR MATCH] tags — and toolMode). Returns optional `rankingMeta` in PromptResult. Try/caught so telemetry can never kill a turn.
+- `lib/ai/runAi.ts`: emits `event="ai.reply_link_audit"` on turns with shown products, measured against `assessedText` (the UNREPLACED model reply, so pausing-turn handoff replacement doesn't mask dropped links). Carries colorBranch + leadBrandTier for correlation. Try/caught.
+
+**Live-sample finding folded back in:** first real turn showed the model links products as `**[Name](url)**` (bold wrapping link), not `[**Name**](url)`. Both are working links; the scanner initially miscounted the former as unlinked-bold. Fixed (bold counts as linked if it sits inside a link text OR fully wraps a link) + regression test quoting the live sample.
+
+**Gate results:**
+- Unit: 716/716 green (incl. 16 new brandTiers/replyAudit tests), lint clean, typecheck hook clean.
+- Live local verification (dev server, real Claude turns, tool mode on): both events fired with correct payloads on (a) "blue street helmet under $300" — productType/color/budget all detected, leadBrandTier=premium, colorMatch 10/10, reply audited 1 link/1 linked product; (b) "klim marrakesh jacket in pink" — low-confidence turn audited correctly with zero product mentions.
+- Fast e2e vs Preview Neon (`E2E_ALLOW_REMOTE_DB=1`): 110 passed / 2 flaky-passed / 1 "failed" — Exhaust catalog row, shown to be the known cold-turn latency family (failure artifact = 25s widget timeout still "Waiting for an agent"; different exhaust rows failed vs flaked across runs; isolated warm rerun **2/2 passed in 21.9s**). Zero reproducible failures. Slow suite not required: prompt bytes, tool gating, and search pipeline untouched.
+
+**Early ranking signals already visible in the two local samples (Phase B fodder, logged not acted on):** "blue street helmet under $300" ranked "Shoei RF-1400 Helmet Shield (CWR-F2)" (an accessory) at #1 — head-noun +15 didn't outweigh brand+type+color on an accessory; "klim marrakesh in pink" led with "Klim Neck Warmer". Accessory-vs-product separation may deserve a slot in the B3 precedence discussion.

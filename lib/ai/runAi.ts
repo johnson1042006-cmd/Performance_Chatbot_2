@@ -26,6 +26,7 @@ import { and, eq, desc } from "drizzle-orm";
 import { getPusher } from "@/lib/pusher/server";
 import { sessionChannel, DASHBOARD_CHANNEL } from "@/lib/pusher/channels";
 import { buildPrompt } from "./buildPrompt";
+import { auditReplyLinks } from "./replyAudit";
 import {
   callClaude,
   CALL_CLAUDE_ERROR_MESSAGE,
@@ -355,7 +356,7 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
     }
   }
 
-  const { system, conversationMessages } = await buildPrompt(
+  const { system, conversationMessages, rankingMeta } = await buildPrompt(
     sessionId,
     latestMessage,
     pageContext as never,
@@ -427,6 +428,39 @@ export async function runAiTurn(opts: RunAiOptions): Promise<RunAiResult> {
   }
 
   const confidence = assessConfidence(assessedText);
+
+  // Phase A5 telemetry (7/20/2026): measure link/bold compliance on the
+  // UNREPLACED reply (assessedText) — what the model actually wrote — so a
+  // pausing turn's handoff replacement doesn't mask a dropped product link.
+  // Grep `event="ai.reply_link_audit"` in Vercel logs; Phase E keys off the
+  // recurrence rate of unlinkedProducts/unlinkedBoldCount.
+  if (rankingMeta && rankingMeta.displayNames.length > 0) {
+    try {
+      const audit = auditReplyLinks(assessedText, rankingMeta.displayNames);
+      log.info("ai.reply_link_audit", {
+        requestId,
+        sessionId,
+        colorBranch: rankingMeta.detectedColor
+          ? rankingMeta.colorMatchCount > 0
+            ? "color_match"
+            : "other_colors_only"
+          : null,
+        linkCount: audit.linkCount,
+        boldCount: audit.boldCount,
+        unlinkedBoldCount: audit.unlinkedBoldCount,
+        productsMentioned: audit.productsMentioned,
+        productsLinked: audit.productsLinked,
+        unlinkedProducts: audit.unlinkedProducts.slice(0, 5),
+        leadBrandTier: rankingMeta.leadBrandTier,
+      });
+    } catch (err) {
+      log.warn("ai.reply_link_audit_failed", {
+        requestId,
+        sessionId,
+        error: serializeError(err),
+      });
+    }
+  }
 
   const [savedMessage] = await db
     .insert(messages)
