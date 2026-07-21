@@ -340,3 +340,11 @@ Added `scripts/prod-browser-smoke.mjs` (env-tunable: SMOKE_BASE_URL / SMOKE_QUER
   (c) "what chain lube do you recommend" → Motorex, linked, 6.3s ✅
 
 **HARD STOP: holding for Antonio's merge go-ahead.** On go: merge --no-ff to main, push (auto-deploy), prod browser smoke + runtime-log check, then Phase D next per accepted sequencing (C/E stay gated on A5 data).
+
+## [2026-07-20 20:05 MDT] — Phase B MERGED + DEPLOYED + PROD-VERIFIED — holding before Phase D
+
+Merge commit `5ec7366` pushed (Antonio's explicit go); Vercel auto-deploy Ready and aliased. Production browser smoke ("looking for a shoei modular helmet"): reply in 13.4s, Neotec 3 recommendations with 4 rendered links. Runtime logs on the new deployment confirm the live scored top-5 is Neotec 3 across the board and both A5 events fire (`ranking_snapshot` leadBrandTier=premium; `reply_link_audit` 4 links, 1/1 product linked).
+
+**Follow-up candidates surfaced by prod logs (for a future curated-table pass, not urgent):** Schuberth C4 Pro ↔ C5 (both live in the pool — attached-token lineage the table doesn't cover yet) and Shoei J-Cruise 1 ↔ 2. Add with the same both-gens-in-catalog evidence rule.
+
+**Phase B closed. Next: Phase D (KB lineage enrichment — tires, flagship helmets, Tech-Air, top jackets per accepted scope). C/E remain gated on accumulating A5 production data.**
