@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // PreToolUse hook: deny Claude edits to .env files — they hold live secrets
-// (DATABASE_URL points at production Neon). .env.example stays editable.
+// (DATABASE_URL points at production Supabase). .env.example stays editable.
 let raw = "";
 process.stdin.on("data", (c) => (raw += c));
 process.stdin.on("end", () => {

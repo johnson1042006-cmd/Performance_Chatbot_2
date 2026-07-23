@@ -1,8 +1,7 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
+import { createDb } from "../lib/db/connect";
 import * as XLSX from "xlsx";
 import * as path from "path";
 import { localCatalog } from "../lib/db/schema";
@@ -58,8 +57,7 @@ async function fetchAllBCProducts(): Promise<Map<string, { id: number; url: stri
 }
 
 async function seedCatalog() {
-  const sql = neon(process.env.DATABASE_URL!);
-  const db = drizzle(sql);
+  const { db } = createDb();
 
   const filePath = path.resolve(__dirname, "../catalog.xlsx");
   const workbook = XLSX.readFile(filePath);

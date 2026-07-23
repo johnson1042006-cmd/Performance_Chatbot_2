@@ -8,7 +8,7 @@
  * a separate sweep removes them — that's fine because lookups are scoped
  * to the current window.
  *
- * DB-error behavior is per-call: the default is fail-open (a transient Neon
+ * DB-error behavior is per-call: the default is fail-open (a transient database
  * hiccup must not 500 cheap reads), but routes that trigger paid AI calls
  * pass `failClosed: true` so a limiter outage can't become unmetered spend.
  */

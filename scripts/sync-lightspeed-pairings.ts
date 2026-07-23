@@ -13,8 +13,7 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
+import { createDb } from "../lib/db/connect";
 import { productPairings } from "../lib/db/schema";
 import { eq, and, or } from "drizzle-orm";
 import {
@@ -100,8 +99,7 @@ async function main() {
     return;
   }
 
-  const sql = neon(process.env.DATABASE_URL!);
-  const db = drizzle(sql);
+  const { db } = createDb();
 
   const existingPairings = await db.select().from(productPairings);
   const existingSet = new Set(

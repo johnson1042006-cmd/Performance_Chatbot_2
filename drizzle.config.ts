@@ -8,6 +8,8 @@ export default defineConfig({
   out: "./drizzle",
   dialect: "postgresql",
   dbCredentials: {
-    url: process.env.DATABASE_URL!,
+    // DDL needs the session pooler (DIRECT_URL); the runtime transaction
+    // pooler (DATABASE_URL) is a fallback for environments without it.
+    url: process.env.DIRECT_URL ?? process.env.DATABASE_URL!,
   },
 });

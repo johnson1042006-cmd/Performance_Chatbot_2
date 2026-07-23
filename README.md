@@ -5,7 +5,7 @@ Embeddable customer support chat for Performance Cycle. Customers chat through a
 ## Architecture
 
 - **Framework**: Next.js 14 (App Router) — UI and API routes in one app
-- **DB**: Postgres on Neon, accessed via Drizzle ORM
+- **DB**: Postgres on Supabase, accessed via Drizzle ORM
 - **AI**: Anthropic Claude Haiku (`claude-haiku-4-5`)
 - **Realtime**: Pusher (channels per session + a shared `dashboard` channel)
 - **Auth**: NextAuth (Credentials + JWT), with `store_manager` and `support_agent` roles
@@ -28,7 +28,7 @@ Embeddable customer support chat for Performance Cycle. Customers chat through a
 ```bash
 npm install
 cp .env.example .env.local        # then fill in values
-npm run db:push                   # apply Drizzle schema to Neon
+npm run db:push                   # apply Drizzle schema to Supabase
 npm run db:seed                   # users (manager + agent)
 npm run db:seed:knowledge         # knowledge base
 npm run db:seed:products          # product catalog
@@ -53,7 +53,7 @@ All required variables are listed in [`.env.example`](.env.example):
 | Variable | Required | Notes |
 |----------|----------|-------|
 | `ANTHROPIC_API_KEY` | yes | For Claude AI fallback |
-| `DATABASE_URL` | yes | Neon Postgres connection string |
+| `DATABASE_URL` | yes | Supabase Postgres connection string (transaction pooler, port 6543) |
 | `PUSHER_APP_ID`, `PUSHER_KEY`, `PUSHER_SECRET`, `PUSHER_CLUSTER` | yes | Server-side Pusher |
 | `NEXT_PUBLIC_PUSHER_KEY`, `NEXT_PUBLIC_PUSHER_CLUSTER` | yes | Client-side Pusher |
 | `NEXTAUTH_SECRET` | yes | NextAuth JWT signing |

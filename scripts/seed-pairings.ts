@@ -1,8 +1,7 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
+import { createDb } from "../lib/db/connect";
 import { productPairings } from "../lib/db/schema";
 
 type PairingType = "matching_pants" | "matching_jacket" | "accessory" | "frequently_bought";
@@ -197,8 +196,7 @@ function buildAllPairings(): Pairing[] {
 }
 
 async function seedPairings() {
-  const sql = neon(process.env.DATABASE_URL!);
-  const db = drizzle(sql);
+  const { db } = createDb();
 
   const replace = process.argv.includes("--replace");
 

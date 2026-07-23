@@ -8,13 +8,11 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
+import { createDb } from "../lib/db/connect";
 import * as schema from "../lib/db/schema";
 import { eq, isNull, sql } from "drizzle-orm";
 
-const sqlClient = neon(process.env.DATABASE_URL!);
-const db = drizzle(sqlClient, { schema });
+const { db, client } = createDb();
 
 async function main() {
   console.log("Backfilling claimed_by_kind from existing status values...");
@@ -48,6 +46,8 @@ async function main() {
   console.log(`  Initialized last_customer_activity_at on ${activityResult.length} rows`);
 
   console.log("Backfill complete.");
+
+  await client.end();
 }
 
 main().catch((err) => {
