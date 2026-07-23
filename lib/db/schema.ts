@@ -149,9 +149,14 @@ export const messages = pgTable("messages", {
     .references(() => sessions.id),
   role: messageRoleEnum("role").notNull(),
   content: text("content").notNull(),
-  // Generated column in the DB (see drizzle/0004_phase5.sql). Included in the
-  // schema so drizzle-kit doesn't attempt destructive drops.
-  contentTsv: tsvector("content_tsv"),
+  // Generated column in the DB (see drizzle/0004_phase5.sql). Declared as
+  // generatedAlwaysAs so drizzle-kit sees it as generated (a plain-tsvector
+  // declaration diffs as drop+add and silently strips the generation, which
+  // is how content_tsv sat empty in prod until 2026-07-22). Derived from
+  // `content`, so any regeneration is lossless.
+  contentTsv: tsvector("content_tsv").generatedAlwaysAs(
+    sql`to_tsvector('english', content)`
+  ),
   sentAt: timestamp("sent_at").defaultNow().notNull(),
   pageContext: jsonb("page_context"),
   // Categories of PII redacted from `content` (e.g. ["card", "email"]). Empty
@@ -167,6 +172,7 @@ export const messages = pgTable("messages", {
   sentiment: integer("sentiment"),
 }, (table) => ({
   sessionIdSentAtIdx: index("messages_session_id_sent_at_idx").on(table.sessionId, table.sentAt),
+  contentTsvIdx: index("messages_content_tsv_idx").using("gin", table.contentTsv),
 }));
 
 export const products = pgTable("products", {
@@ -226,14 +232,18 @@ export const productColorways = pgTable("product_colorways", {
   // Generated column in the DB (see drizzle/0008_colorway_tsv.sql). 'simple'
   // config = no stemming, so color tokens match verbatim ("olive" stays
   // "olive"). Powers color-driven product retrieval (lib/search/colorwayIndex).
-  // Declared here so drizzle-kit doesn't attempt destructive drops.
-  colorwayTsv: tsvector("colorway_tsv"),
+  // Declared as generatedAlwaysAs (not plain tsvector) so drizzle-kit won't
+  // diff it as a destructive drop; derived from colorway_lower, so lossless.
+  colorwayTsv: tsvector("colorway_tsv").generatedAlwaysAs(
+    sql`to_tsvector('simple', regexp_replace(colorway_lower, '[/_,-]+', ' ', 'g'))`
+  ),
   baseSku: text("base_sku"),
   price: decimal("price", { precision: 10, scale: 2 }),
   url: text("url"),
 }, (table) => ({
   bcProductIdIdx: index("product_colorways_bc_product_id_idx").on(table.bcProductId),
   colorwayLowerIdx: index("product_colorways_colorway_lower_idx").on(table.colorwayLower),
+  colorwayTsvIdx: index("product_colorways_colorway_tsv_idx").using("gin", table.colorwayTsv),
 }));
 
 export const chatEvents = pgTable("chat_events", {
