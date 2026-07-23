@@ -24,7 +24,8 @@ flowchart LR
 Source of truth for what’s required locally is `.env.example`.
 
 - **ANTHROPIC_API_KEY**: Claude API key (Phase 1). Rotate in Anthropic console; update Vercel env var.
-- **DATABASE_URL**: Postgres connection string (Phase 1). Rotate by issuing new DB credentials / connection string.
+- **DATABASE_URL**: Supabase Postgres connection string — transaction pooler, port 6543 (Phase 1). Rotate by resetting the database password in Supabase Dashboard → Project Settings → Database, then update both `DATABASE_URL` and `DIRECT_URL` in Vercel.
+- **DIRECT_URL**: Supabase session pooler URL, port 5432 — used by drizzle-kit (`db:push`) and admin tooling. Rotates together with `DATABASE_URL` (same password).
 - **PUSHER_APP_ID / PUSHER_KEY / PUSHER_SECRET / PUSHER_CLUSTER**: Pusher server credentials (Phase 2). Rotate in Pusher dashboard; update Vercel env vars.
 - **NEXT_PUBLIC_PUSHER_KEY / NEXT_PUBLIC_PUSHER_CLUSTER**: Pusher browser values (Phase 2). Rotate with the Pusher key/cluster.
 - **NEXTAUTH_SECRET**: NextAuth signing secret (Phase 1). Rotate with `openssl rand -base64 32`; invalidate existing sessions.
@@ -50,10 +51,11 @@ footgun broke local builds on 2026-07-12.
 To refresh local env: `vercel env pull .env.local --environment=preview`, then
 fix up the values that pull empty (Sensitive-type vars — Pusher, VAPID,
 CRON_SECRET, `USE_ROUTING_CLASSIFIER`) from their dashboards, and make sure
-`NEXTAUTH_URL="http://localhost:3000"` and `DATABASE_URL` targets the Preview
-Neon branch (`ep-dark-rice…`), never production (`ep-withered-silence…`). If
-you need production values for an incident, pull to a file OUTSIDE the repo
-and delete it when done.
+`NEXTAUTH_URL="http://localhost:3000"` and `DATABASE_URL` never targets the
+production Supabase project (`ouixdfvsbbjfpkpfvcvq`) unless you are doing
+verified production work — use a local Postgres or a Supabase branch database
+for tests. If you need production values for an incident, pull to a file
+OUTSIDE the repo and delete it when done.
 
 ## Verification suite (`npm run verify`)
 

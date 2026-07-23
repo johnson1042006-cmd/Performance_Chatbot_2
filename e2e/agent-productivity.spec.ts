@@ -73,7 +73,7 @@ async function loginAsAgent(page: Page) {
   await page.goto("/login");
   await page.fill('input[id="email"]', AGENT_EMAIL);
   await page.fill('input[id="password"]', AGENT_PASS);
-  // 45 s covers Neon serverless cold-start on the first credentials check.
+  // 45 s covers a cold first credentials check (fresh build, cold connections).
   const credsDone = page.waitForResponse(
     (r) => r.url().includes("/api/auth/callback/credentials"),
     { timeout: 45000 }
@@ -357,7 +357,7 @@ test.describe("Phase 4 agent productivity", () => {
   test("agent claims a chat, picks a canned reply, edits and sends", async ({
     page,
   }) => {
-    // First test in the suite — Neon DB may be cold, allow extra time.
+    // First test in the suite — connections may be cold, allow extra time.
     test.setTimeout(90000);
     const sessions = [makeSessionStub(SESSION_A, "embed_alpha")];
     const messagesBySession: Record<string, Array<Record<string, unknown>>> = {

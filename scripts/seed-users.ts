@@ -1,8 +1,7 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
+import { createDb } from "../lib/db/connect";
 import { randomBytes } from "crypto";
 import bcrypt from "bcryptjs";
 import { users } from "../lib/db/schema";
@@ -35,8 +34,7 @@ function resolvePassword(envVar: string, label: string): string {
 }
 
 async function seed() {
-  const sql = neon(process.env.DATABASE_URL!);
-  const db = drizzle(sql);
+  const { db, client } = createDb();
 
   const managerPassword = resolvePassword("SEED_MANAGER_PASSWORD", "manager");
   const agentPassword = resolvePassword("SEED_AGENT_PASSWORD", "agent");
@@ -84,6 +82,8 @@ async function seed() {
   console.log(
     "Seeded/updated 2 users (manager + agent) with mustResetPassword=true"
   );
+
+  await client.end();
 }
 
 seed().catch(console.error);

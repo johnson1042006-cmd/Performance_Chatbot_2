@@ -4,7 +4,7 @@ import { processDueAiClaims, sweepStaleSessions } from "@/lib/sessions/state";
  * Module-level debounce for the lazy "tick" sweeps that customer/dashboard
  * routes used to run on every request. The widget polls some of these routes
  * every few seconds per open session, so without a debounce N concurrent
- * customers fire N x many redundant global sweeps per minute against Neon.
+ * customers fire N x many redundant global sweeps per minute against the database.
  *
  * `/api/cron/tick` runs the same sweeps every minute as the guaranteed
  * backstop, so it is safe to skip the in-request sweep when one ran recently.

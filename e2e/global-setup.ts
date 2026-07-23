@@ -18,9 +18,8 @@
 import { config as loadEnv } from "dotenv";
 loadEnv({ path: ".env.local" });
 
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
 import { inArray } from "drizzle-orm";
+import { createDb } from "../lib/db/connect";
 import { users } from "../lib/db/schema";
 
 const MANAGER_EMAIL =
@@ -73,8 +72,7 @@ export default async function globalSetup() {
 
   assertSafeDatabase();
 
-  const sql = neon(process.env.DATABASE_URL);
-  const db = drizzle(sql);
+  const { db, client } = createDb();
 
   const result = await db
     .update(users)
@@ -82,15 +80,16 @@ export default async function globalSetup() {
     .where(inArray(users.email, [MANAGER_EMAIL, AGENT_EMAIL]))
     .returning({ id: users.id, email: users.email });
 
+  await client.end();
+
   console.log(
     `[e2e/global-setup] cleared mustResetPassword on ${result.length} test user(s): ${result.map((r) => r.email).join(", ")}`,
   );
 
   // Warm up the webServer's database connection pool. The Next.js process
-  // uses a TCP pgbouncer connection that starts cold; the first credentials
-  // check against a sleeping Neon compute can take 20-45 s. By firing one
-  // full login here (before any test runs), we ensure the pool is established
-  // and the Neon compute is awake for the actual tests.
+  // opens its pooled Postgres connection lazily; the first credentials check
+  // pays that setup cost. By firing one full login here (before any test
+  // runs), we ensure the connection is established for the actual tests.
   try {
     const csrfRes = await fetch(`${serverBase}/api/auth/csrf`, {
       headers: { ...bypassHeaders },

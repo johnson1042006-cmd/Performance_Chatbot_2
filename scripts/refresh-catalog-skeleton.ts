@@ -14,8 +14,7 @@ config({ path: ".env.local" });
 import * as fs from "fs";
 import * as path from "path";
 
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
+import { createDb } from "../lib/db/connect";
 import { knowledgeBase } from "../lib/db/schema";
 import {
   buildSkeletonFromDump,
@@ -67,8 +66,7 @@ async function main() {
   // Upsert into knowledge_base
   // -------------------------------------------------------------------------
 
-  const sql = neon(process.env.DATABASE_URL);
-  const db = drizzle(sql);
+  const { db, client } = createDb();
 
   await db
     .insert(knowledgeBase)
@@ -84,6 +82,8 @@ async function main() {
 
   console.log(`\nUpserted knowledge_base row: topic="${TOPIC}"`);
   console.log("Done.");
+
+  await client.end();
 }
 
 main().catch((err) => {

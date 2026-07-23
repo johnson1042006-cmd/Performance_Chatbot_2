@@ -1,11 +1,11 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import { neon } from "@neondatabase/serverless";
+import { createClient } from "../lib/db/connect";
 import * as XLSX from "xlsx";
 import * as path from "path";
 
-const sql = neon(process.env.DATABASE_URL!);
+const sql = createClient();
 const BC_BASE = `https://api.bigcommerce.com/stores/${process.env.BIGCOMMERCE_STORE_HASH}/v3`;
 const BC_TOKEN = process.env.BIGCOMMERCE_ACCESS_TOKEN!;
 

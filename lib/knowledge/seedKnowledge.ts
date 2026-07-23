@@ -1,5 +1,4 @@
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
+import { createDb } from "../db/connect";
 import { knowledgeBase } from "../db/schema";
 
 interface KnowledgeSeed {
@@ -479,26 +478,29 @@ CRITICAL: BOPIS is available ONLY at the Centennial location. We do not have mul
 ];
 
 export async function seedKnowledge() {
-  const sql = neon(process.env.DATABASE_URL!);
-  const db = drizzle(sql);
+  const { db, client } = createDb();
 
-  for (const entry of entries) {
-    const { forceUpdate, ...row } = entry;
-    if (forceUpdate) {
-      await db
-        .insert(knowledgeBase)
-        .values(row)
-        .onConflictDoUpdate({
-          target: knowledgeBase.topic,
-          set: { content: row.content, updatedAt: new Date() },
-        });
-    } else {
-      await db
-        .insert(knowledgeBase)
-        .values(row)
-        // Seed is first-run only by default. Edit KB via the dashboard.
-        .onConflictDoNothing();
+  try {
+    for (const entry of entries) {
+      const { forceUpdate, ...row } = entry;
+      if (forceUpdate) {
+        await db
+          .insert(knowledgeBase)
+          .values(row)
+          .onConflictDoUpdate({
+            target: knowledgeBase.topic,
+            set: { content: row.content, updatedAt: new Date() },
+          });
+      } else {
+        await db
+          .insert(knowledgeBase)
+          .values(row)
+          // Seed is first-run only by default. Edit KB via the dashboard.
+          .onConflictDoNothing();
+      }
     }
+  } finally {
+    await client.end();
   }
 
   console.log(`Seeded ${entries.length} knowledge base entries`);

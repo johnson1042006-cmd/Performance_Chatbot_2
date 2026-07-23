@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Embeddable customer support chat for Performance Cycle (a motorcycle gear shop). Customers chat through an iframe widget (`public/embed.js` → `/embed`); messages route through an AI fallback (Claude Haiku via `@anthropic-ai/sdk`) and to human agents via a role-based dashboard. Single Next.js 14 App Router app: widget UI, dashboards, and all API routes together. Postgres on Neon via Drizzle ORM; realtime via Pusher; auth via NextAuth (Credentials + JWT) with `store_manager` and `support_agent` roles; catalog/inventory from the BigCommerce REST API.
+Embeddable customer support chat for Performance Cycle (a motorcycle gear shop). Customers chat through an iframe widget (`public/embed.js` → `/embed`); messages route through an AI fallback (Claude Haiku via `@anthropic-ai/sdk`) and to human agents via a role-based dashboard. Single Next.js 14 App Router app: widget UI, dashboards, and all API routes together. Postgres on Supabase via Drizzle ORM (postgres.js driver, Supavisor transaction pooler); realtime via Pusher; auth via NextAuth (Credentials + JWT) with `store_manager` and `support_agent` roles; catalog/inventory from the BigCommerce REST API.
 
 ## Commands
 

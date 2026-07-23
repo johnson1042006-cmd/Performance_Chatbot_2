@@ -1,13 +1,11 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
+import { createDb } from "../lib/db/connect";
 import { products, productPairings } from "../lib/db/schema";
 
 async function seed() {
-  const sql = neon(process.env.DATABASE_URL!);
-  const db = drizzle(sql);
+  const { db } = createDb();
 
   const sampleProducts = [
     {

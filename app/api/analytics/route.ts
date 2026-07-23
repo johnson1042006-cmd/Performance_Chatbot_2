@@ -123,7 +123,7 @@ export async function GET() {
       FROM flags
     `);
     const aiCleanlyArr = (aiCleanlyRows as unknown as { rows?: { total: number; cleanly: number }[] }).rows
-      ?? (Array.isArray(aiCleanlyRows) ? aiCleanlyRows as { total: number; cleanly: number }[] : []);
+      ?? (Array.isArray(aiCleanlyRows) ? aiCleanlyRows as unknown as { total: number; cleanly: number }[] : []);
     const aiCleanlyTotal = aiCleanlyArr[0]?.total ?? 0;
     const aiCleanly = aiCleanlyArr[0]?.cleanly ?? 0;
     const aiHandledCleanlyPct =

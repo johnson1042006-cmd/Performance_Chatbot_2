@@ -81,7 +81,7 @@ async function evalAiFailureRatePct(windowMinutes = 60): Promise<number> {
     SELECT total, escalated FROM counts
   `);
   const arr = (result as unknown as { rows?: { total: number; escalated: number }[] }).rows
-    ?? (Array.isArray(result) ? (result as { total: number; escalated: number }[]) : []);
+    ?? (Array.isArray(result) ? (result as unknown as { total: number; escalated: number }[]) : []);
   const row = arr[0];
   if (!row || row.total === 0) return 0;
   return Math.round((row.escalated / row.total) * 100);
@@ -101,7 +101,7 @@ async function evalTicketSlaBreachCount(): Promise<number> {
     `);
     const arr =
       (result as unknown as { rows?: { c: number }[] }).rows ??
-      (Array.isArray(result) ? (result as { c: number }[]) : []);
+      (Array.isArray(result) ? (result as unknown as { c: number }[]) : []);
     return arr[0]?.c ?? 0;
   } catch (error) {
     log.warn("alerts.eval_ticket_sla_breach_failed", {

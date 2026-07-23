@@ -1,9 +1,9 @@
 ---
 name: db-migrate
-description: Make a Postgres schema change safely with Drizzle + Neon — edit lib/db/schema.ts, push, update seeds/tests, verify. Use when adding or altering tables, columns, or enums.
+description: Make a Postgres schema change safely with Drizzle + Supabase — edit lib/db/schema.ts, push, update seeds/tests, verify. Use when adding or altering tables, columns, or enums.
 ---
 
-# DB schema changes (Drizzle + Neon)
+# DB schema changes (Drizzle + Supabase)
 
 This repo uses `drizzle-kit push` (schema-diff push, no migration files).
 `lib/db/schema.ts` is the single source of truth; `drizzle/meta/` snapshots
@@ -26,9 +26,11 @@ are managed by drizzle-kit — never edit them by hand.
 
 ## Cautions
 
-- `DATABASE_URL` points at a live Neon database — `db:push` applies
-  immediately and there is no down-migration. For risky changes, create a
-  Neon branch first and test the push there.
+- `db:push` connects via `DIRECT_URL` (Supabase session pooler, port 5432 —
+  falls back to `DATABASE_URL`) and applies immediately with no
+  down-migration. For risky changes, test the push on a Supabase branch
+  database first, or take a backup (Dashboard → Database → Backups) before
+  pushing.
 - Config-like data (bot settings, SLA windows) lives in `knowledge_base`
   rows, not new tables — check `botSettingsDefaults.ts` before adding a
   settings table.

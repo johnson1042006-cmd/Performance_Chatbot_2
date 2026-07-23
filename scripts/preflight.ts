@@ -16,8 +16,7 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
+import { createDb } from "../lib/db/connect";
 import { sql } from "drizzle-orm";
 import {
   users,
@@ -120,8 +119,7 @@ async function checkDatabase(): Promise<Result[]> {
   }
 
   try {
-    const conn = neon(process.env.DATABASE_URL);
-    const db = drizzle(conn);
+    const { db } = createDb();
 
     const userRows = await db
       .select({ count: sql<number>`count(*)::int` })

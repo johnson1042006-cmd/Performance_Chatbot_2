@@ -1,8 +1,7 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
+import { createDb } from "../lib/db/connect";
 import { eq } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { users } from "../lib/db/schema";
@@ -28,8 +27,7 @@ function requirePassword(envVar: string): string {
 }
 
 async function rotate() {
-  const sql = neon(process.env.DATABASE_URL!);
-  const db = drizzle(sql);
+  const { db, client } = createDb();
 
   const managerPassword = requirePassword("SEED_MANAGER_PASSWORD");
   const agentPassword = requirePassword("SEED_AGENT_PASSWORD");
@@ -52,6 +50,8 @@ async function rotate() {
       console.log(`[rotate] rotated password + forced reset for ${email}`);
     }
   }
+
+  await client.end();
 }
 
 rotate().catch((err) => {
