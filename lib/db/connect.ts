@@ -17,11 +17,14 @@ export function getDatabaseUrl(): string {
 }
 
 // prepare: false is required by Supabase's Supavisor transaction pooler (port
-// 6543); max: 1 because each serverless function instance holds its own client.
+// 6543). max must stay well above 1: locally the whole Next.js server shares
+// one client, and Vercel Fluid Compute runs concurrent invocations per
+// instance — a single connection serializes every query (measured ~120 ms
+// per round trip, which stacked concurrent dashboard loads past 30 s).
 export function createClient(url: string = getDatabaseUrl()) {
   return postgres(url, {
     prepare: false,
-    max: 1,
+    max: Number(process.env.DB_POOL_MAX ?? 10),
     idle_timeout: 20,
     connect_timeout: 10,
   });
