@@ -30,6 +30,8 @@ npx playwright test e2e/smoke.spec.ts  # single spec (needs a prior `npm run bui
 
 Set `E2E_REUSE_SERVER=1` to reuse a server already listening on 3050; `E2E_BASE_URL=<url>` to run against a deployment. E2E expects seeded users — `e2e/global-setup.ts` clears their `mustResetPassword` flag. Run `test:e2e:slow` before merging anything that touches the bot prompt, tool gating, or the catalog/knowledge-base pipeline.
 
+**E2E writes to the live production database.** Since the Supabase migration (2026-07-22), local `.env.local` `DATABASE_URL` points at the production Supabase project — there is no separate preview branch DB. The suite writes test sessions/messages into whatever `DATABASE_URL` points at (the `assertSafeDatabase()` guard requires `E2E_ALLOW_REMOTE_DB=1` for any non-localhost DB — never set it reflexively). Run e2e deliberately and sparingly: as a merge gate for changes that touch the DB layer, session state machine, or dashboards — not as a routine check (`npm run test` covers that). After a run, `npm run db:retag-test` tags the test sessions. For frequent e2e iteration, point `DATABASE_URL` at a local Postgres or a Supabase branch database instead.
+
 DB: `npm run db:push` applies the Drizzle schema (schema lives in `lib/db/schema.ts`, config in `drizzle.config.ts`); `npm run db:seed` plus `db:seed:knowledge|products|pairings|catalog|colorways` populate data. `.env.example` is the source of truth for required env vars.
 
 ## Architecture
