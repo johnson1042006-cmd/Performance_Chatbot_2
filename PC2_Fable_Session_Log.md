@@ -365,3 +365,7 @@ Merge commit `5ec7366` pushed (Antonio's explicit go); Vercel auto-deploy Ready 
 - Browser smoke (local build): "looking for a schuberth modular helmet" → four C5 recommendations, 4 links, C5 called "flagship" ✅; "do you have the schuberth c4 pro" → honest zero-stock answer + C5/E2 alternatives with links ✅ (raw-ranking escape hatch separately proven above).
 
 **HARD STOP: holding for merge go-ahead.**
+
+## [2026-07-22 19:10 MDT] — Schuberth lineage MERGED + DEPLOYED + PROD-VERIFIED
+
+Merge `674329e` pushed (Antonio's go); Vercel auto-deploy Ready in 50s and aliased. Production browser smoke ("looking for a schuberth modular helmet"): 13.4s reply, all four recommendations C5 (in-stock units leading), 4 rendered links, C4 Pro correctly absent from the lead. Curated table now: Shoei RF/X/GT-Air/Neotec, Scorpion EXO-R4x0/AT9x0, REV'IT ×6, Sidi Crossfire, Schuberth C. Standing state: accessory-ranking item PARKED on the A5-telemetry trigger; J-Cruise excluded pending catalog evidence; Phase D (KB lineage enrichment) next on Antonio's go; C/E gated on A5 data.
