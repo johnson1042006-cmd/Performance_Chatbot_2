@@ -196,17 +196,39 @@ no-change check, and the live prod checklist (Step 8).
   schema diff used instead — stronger).
 - **Fix found:** pool `max` 1→10 (`DB_POOL_MAX` env override). max:1 serialized all queries
   per process; at ca-central-1 latency (~120 ms RTT) concurrent dashboard loads stacked past 30 s.
-- **Pre-existing finding (not migration):** `messages.content_tsv` is a plain NULL column in
-  prod — the generated-column migration (drizzle/0004_phase5.sql) never landed via db:push.
-  Message FTS has been silently degraded on Neon too. Follow-up candidate.
 - Vercel env: `DATABASE_URL` (tx pooler :6543) + `DIRECT_URL` (session pooler :5432) in
   prod/preview/dev; all 15 Neon/`POSTGRES_*` vars removed via CLI.
 - Prod verified: /api/chat/settings, session create, streamed AI reply with real green-jacket
   colorway results, cron tick 200s every minute, zero runtime errors.
 
-**Open items:**
-1. User: one manual dashboard login (auth path exercised in e2e, not yet clicked in prod).
-2. User: disconnect Neon marketplace integration (Vercel dashboard → Storage) so it can't re-inject vars.
-3. Local `.env.local` still points at Neon — update DATABASE_URL/DIRECT_URL to Supabase (hook blocks Claude editing it).
-4. **Step 9 (after 24–48 h clean):** delete Neon projects `fragrant-term-38731407` + `bold-poetry-31521134` (explicit go required).
-5. Confirm `/api/cron/catalog-refresh` succeeds next morning.
+### Post-cutover fixes (2026-07-22 → 07-23)
+
+- **Analytics 500 (commit b4ad68a):** postgres.js doesn't auto-serialize JS `Date` params in
+  raw `sql` templates the way the Neon HTTP driver did → `/api/analytics` (manager hub
+  metrics banner), manager search/export date filters, and the alert evaluator's failure-rate
+  window all threw. Fixed by passing `.toISOString()` at 4 sites. Column-typed query-builder
+  calls (`gte(col, date)`) were unaffected.
+- **messages.content_tsv (commit 546c167):** was a plain always-NULL column with no GIN index
+  (0004 migration's GENERATED clause never landed — project uses db:push, schema.ts declared
+  it plain). Manager message search returned zero rows the whole time (predated migration).
+  Fixed directly on Supabase (drop + re-add GENERATED STORED + GIN index; 1133 rows populated;
+  route query returns 144 sessions for "helmet", index scan confirmed). schema.ts now declares
+  both content_tsv and colorway_tsv as `.generatedAlwaysAs(...)` with GIN indexes so a future
+  db:push can't diff them as destructive drops. Both derived → regeneration lossless.
+
+### Closeout status (2026-07-23)
+
+- [DONE] Manual dashboard login in prod (manager + agent) — auth works.
+- [DONE] Neon marketplace integration disconnected in Vercel.
+- [DONE] Local `.env.local` updated to Supabase URLs (Neon backup at `.env.local.bak-neon`).
+- [DONE] `/api/cron/catalog-refresh` ran clean overnight; 24h+ prod with zero runtime errors.
+- [DONE] Backup dump copied to a 2nd durable location (`~/OneDrive - University of Utah/PC2_db_backups/`,
+  SHA256-matched to the Desktop copy).
+- [USER-HANDLING] Deleting Neon projects `fragrant-term-38731407` + `bold-poetry-31521134`.
+  Attempted via MCP 2026-07-23 but the Neon MCP backend returned internal-auth / feature-flag
+  errors even on read calls; user is deleting them manually in the Neon console. **This is the
+  only remaining Phase 1 item.**
+
+**Phase 1 is functionally complete — production runs entirely on Supabase.** Phases 2–5
+(Supabase Auth, Realtime, RLS, Storage/Edge) remain outlined above and each need their own
+plan + explicit go-ahead before starting.
