@@ -64,7 +64,7 @@ async function evalAiFailureRatePct(windowMinutes = 60): Promise<number> {
     WITH recent_ai AS (
       SELECT m.session_id
       FROM messages m
-      WHERE m.role = 'ai' AND m.sent_at >= ${since}
+      WHERE m.role = 'ai' AND m.sent_at >= ${since.toISOString()}
     ),
     counts AS (
       SELECT

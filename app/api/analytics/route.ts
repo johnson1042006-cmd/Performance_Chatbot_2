@@ -93,7 +93,7 @@ export async function GET() {
       WITH today_ai AS (
         SELECT s.id
         FROM sessions s
-        WHERE s.started_at >= ${today}
+        WHERE s.started_at >= ${today.toISOString()}
           AND s.claimed_by_kind = 'ai'
       ),
       flags AS (

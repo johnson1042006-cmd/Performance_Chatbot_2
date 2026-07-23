@@ -89,8 +89,8 @@ export async function GET(req: NextRequest) {
         LEFT JOIN latest_feedback lf ON lf.session_id = s.id
         ${q ? sql`JOIN hit_sessions hs ON hs.session_id = s.id` : sql``}
         WHERE 1=1
-          ${fromDate ? sql`AND s.started_at >= ${fromDate}` : sql``}
-          ${toDate ? sql`AND s.started_at <= ${toDate}` : sql``}
+          ${fromDate ? sql`AND s.started_at >= ${fromDate.toISOString()}` : sql``}
+          ${toDate ? sql`AND s.started_at <= ${toDate.toISOString()}` : sql``}
           ${status ? sql`AND s.status::text = ${status}` : sql``}
           ${agent ? sql`AND s.claimed_by_user_id::text = ${agent}` : sql``}
         ORDER BY s.started_at DESC

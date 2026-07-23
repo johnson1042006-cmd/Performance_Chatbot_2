@@ -128,8 +128,8 @@ export async function GET(req: NextRequest) {
       LEFT JOIN users u ON u.id = s.claimed_by_user_id
       JOIN session_msg_counts smc ON smc.session_id = s.id
       WHERE 1=1
-        ${fromDate ? sql`AND s.started_at >= ${fromDate}` : sql``}
-        ${toDate ? sql`AND s.started_at <= ${toDate}` : sql``}
+        ${fromDate ? sql`AND s.started_at >= ${fromDate.toISOString()}` : sql``}
+        ${toDate ? sql`AND s.started_at <= ${toDate.toISOString()}` : sql``}
         ${status ? sql`AND s.status::text = ${status}` : sql``}
         ${agent ? sql`AND s.claimed_by_user_id::text = ${agent}` : sql``}
       ORDER BY smc.last_msg_at DESC
@@ -150,8 +150,8 @@ export async function GET(req: NextRequest) {
       FROM hit_sessions hs
       JOIN sessions s ON s.id = hs.session_id
       WHERE 1=1
-        ${fromDate ? sql`AND s.started_at >= ${fromDate}` : sql``}
-        ${toDate ? sql`AND s.started_at <= ${toDate}` : sql``}
+        ${fromDate ? sql`AND s.started_at >= ${fromDate.toISOString()}` : sql``}
+        ${toDate ? sql`AND s.started_at <= ${toDate.toISOString()}` : sql``}
         ${status ? sql`AND s.status::text = ${status}` : sql``}
         ${agent ? sql`AND s.claimed_by_user_id::text = ${agent}` : sql``}
     `);
