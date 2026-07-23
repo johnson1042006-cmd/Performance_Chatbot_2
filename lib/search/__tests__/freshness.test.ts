@@ -103,6 +103,44 @@ describe("extractCuratedGenerations", () => {
   it("Arai Quantum-X never collides with the REV'IT Quantum family", () => {
     expect(extractCuratedGenerations("Arai Quantum-X Steel Helmet")).toEqual([]);
   });
+
+  it("parses the Schuberth C-series; Pro is a refresh, not a generation", () => {
+    expect(extractCuratedGenerations("Schuberth C5 Eclipse Helmet")).toEqual([
+      { key: "schuberth-c", generation: 5 },
+    ]);
+    expect(extractCuratedGenerations("Schuberth C4 Pro Helmet")).toEqual([
+      { key: "schuberth-c", generation: 4 },
+    ]);
+    expect(extractCuratedGenerations("Schuberth C3 Faceshield")).toEqual([
+      { key: "schuberth-c", generation: 3 },
+    ]);
+  });
+
+  it("Schuberth guards: SC2 intercom, E-series, Shoei TC-x codes never match", () => {
+    expect(extractCuratedGenerations("Schuberth SC2 Bluetooth Intercom")).toEqual([]);
+    expect(extractCuratedGenerations("Schuberth E2 Helmet")).toEqual([]);
+    expect(extractCuratedGenerations("Schuberth E1 Pinlock-Ready Face Shield")).toEqual([]);
+    // TC-5 colorway code on a non-Schuberth name: brandHint + \b both block
+    expect(extractCuratedGenerations("Shoei GT-Air 3 Realm TC-5 Helmet")).toEqual([
+      { key: "shoei-gt-air", generation: 3 },
+    ]);
+  });
+
+  it("multi-generation combo accessory names parse as the MAX generation", () => {
+    // Real: both tokens are gen 4 — one entry, not two
+    expect(
+      extractCuratedGenerations("Schuberth C4/C4 Pro  Face Shield")
+    ).toEqual([{ key: "schuberth-c", generation: 4 }]);
+    // A C4/C5 accessory fits the newest gen — must never be demoted for
+    // also fitting the older one
+    expect(extractCuratedGenerations("Schuberth C4/C5 Face Shield")).toEqual([
+      { key: "schuberth-c", generation: 5 },
+    ]);
+  });
+
+  it("J-Cruise is deliberately NOT a family (gen 1 left the catalog 7/2026)", () => {
+    expect(extractCuratedGenerations("Shoei J-Cruise 2 Helmet")).toEqual([]);
+  });
 });
 
 describe("computeCuratedStalePenalties — real catalog pairs", () => {
@@ -151,6 +189,28 @@ describe("computeCuratedStalePenalties — real catalog pairs", () => {
     const old = p("Sidi Crossfire 2 SRS Soles");
     const pool = [old, p("Sidi Crossfire 3 SRS Boot")];
     expect(penaltyFor(pool, old, "mx boots")).toBe(CURATED_STALE_DEMOTION);
+  });
+
+  it("demotes Schuberth C4 Pro and C3 shields when a C5 is present", () => {
+    const c4pro = p("Schuberth C4 Pro Helmet");
+    const c3 = p("Schuberth C3 Faceshield");
+    const pool = [c4pro, c3, p("Schuberth C5 Helmet")];
+    expect(penaltyFor(pool, c4pro, "modular helmet")).toBe(CURATED_STALE_DEMOTION);
+    expect(penaltyFor(pool, c3, "modular helmet")).toBe(CURATED_STALE_DEMOTION);
+    expect(penaltyFor(pool, pool[2], "modular helmet")).toBe(0);
+  });
+
+  it("Schuberth escape hatch: naming c4 (or c4 pro) suppresses demotion", () => {
+    const c4pro = p("Schuberth C4 Pro Helmet");
+    const pool = [c4pro, p("Schuberth C5 Helmet")];
+    expect(penaltyFor(pool, c4pro, "schuberth c4 pro helmet")).toBe(0);
+    expect(penaltyFor(pool, c4pro, "c4 helmet")).toBe(0);
+  });
+
+  it("a C4/C5 combo shield is never demoted (max-gen parsing)", () => {
+    const combo = p("Schuberth C4/C5 Face Shield");
+    const pool = [combo, p("Schuberth C5 Helmet"), p("Schuberth C4 Pro Helmet")];
+    expect(penaltyFor(pool, combo, "modular helmet")).toBe(0);
   });
 });
 
