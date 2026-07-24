@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions, bustUserFlagCache } from "@/lib/auth";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { getStaffSession, bustUserFlagCache } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import bcrypt from "bcryptjs";
 import { log, serializeError } from "@/lib/log";
 
 const MIN_LEN = 12;
@@ -12,7 +12,9 @@ const MIN_LEN = 12;
 export async function POST(req: NextRequest) {
   const requestId = crypto.randomUUID();
   try {
-    const session = await getServerSession(authOptions);
+    // getStaffSession returns null for unauthenticated OR deactivated users,
+    // so this covers the old "!user || !user.isActive" 401.
+    const session = await getStaffSession();
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -48,37 +50,43 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const [user] = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, session.user.id))
-      .limit(1);
-
-    if (!user || !user.isActive) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const valid = await bcrypt.compare(currentPassword, user.passwordHash);
-    if (!valid) {
+    // Verify the current password by attempting a sign-in on a throwaway client
+    // (persistSession: false — does not touch the user's real cookie session).
+    const scratch = createSupabaseClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+      { auth: { persistSession: false, autoRefreshToken: false } }
+    );
+    const { error: signInErr } = await scratch.auth.signInWithPassword({
+      email: session.user.email,
+      password: currentPassword,
+    });
+    if (signInErr) {
       return NextResponse.json(
         { error: "Current password is incorrect." },
         { status: 400 }
       );
     }
 
-    const newHash = await bcrypt.hash(newPassword, 12);
+    // Set the new password (Supabase owns credentials now).
+    const admin = createAdminClient();
+    const { error: updErr } = await admin.auth.admin.updateUserById(
+      session.user.id,
+      { password: newPassword }
+    );
+    if (updErr) throw updErr;
+
     await db
       .update(users)
       .set({
-        passwordHash: newHash,
         mustResetPassword: false,
         passwordUpdatedAt: new Date(),
       })
-      .where(eq(users.id, user.id));
+      .where(eq(users.id, session.user.id));
 
-    bustUserFlagCache(user.id);
+    bustUserFlagCache(session.user.id);
 
-    log.info("auth.password_reset", { requestId, userId: user.id });
+    log.info("auth.password_reset", { requestId, userId: session.user.id });
 
     return NextResponse.json({ ok: true });
   } catch (error) {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useSession } from "next-auth/react";
+import { useStaffUser } from "@/components/providers/StaffSessionProvider";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
@@ -25,7 +25,7 @@ interface TeamTableProps {
 
 export default function TeamTable({ onInvite }: TeamTableProps) {
   const { addToast } = useToast();
-  const { data: sessionData } = useSession();
+  const sessionData = useStaffUser();
   const sessionUserId = sessionData?.user?.id;
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);

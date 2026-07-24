@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getStaffSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { messages, sessions, knowledgeBase } from "@/lib/db/schema";
 import { and, desc, eq } from "drizzle-orm";
@@ -41,7 +40,7 @@ export async function POST(
 ) {
   const requestId = crypto.randomUUID();
   try {
-    const auth = await getServerSession(authOptions);
+    const auth = await getStaffSession();
     if (!auth?.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

@@ -13,6 +13,10 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "."),
+      // `server-only` throws when resolved under vitest's client condition.
+      // Stub it so route modules that import lib/supabase/admin can load in
+      // unit tests (the real guard still applies in the Next.js build).
+      "server-only": path.resolve(__dirname, "test/stubs/server-only.ts"),
     },
   },
 });

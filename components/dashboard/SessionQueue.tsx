@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useSession } from "next-auth/react";
+import { useStaffUser } from "@/components/providers/StaffSessionProvider";
 import SessionCard from "./SessionCard";
 import { DASHBOARD_CHANNEL } from "@/lib/pusher/channels";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -107,7 +107,7 @@ export default function SessionQueue({
   onVisibleIdsChange,
   refetchKey,
 }: SessionQueueProps) {
-  const { data: authSession } = useSession();
+  const authSession = useStaffUser();
   const userId = authSession?.user?.id;
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);

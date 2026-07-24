@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getStaffSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { sessions, messages, users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -61,7 +60,7 @@ export async function DELETE(
 ) {
   const requestId = crypto.randomUUID();
   try {
-    const authSession = await getServerSession(authOptions);
+    const authSession = await getStaffSession();
     if (!authSession?.user || authSession.user.role !== "store_manager") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getStaffSession } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import bcrypt from "bcryptjs";
 import { log, serializeError } from "@/lib/log";
 
 const TEMP_PASSWORD_MIN_LEN = 12;
@@ -17,10 +16,20 @@ function isUniqueViolation(error: unknown): boolean {
   return code === "23505" || cause?.code === "23505";
 }
 
+/** Supabase Auth duplicate-email error (from admin.createUser). */
+function isSupabaseDuplicate(error: { code?: string; status?: number; message?: string } | null): boolean {
+  if (!error) return false;
+  return (
+    error.code === "email_exists" ||
+    error.status === 422 ||
+    /already.*regist|already exists/i.test(error.message ?? "")
+  );
+}
+
 export async function GET() {
   const requestId = crypto.randomUUID();
   try {
-    const session = await getServerSession(authOptions);
+    const session = await getStaffSession();
     if (!session?.user || session.user.role !== "store_manager") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -49,7 +58,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const requestId = crypto.randomUUID();
   try {
-    const session = await getServerSession(authOptions);
+    const session = await getStaffSession();
     if (!session?.user || session.user.role !== "store_manager") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -85,30 +94,63 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const passwordHash = await bcrypt.hash(password, 12);
+    // Create the Supabase auth identity first (it owns credentials now), then
+    // mirror a public.users profile row keyed on the same id. email_confirm so
+    // the invitee is immediately active with no confirmation email.
+    const admin = createAdminClient();
+    const { data: created, error: createErr } = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { name },
+    });
+
+    if (createErr || !created?.user) {
+      if (isSupabaseDuplicate(createErr)) {
+        return NextResponse.json(
+          { error: "A user with that email already exists." },
+          { status: 409 }
+        );
+      }
+      throw createErr ?? new Error("Supabase createUser returned no user");
+    }
 
     // mustResetPassword: the invited teammate signs in with the temp password
     // the manager chose, then is forced to set their own on first login.
-    const [user] = await db
-      .insert(users)
-      .values({ email, name, passwordHash, role, mustResetPassword: true })
-      .returning({
-        id: users.id,
-        email: users.email,
-        name: users.name,
-        role: users.role,
-        isActive: users.isActive,
-        createdAt: users.createdAt,
-      });
+    let user;
+    try {
+      [user] = await db
+        .insert(users)
+        .values({
+          id: created.user.id,
+          email,
+          name,
+          role,
+          mustResetPassword: true,
+        })
+        .returning({
+          id: users.id,
+          email: users.email,
+          name: users.name,
+          role: users.role,
+          isActive: users.isActive,
+          createdAt: users.createdAt,
+        });
+    } catch (insertErr) {
+      // Roll back the orphaned auth user so a retry isn't blocked by a
+      // half-created account.
+      await admin.auth.admin.deleteUser(created.user.id).catch(() => {});
+      if (isUniqueViolation(insertErr)) {
+        return NextResponse.json(
+          { error: "A user with that email already exists." },
+          { status: 409 }
+        );
+      }
+      throw insertErr;
+    }
 
     return NextResponse.json({ user }, { status: 201 });
   } catch (error) {
-    if (isUniqueViolation(error)) {
-      return NextResponse.json(
-        { error: "A user with that email already exists." },
-        { status: 409 }
-      );
-    }
     log.error("admin.users_post_failed", { requestId, error: serializeError(error) });
     return NextResponse.json(
       { error: "Failed to create user" },
@@ -120,7 +162,7 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const requestId = crypto.randomUUID();
   try {
-    const session = await getServerSession(authOptions);
+    const session = await getStaffSession();
     if (!session?.user || session.user.role !== "store_manager") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

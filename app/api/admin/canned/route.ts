@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getStaffSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { cannedResponses } from "@/lib/db/schema";
 import { eq, asc } from "drizzle-orm";
@@ -9,7 +8,7 @@ import { log, serializeError } from "@/lib/log";
 export const dynamic = "force-dynamic";
 
 async function requireManager() {
-  const session = await getServerSession(authOptions);
+  const session = await getStaffSession();
   if (!session?.user || session.user.role !== "store_manager") {
     return null;
   }

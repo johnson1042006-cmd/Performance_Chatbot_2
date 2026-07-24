@@ -87,37 +87,26 @@ export default async function globalSetup() {
   );
 
   // Warm up the webServer's database connection pool. The Next.js process
-  // opens its pooled Postgres connection lazily; the first credentials check
-  // pays that setup cost. By firing one full login here (before any test
-  // runs), we ensure the connection is established for the actual tests.
+  // opens its pooled Postgres connection lazily; the first login pays that
+  // setup cost. Firing one login here (before any test runs) establishes the
+  // connection and warms the Supabase auth path.
   try {
-    const csrfRes = await fetch(`${serverBase}/api/auth/csrf`, {
-      headers: { ...bypassHeaders },
-    });
-    const { csrfToken } = (await csrfRes.json()) as { csrfToken: string };
-
-    const body = new URLSearchParams({
-      email: AGENT_EMAIL,
-      // Seed passwords are now env-driven (FIX-7). Prefer the explicit e2e var,
-      // then the seed var the suite ran db:seed with, then the legacy default.
-      password:
-        process.env.E2E_AGENT_PASS ??
-        process.env.SEED_AGENT_PASSWORD ??
-        "agent123",
-      csrfToken,
-      json: "true",
-    });
-    await fetch(`${serverBase}/api/auth/callback/credentials`, {
+    await fetch(`${serverBase}/api/auth/login`, {
       method: "POST",
       headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Type": "application/json",
         ...bypassHeaders,
       },
-      body: body.toString(),
-      // Don't follow the redirect — we only care that the request was processed.
+      body: JSON.stringify({
+        email: AGENT_EMAIL,
+        password:
+          process.env.E2E_AGENT_PASS ??
+          process.env.SEED_AGENT_PASSWORD ??
+          "agent123",
+      }),
       redirect: "manual",
     });
-    console.log("[e2e/global-setup] warmed up NextAuth credentials handler");
+    console.log("[e2e/global-setup] warmed up Supabase login handler");
   } catch (err) {
     // Non-fatal: test will be slower on cold start but not broken.
     console.warn("[e2e/global-setup] warm-up request skipped:", String(err));

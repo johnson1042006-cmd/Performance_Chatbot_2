@@ -1,59 +1,43 @@
-import { withAuth } from "next-auth/middleware";
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
+import { updateSession } from "@/lib/supabase/middleware";
 
-export default withAuth(
-  function middleware(req) {
-    const token = req.nextauth.token;
-    const path = req.nextUrl.pathname;
+/**
+ * Phase 2 (Supabase Auth): the middleware is intentionally thin. It runs on the
+ * edge runtime, which cannot query Postgres, and the Supabase JWT carries only
+ * identity (not the app role or mustResetPassword flag — those stay in
+ * public.users, read in Node). So it does exactly two things:
+ *   1. updateSession() — refresh the Supabase auth cookie on every matched
+ *      request (mandatory; skipping it silently logs users out).
+ *   2. Authenticated-gate: redirect unauthenticated users away from /dashboard
+ *      and /password-reset to /login.
+ *
+ * The role gate (/dashboard/manager/*) and the forced-reset gate moved to Node
+ * server layers: app/dashboard/manager/layout.tsx + app/dashboard/layout.tsx
+ * for pages, and requireManager/requireStaff for /api/* routes. API paths pass
+ * through here — route handlers do their own authorization (and some
+ * /api/sessions endpoints are customer-facing with no Supabase session).
+ */
+export async function middleware(request: NextRequest) {
+  const { response, user } = await updateSession(request);
+  const path = request.nextUrl.pathname;
 
-    // Force first-login password change before any protected page renders.
-    // The reset page itself is exempt so the user can submit the form, and
-    // the NextAuth API routes are exempt so sign-out and CSRF still work.
-    // Staff API routes get a 403 (a redirect makes no sense for fetch calls)
-    // so a must-reset user can't keep operating the dashboard via direct
-    // API requests.
-    if (
-      token?.mustResetPassword === true &&
-      path !== "/password-reset" &&
-      !path.startsWith("/api/auth")
-    ) {
-      if (path.startsWith("/api/")) {
-        return NextResponse.json(
-          { error: "password_reset_required" },
-          { status: 403 }
-        );
-      }
-      return NextResponse.redirect(new URL("/password-reset", req.url));
-    }
-
-    if (path.startsWith("/dashboard/manager") && token?.role !== "store_manager") {
-      return NextResponse.redirect(new URL("/dashboard/agent", req.url));
-    }
-
-    return NextResponse.next();
-  },
-  {
-    callbacks: {
-      authorized: ({ token, req }) => {
-        const path = req.nextUrl.pathname;
-        if (path.startsWith("/dashboard") || path === "/password-reset") {
-          return !!token;
-        }
-        // API paths pass through: route handlers do their own auth (and some
-        // /api/sessions endpoints are customer-facing with no NextAuth token).
-        // The middleware body above still enforces forced password reset for
-        // any logged-in staff token.
-        return true;
-      },
-    },
+  const needsAuth =
+    path.startsWith("/dashboard") || path === "/password-reset";
+  if (needsAuth && !user) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/login";
+    return NextResponse.redirect(url);
   }
-);
+
+  return response;
+}
 
 export const config = {
   matcher: [
     "/dashboard/:path*",
     "/password-reset",
-    // Staff-facing API groups — included so the forced-reset guard applies.
+    // Staff-facing API groups — matched so the Supabase auth cookie is
+    // refreshed on these requests (route handlers still self-authorize).
     "/api/admin/:path*",
     "/api/analytics/:path*",
     "/api/sessions/:path*",

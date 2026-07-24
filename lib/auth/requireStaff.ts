@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getStaffSession } from "@/lib/auth";
 
 export interface StaffContext {
   userId: string;
@@ -10,11 +9,13 @@ export interface StaffContext {
 }
 
 /**
- * Guard for staff-only API routes (agent OR manager). Mirrors
- * [requireManager] but accepts either authenticated role. Used by the
- * Phase 5.5 ticket routes so agents can list and edit their own tickets
- * while managers retain global access. Returns either a `StaffContext`
+ * Guard for staff-only API routes (agent OR manager). Mirrors [requireManager]
+ * but accepts either authenticated role. Returns either a `StaffContext`
  * (caller continues) or a `NextResponse` (caller returns it).
+ *
+ * Also enforces the forced-password-reset gate for `/api/*` (moved from
+ * middleware in Phase 2): a must-reset staff member gets 403
+ * `password_reset_required`.
  *
  * ```ts
  * const guard = await requireStaff();
@@ -23,7 +24,7 @@ export interface StaffContext {
  * ```
  */
 export async function requireStaff(): Promise<StaffContext | NextResponse> {
-  const session = await getServerSession(authOptions);
+  const session = await getStaffSession();
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -32,6 +33,12 @@ export async function requireStaff(): Promise<StaffContext | NextResponse> {
     session.user.role !== "support_agent"
   ) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  if (session.user.mustResetPassword) {
+    return NextResponse.json(
+      { error: "password_reset_required" },
+      { status: 403 }
+    );
   }
   return {
     userId: session.user.id,

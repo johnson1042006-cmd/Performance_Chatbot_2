@@ -36,10 +36,13 @@ vi.mock("@/lib/db/schema", () => ({
   },
 }));
 
-vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
-vi.mock("@/lib/auth", () => ({ authOptions: {} }));
-vi.mock("bcryptjs", () => ({
-  default: { hash: vi.fn().mockResolvedValue("hashed-pw") },
+vi.mock("@/lib/auth", () => ({ getStaffSession: vi.fn(), bustUserFlagCache: vi.fn() }));
+const mockCreateUser = vi.fn();
+const mockDeleteUser = vi.fn();
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: () => ({
+    auth: { admin: { createUser: mockCreateUser, deleteUser: mockDeleteUser } },
+  }),
 }));
 vi.mock("@/lib/log", () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -57,8 +60,8 @@ function makeReq(body: object) {
 }
 
 async function asManager() {
-  const { getServerSession } = await import("next-auth");
-  (getServerSession as any).mockResolvedValue({
+  const { getStaffSession } = await import("@/lib/auth");
+  (getStaffSession as any).mockResolvedValue({
     user: { id: "mgr-1", role: "store_manager", name: "Manager", email: "m@pc.com" },
   });
 }
@@ -83,6 +86,8 @@ describe("POST /api/admin/users (invite onboarding)", () => {
         createdAt: new Date().toISOString(),
       },
     ]);
+    mockCreateUser.mockResolvedValue({ data: { user: { id: "u-new" } }, error: null });
+    mockDeleteUser.mockResolvedValue({ error: null });
     await asManager();
   });
 

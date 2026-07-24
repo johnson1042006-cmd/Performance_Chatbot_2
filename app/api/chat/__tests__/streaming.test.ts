@@ -87,8 +87,7 @@ vi.mock("@/lib/ai/callClaude", () => ({
   CALL_CLAUDE_ERROR_MESSAGE: "trouble",
 }));
 
-vi.mock("next-auth", () => ({ getServerSession: vi.fn() }));
-vi.mock("@/lib/auth", () => ({ authOptions: {} }));
+vi.mock("@/lib/auth", () => ({ getStaffSession: vi.fn(), bustUserFlagCache: vi.fn() }));
 
 // Token enforcement is covered in security.test.ts; allow everything here so
 // positional mockDbSelect queues stay aligned with the route's own selects.

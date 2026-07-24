@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getStaffSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { sql } from "drizzle-orm";
 import { log, serializeError } from "@/lib/log";
@@ -46,7 +45,7 @@ interface HistoryRow {
 export async function GET(req: NextRequest) {
   const requestId = crypto.randomUUID();
   try {
-    const session = await getServerSession(authOptions);
+    const session = await getStaffSession();
     if (!session?.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

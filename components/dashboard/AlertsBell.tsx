@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useSession } from "next-auth/react";
+import { useStaffUser } from "@/components/providers/StaffSessionProvider";
 import { Bell, X } from "lucide-react";
 import { FRIENDLY } from "./alertFriendlyNames";
 import { ALERTS_CHANNEL } from "@/lib/pusher/channels";
@@ -22,7 +22,7 @@ interface AlertEvent {
  * via 30s polling and the "alerts" Pusher channel.
  */
 export default function AlertsBell() {
-  const { data: session } = useSession();
+  const session = useStaffUser();
   const isManager = session?.user?.role === "store_manager";
   const [events, setEvents] = useState<AlertEvent[]>([]);
   const [open, setOpen] = useState(false);

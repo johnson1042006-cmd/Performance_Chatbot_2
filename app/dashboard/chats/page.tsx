@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { useSession } from "next-auth/react";
+import { useStaffUser } from "@/components/providers/StaffSessionProvider";
 import TopBar from "@/components/ui/TopBar";
 import Badge from "@/components/ui/Badge";
 import SessionQueue from "@/components/dashboard/SessionQueue";
@@ -30,7 +30,7 @@ interface SessionData {
 const MAX_PINNED = 6;
 
 export default function LiveChatsPage() {
-  const { data: authSession } = useSession();
+  const authSession = useStaffUser();
   const { addToast } = useToast();
   const [pinnedTabs, setPinnedTabs] = useState<SessionData[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);

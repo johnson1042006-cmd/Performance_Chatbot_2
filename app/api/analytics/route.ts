@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getStaffSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { sessions, messages } from "@/lib/db/schema";
 import { eq, gte, sql, and, ne, isNull } from "drizzle-orm";
@@ -12,7 +11,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const requestId = crypto.randomUUID();
   try {
-    const session = await getServerSession(authOptions);
+    const session = await getStaffSession();
     if (!session?.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useSession } from "next-auth/react";
+import { useStaffUser } from "@/components/providers/StaffSessionProvider";
 import MessageThread from "./MessageThread";
 import PageContextBadge from "./PageContextBadge";
 import AITrace from "./AITrace";
@@ -89,7 +89,7 @@ export default function ChatPanel({
   sendRef,
   focusReplyRef,
 }: ChatPanelProps) {
-  const { data: authSession } = useSession();
+  const authSession = useStaffUser();
   const { addToast } = useToast();
   const [messages, setMessages] = useState<Message[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(true);

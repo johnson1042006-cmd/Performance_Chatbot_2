@@ -1,6 +1,5 @@
 "use client";
 
-import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import Image from "next/image";
@@ -17,17 +16,20 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
 
-    const result = await signIn("credentials", {
-      email,
-      password,
-      redirect: false,
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
     });
 
-    if (result?.error) {
+    if (!res.ok) {
       setError("Invalid email or password");
       setLoading(false);
     } else {
+      // Full navigation so the new auth cookie is picked up by the server
+      // (middleware + dashboard layout) on the next request.
       router.push("/dashboard");
+      router.refresh();
     }
   };
 

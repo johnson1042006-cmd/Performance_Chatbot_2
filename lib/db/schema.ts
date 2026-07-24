@@ -67,9 +67,16 @@ export const chatEventTypeEnum = pgEnum("chat_event_type", [
 ]);
 
 export const users = pgTable("users", {
+  // Phase 2: id is also a FK to auth.users(id) (constraint added via
+  // drizzle/0009_supabase_auth.sql — auth.users isn't a Drizzle table).
+  // Supabase Auth owns identity; this table stays the app's profile/authz
+  // source of truth (role, isActive, mustResetPassword).
   id: uuid("id").defaultRandom().primaryKey(),
   email: varchar("email", { length: 255 }).notNull().unique(),
-  passwordHash: varchar("password_hash", { length: 255 }).notNull(),
+  // Phase 2: Supabase Auth owns credentials now. Kept (nullable) as a frozen
+  // rollback lever — NextAuth's authorize() reads it if we revert. New invites
+  // leave it null. Drop in a later cleanup phase.
+  passwordHash: varchar("password_hash", { length: 255 }),
   role: userRoleEnum("role").notNull().default("support_agent"),
   name: varchar("name", { length: 255 }).notNull(),
   avatarUrl: varchar("avatar_url", { length: 500 }),

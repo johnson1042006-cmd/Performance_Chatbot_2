@@ -1,6 +1,6 @@
 "use client";
 
-import { signOut } from "next-auth/react";
+import { createClient } from "@/lib/supabase/client";
 import { useState } from "react";
 
 const MIN_LEN = 12;
@@ -45,9 +45,10 @@ export default function PasswordResetPage() {
         return;
       }
 
-      // Sign the user out so the JWT is regenerated on next login with the
-      // fresh `mustResetPassword=false` flag and the new password.
-      await signOut({ callbackUrl: "/login" });
+      // Sign the user out so they re-authenticate with the new password and a
+      // fresh session (mustResetPassword is now false in public.users).
+      await createClient().auth.signOut();
+      window.location.href = "/login";
     } catch {
       setError("Something went wrong. Please try again.");
       setLoading(false);

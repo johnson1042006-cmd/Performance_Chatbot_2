@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getStaffSession } from "@/lib/auth";
 import { getPusher } from "@/lib/pusher/server";
 import { sessionChannel } from "@/lib/pusher/channels";
 
@@ -10,7 +9,7 @@ export async function POST(
   _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const authSession = await getServerSession(authOptions);
+  const authSession = await getStaffSession();
   if (!authSession?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

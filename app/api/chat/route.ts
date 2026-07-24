@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getStaffSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { messages, sessions, knowledgeBase } from "@/lib/db/schema";
 import { and, eq, gt, sql } from "drizzle-orm";
@@ -100,7 +99,7 @@ export async function POST(req: NextRequest) {
 
     let agentUser: { id: string; role: string } | null = null;
     if (role === "agent") {
-      const authSession = await getServerSession(authOptions);
+      const authSession = await getStaffSession();
       if (!authSession?.user) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
       }

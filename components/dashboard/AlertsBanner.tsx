@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useSession } from "next-auth/react";
+import { useStaffUser } from "@/components/providers/StaffSessionProvider";
 import { AlertTriangle, X } from "lucide-react";
 import { ALERTS_CHANNEL } from "@/lib/pusher/channels";
 
@@ -27,7 +27,7 @@ const FRIENDLY: Record<string, string> = {
  * there are no unacked alerts.
  */
 export default function AlertsBanner() {
-  const { data: session } = useSession();
+  const session = useStaffUser();
   const isManager = session?.user?.role === "store_manager";
   const [events, setEvents] = useState<AlertEvent[]>([]);
 

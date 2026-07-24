@@ -1,9 +1,9 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import { createDb } from "../lib/db/connect";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { randomBytes } from "crypto";
-import bcrypt from "bcryptjs";
+import { createDb } from "../lib/db/connect";
 import { users } from "../lib/db/schema";
 
 // The credentials that shipped in older docs/seeds. We refuse to seed these
@@ -33,51 +33,82 @@ function resolvePassword(envVar: string, label: string): string {
   return generated;
 }
 
+/** Create the Supabase auth user, or update its password if it already exists. Returns the auth user id. */
+async function upsertAuthUser(
+  admin: SupabaseClient,
+  email: string,
+  password: string,
+  name: string
+): Promise<string> {
+  const { data: list } = await admin.auth.admin.listUsers({ perPage: 1000 });
+  const existing = list?.users.find(
+    (u) => u.email?.toLowerCase() === email.toLowerCase()
+  );
+
+  if (existing) {
+    const { error } = await admin.auth.admin.updateUserById(existing.id, {
+      password,
+    });
+    if (error) throw error;
+    return existing.id;
+  }
+
+  const { data, error } = await admin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: { name },
+  });
+  if (error || !data.user) throw error ?? new Error("createUser returned no user");
+  return data.user.id;
+}
+
 async function seed() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const secret = process.env.SUPABASE_SECRET_KEY;
+  if (!url || !secret) {
+    throw new Error("Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SECRET_KEY.");
+  }
+  const admin = createClient(url, secret, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
   const { db, client } = createDb();
 
-  const managerPassword = resolvePassword("SEED_MANAGER_PASSWORD", "manager");
-  const agentPassword = resolvePassword("SEED_AGENT_PASSWORD", "agent");
-
-  const managerHash = await bcrypt.hash(managerPassword, 12);
-  const agentHash = await bcrypt.hash(agentPassword, 12);
-
-  // upsert by email so re-runs (or already-seeded environments) still flip
-  // mustResetPassword=true on the existing rows. This is the security
-  // backstop: default credentials must NEVER stay valid past first login.
-  await db
-    .insert(users)
-    .values({
+  const seeds = [
+    {
       email: "manager@performancecycle.com",
-      passwordHash: managerHash,
-      role: "store_manager",
       name: "Store Manager",
-      mustResetPassword: true,
-      passwordUpdatedAt: null,
-    })
-    .onConflictDoUpdate({
-      target: users.email,
-      set: {
-        mustResetPassword: true,
-      },
-    });
-
-  await db
-    .insert(users)
-    .values({
+      role: "store_manager" as const,
+      password: resolvePassword("SEED_MANAGER_PASSWORD", "manager"),
+    },
+    {
       email: "agent@performancecycle.com",
-      passwordHash: agentHash,
-      role: "support_agent",
       name: "Support Agent",
-      mustResetPassword: true,
-      passwordUpdatedAt: null,
-    })
-    .onConflictDoUpdate({
-      target: users.email,
-      set: {
+      role: "support_agent" as const,
+      password: resolvePassword("SEED_AGENT_PASSWORD", "agent"),
+    },
+  ];
+
+  for (const s of seeds) {
+    const id = await upsertAuthUser(admin, s.email, s.password, s.name);
+    // Mirror/refresh the public.users profile. onConflict flips
+    // mustResetPassword=true on re-runs — the security backstop: default
+    // credentials must NEVER stay valid past first login.
+    await db
+      .insert(users)
+      .values({
+        id,
+        email: s.email,
+        role: s.role,
+        name: s.name,
         mustResetPassword: true,
-      },
-    });
+        passwordUpdatedAt: null,
+      })
+      .onConflictDoUpdate({
+        target: users.email,
+        set: { mustResetPassword: true },
+      });
+  }
 
   console.log(
     "Seeded/updated 2 users (manager + agent) with mustResetPassword=true"
@@ -86,4 +117,7 @@ async function seed() {
   await client.end();
 }
 
-seed().catch(console.error);
+seed().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

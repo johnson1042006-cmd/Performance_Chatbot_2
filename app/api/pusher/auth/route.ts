@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getStaffSession } from "@/lib/auth";
 import { getPusher } from "@/lib/pusher/server";
 import {
   sessionIdFromChannel,
@@ -53,7 +52,7 @@ export async function POST(req: NextRequest) {
       channelName === DASHBOARD_CHANNEL ||
       channelName === ALERTS_CHANNEL
     ) {
-      const authSession = await getServerSession(authOptions);
+      const authSession = await getStaffSession();
       authorized =
         !!authSession?.user &&
         (authSession.user.role === "store_manager" ||
