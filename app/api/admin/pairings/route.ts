@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getStaffSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { productPairings, products } from "@/lib/db/schema";
 import { alias } from "drizzle-orm/pg-core";
@@ -10,7 +9,7 @@ import { log, serializeError } from "@/lib/log";
 export async function GET() {
   const requestId = crypto.randomUUID();
   try {
-    const session = await getServerSession(authOptions);
+    const session = await getStaffSession();
     if (!session?.user || session.user.role !== "store_manager") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -50,7 +49,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const requestId = crypto.randomUUID();
   try {
-    const session = await getServerSession(authOptions);
+    const session = await getStaffSession();
     if (!session?.user || session.user.role !== "store_manager") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -83,7 +82,7 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const requestId = crypto.randomUUID();
   try {
-    const session = await getServerSession(authOptions);
+    const session = await getStaffSession();
     if (!session?.user || session.user.role !== "store_manager") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

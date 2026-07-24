@@ -3,7 +3,8 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { useSession, signOut } from "next-auth/react";
+import { useStaffUser } from "@/components/providers/StaffSessionProvider";
+import { createClient } from "@/lib/supabase/client";
 import { useEffect, useState, useCallback } from "react";
 import {
   LayoutDashboard,
@@ -95,7 +96,7 @@ const navItems: NavItem[] = [
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const { data: session } = useSession();
+  const session = useStaffUser();
   const role = session?.user?.role;
   const isManager = role === "store_manager";
   const push = usePushNotifications();
@@ -247,13 +248,14 @@ export default function Sidebar() {
             )}
             <AlertsBell />
             <button
-              onClick={() => {
+              onClick={async () => {
                 // Clear agent presence before signing out so anyAgentsOnline()
                 // returns false immediately rather than waiting up to 60 s for
                 // the heartbeat window to expire. Best-effort — sign-out
                 // proceeds regardless of whether the beacon lands.
                 navigator.sendBeacon("/api/presence/offline");
-                signOut({ callbackUrl: "/login" });
+                await createClient().auth.signOut();
+                window.location.href = "/login";
               }}
               className="text-white/40 hover:text-white transition-colors"
             >

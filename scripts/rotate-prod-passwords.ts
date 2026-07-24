@@ -1,14 +1,14 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import { createDb } from "../lib/db/connect";
+import { createClient } from "@supabase/supabase-js";
 import { eq } from "drizzle-orm";
-import bcrypt from "bcryptjs";
+import { createDb } from "../lib/db/connect";
 import { users } from "../lib/db/schema";
 
-// One-off rotation for the two seeded accounts. Sets fresh bcrypt hashes from
-// env vars and forces a password reset on next login. Run after any concern
-// that the old seeded credentials may have been exposed.
+// One-off rotation for the two seeded accounts. Sets fresh passwords in
+// Supabase Auth and forces a password reset on next login. Run after any
+// concern that the old seeded credentials may have been exposed.
 const LEAKED_DEFAULTS = new Set(["manager123", "agent123"]);
 
 function requirePassword(envVar: string): string {
@@ -27,6 +27,14 @@ function requirePassword(envVar: string): string {
 }
 
 async function rotate() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const secret = process.env.SUPABASE_SECRET_KEY;
+  if (!url || !secret) {
+    throw new Error("Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SECRET_KEY.");
+  }
+  const admin = createClient(url, secret, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
   const { db, client } = createDb();
 
   const managerPassword = requirePassword("SEED_MANAGER_PASSWORD");
@@ -37,18 +45,32 @@ async function rotate() {
     { email: "agent@performancecycle.com", password: agentPassword },
   ];
 
+  const { data: list } = await admin.auth.admin.listUsers({ perPage: 1000 });
+
   for (const { email, password } of updates) {
-    const passwordHash = await bcrypt.hash(password, 12);
-    const result = await db
-      .update(users)
-      .set({ passwordHash, mustResetPassword: true, passwordUpdatedAt: null })
-      .where(eq(users.email, email))
-      .returning({ id: users.id, email: users.email });
-    if (result.length === 0) {
-      console.warn(`[rotate] no user found for ${email} — skipped`);
-    } else {
-      console.log(`[rotate] rotated password + forced reset for ${email}`);
+    const authUser = list?.users.find(
+      (u) => u.email?.toLowerCase() === email.toLowerCase()
+    );
+    if (!authUser) {
+      console.warn(`[rotate] no auth user found for ${email} — skipped`);
+      continue;
     }
+
+    const { error } = await admin.auth.admin.updateUserById(authUser.id, {
+      password,
+    });
+    if (error) {
+      console.error(`[rotate] failed to set password for ${email}: ${error.message}`);
+      continue;
+    }
+
+    // Force reset on next login (public.users owns the flag).
+    await db
+      .update(users)
+      .set({ mustResetPassword: true, passwordUpdatedAt: null })
+      .where(eq(users.email, email));
+
+    console.log(`[rotate] rotated password + forced reset for ${email}`);
   }
 
   await client.end();

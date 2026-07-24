@@ -64,21 +64,20 @@ vi.mock("@/lib/log", () => ({
   serializeError: () => ({}),
 }));
 
-const mockGetServerSession = vi.fn();
-vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
-vi.mock("@/lib/auth", () => ({ authOptions: {} }));
+const mockGetStaffSession = vi.fn();
+vi.mock("@/lib/auth", () => ({ getStaffSession: mockGetStaffSession }));
 
 describe("GET /api/admin/pairings", () => {
   beforeEach(() => {
     mockDbSelect.mockReset();
-    mockGetServerSession.mockReset();
-    mockGetServerSession.mockResolvedValue({
+    mockGetStaffSession.mockReset();
+    mockGetStaffSession.mockResolvedValue({
       user: { id: "u-1", role: "store_manager", name: "Manager", email: "m@x" },
     });
   });
 
   it("returns 401 for non-managers", async () => {
-    mockGetServerSession.mockResolvedValue({
+    mockGetStaffSession.mockResolvedValue({
       user: { id: "u-2", role: "support_agent", name: "Agent", email: "a@x" },
     });
     const { GET } = await import("@/app/api/admin/pairings/route");

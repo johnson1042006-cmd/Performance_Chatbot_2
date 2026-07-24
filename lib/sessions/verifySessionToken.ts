@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getStaffSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { sessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -82,7 +81,7 @@ export async function verifySessionAccess(
   req: NextRequest,
   sessionId: string
 ): Promise<boolean> {
-  const authSession = await getServerSession(authOptions);
+  const authSession = await getStaffSession();
   if (
     authSession?.user &&
     (authSession.user.role === "store_manager" ||

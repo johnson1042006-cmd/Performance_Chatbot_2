@@ -83,9 +83,6 @@ vi.mock("@/lib/ai/callClaude", () => ({
   callClaude: vi.fn().mockResolvedValue("AI response text"),
 }));
 
-vi.mock("next-auth", () => ({
-  getServerSession: vi.fn(),
-}));
 
 // Session-token enforcement is exercised directly in security.test.ts. Here
 // we always allow so the positional mockDbSelect queues stay aligned with the
@@ -94,9 +91,7 @@ vi.mock("@/lib/sessions/verifySessionToken", () => ({
   verifySessionAccess: vi.fn().mockResolvedValue(true),
 }));
 
-vi.mock("@/lib/auth", () => ({
-  authOptions: {},
-}));
+vi.mock("@/lib/auth", () => ({ getStaffSession: vi.fn(), bustUserFlagCache: vi.fn() }));
 
 // Mock @/lib/presence so anyAgentsOnline returns a controllable value
 // without dragging in a `users` schema-mock proxy chain.
@@ -388,8 +383,8 @@ describe("GET /api/chat/settings", () => {
 // ---------------------------------------------------------------------------
 describe("/api/admin/settings", () => {
   it("requires store_manager role for GET", async () => {
-    const { getServerSession } = await import("next-auth");
-    (getServerSession as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    const { getStaffSession } = await import("@/lib/auth");
+    (getStaffSession as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       user: { id: "u1", role: "support_agent", name: "Agent", email: "a@test.com" },
     });
 
@@ -399,8 +394,8 @@ describe("/api/admin/settings", () => {
   });
 
   it("requires store_manager role for POST", async () => {
-    const { getServerSession } = await import("next-auth");
-    (getServerSession as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    const { getStaffSession } = await import("@/lib/auth");
+    (getStaffSession as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       user: { id: "u1", role: "support_agent", name: "Agent", email: "a@test.com" },
     });
 
@@ -417,8 +412,8 @@ describe("/api/admin/settings", () => {
   });
 
   it("returns 401 when not authenticated", async () => {
-    const { getServerSession } = await import("next-auth");
-    (getServerSession as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
+    const { getStaffSession } = await import("@/lib/auth");
+    (getStaffSession as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
 
     const { GET } = await import("@/app/api/admin/settings/route");
     const res = await GET();
@@ -431,8 +426,8 @@ describe("/api/admin/settings", () => {
 // ---------------------------------------------------------------------------
 describe("GET /api/analytics", () => {
   it("returns 401 when not authenticated", async () => {
-    const { getServerSession } = await import("next-auth");
-    (getServerSession as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
+    const { getStaffSession } = await import("@/lib/auth");
+    (getStaffSession as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
 
     const { GET } = await import("@/app/api/analytics/route");
     const res = await GET();

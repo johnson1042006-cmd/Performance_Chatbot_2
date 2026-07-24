@@ -1,62 +1,65 @@
-import { NextAuthOptions } from "next-auth";
-import CredentialsProvider from "next-auth/providers/credentials";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
-import { eq, sql } from "drizzle-orm";
-import { enforce } from "@/lib/rateLimit";
-import bcrypt from "bcryptjs";
+import { eq } from "drizzle-orm";
+import { createClient } from "@/lib/supabase/server";
 
-declare module "next-auth" {
-  interface User {
+/**
+ * Staff session shape used across the dashboard/API. Identity comes from
+ * Supabase Auth; role/isActive/name/mustResetPassword are the app's own
+ * profile columns in public.users (Phase 2 keeps public.users as the authz
+ * source of truth — role is NOT in the Supabase JWT; that's deferred to Phase 4).
+ */
+export interface StaffSession {
+  user: {
     id: string;
-    role: "store_manager" | "support_agent";
-    name: string;
     email: string;
-  }
-  interface Session {
-    user: {
-      id: string;
-      role: "store_manager" | "support_agent";
-      name: string;
-      email: string;
-      mustResetPassword?: boolean;
-    };
-  }
-}
-
-declare module "next-auth/jwt" {
-  interface JWT {
-    id: string;
+    name: string;
     role: "store_manager" | "support_agent";
-    mustResetPassword?: boolean;
-  }
+    mustResetPassword: boolean;
+  };
 }
 
-// In-memory cache so the JWT callback isn't a DB hit on every request. 60s
-// is short enough that an admin clearing a user's reset flag is reflected
-// quickly, but long enough that hot pages don't hammer the users table.
-// Bust explicitly via `bustUserFlagCache(userId)` after a successful reset.
-type CacheEntry = { mustReset: boolean; expiresAt: number };
+type Profile = {
+  role: "store_manager" | "support_agent";
+  name: string;
+  isActive: boolean;
+  mustReset: boolean;
+};
+
+// In-memory cache so the per-request profile lookup isn't a DB hit on every
+// call. 60s is short enough that an admin clearing a reset flag / deactivating
+// a user is reflected quickly, long enough that hot pages don't hammer the
+// users table. Bust explicitly via bustUserFlagCache(userId) after a reset.
+type CacheEntry = { profile: Profile | null; expiresAt: number };
 const userFlagCache = new Map<string, CacheEntry>();
 
-async function loadMustReset(userId: string): Promise<boolean> {
+async function loadProfile(userId: string): Promise<Profile | null> {
   const hit = userFlagCache.get(userId);
-  if (hit && hit.expiresAt > Date.now()) return hit.mustReset;
+  if (hit && hit.expiresAt > Date.now()) return hit.profile;
 
   try {
     const [row] = await db
-      .select({ m: users.mustResetPassword })
+      .select({
+        role: users.role,
+        name: users.name,
+        isActive: users.isActive,
+        mustReset: users.mustResetPassword,
+      })
       .from(users)
       .where(eq(users.id, userId))
       .limit(1);
-    const mustReset = !!row?.m;
-    userFlagCache.set(userId, {
-      mustReset,
-      expiresAt: Date.now() + 60_000,
-    });
-    return mustReset;
+    const profile: Profile | null = row
+      ? {
+          role: row.role,
+          name: row.name,
+          isActive: row.isActive,
+          mustReset: !!row.mustReset,
+        }
+      : null;
+    userFlagCache.set(userId, { profile, expiresAt: Date.now() + 60_000 });
+    return profile;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -64,74 +67,30 @@ export function bustUserFlagCache(userId: string): void {
   userFlagCache.delete(userId);
 }
 
-export const authOptions: NextAuthOptions = {
-  providers: [
-    CredentialsProvider({
-      name: "Credentials",
-      credentials: {
-        email: { label: "Email", type: "email" },
-        password: { label: "Password", type: "password" },
-      },
-      async authorize(credentials, req) {
-        // Rate limit by IP before doing any DB or bcrypt work.
-        // 10 attempts / 60 seconds / IP. Returns null on limit, which NextAuth
-        // surfaces to the user as a generic "Invalid credentials" — we don't
-        // telegraph that they've been rate limited.
-        const ip =
-          (req?.headers?.["x-forwarded-for"] as string | undefined)
-            ?.split(",")[0]
-            ?.trim() || "unknown";
-        const rl = await enforce(`login:${ip}`, 10, 60);
-        if (!rl.ok) return null;
+/**
+ * Resolve the current staff session from the Supabase auth cookie. Returns null
+ * when there is no authenticated Supabase user, when the user has no profile
+ * row, or when the profile is deactivated (isActive=false → immediate access
+ * loss, since RLS isn't in play yet). Uses getUser() (revalidates the JWT
+ * against the Auth server), never getSession().
+ */
+export async function getStaffSession(): Promise<StaffSession | null> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
 
-        if (!credentials?.email || !credentials?.password) return null;
+  const profile = await loadProfile(user.id);
+  if (!profile || !profile.isActive) return null;
 
-        const [user] = await db
-          .select()
-          .from(users)
-          .where(sql`lower(${users.email}) = ${credentials.email.toLowerCase()}`)
-          .limit(1);
-
-        if (!user || !user.isActive) return null;
-
-        const isValid = await bcrypt.compare(
-          credentials.password,
-          user.passwordHash
-        );
-        if (!isValid) return null;
-
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-        };
-      },
-    }),
-  ],
-  callbacks: {
-    async jwt({ token, user }) {
-      if (user) {
-        token.id = user.id;
-        token.role = user.role;
-      }
-      if (token.id) {
-        token.mustResetPassword = await loadMustReset(token.id);
-      }
-      return token;
+  return {
+    user: {
+      id: user.id,
+      email: user.email ?? "",
+      name: profile.name,
+      role: profile.role,
+      mustResetPassword: profile.mustReset,
     },
-    async session({ session, token }) {
-      session.user.id = token.id;
-      session.user.role = token.role;
-      session.user.mustResetPassword = !!token.mustResetPassword;
-      return session;
-    },
-  },
-  pages: {
-    signIn: "/login",
-  },
-  session: {
-    strategy: "jwt",
-  },
-  secret: process.env.NEXTAUTH_SECRET,
-};
+  };
+}

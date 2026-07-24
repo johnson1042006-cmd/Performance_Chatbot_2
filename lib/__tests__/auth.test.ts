@@ -2,22 +2,24 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ---------------------------------------------------------------------------
-// Mock bcrypt and database
+// Mocks: Supabase server client (identity) + db (public.users profile)
 // ---------------------------------------------------------------------------
-vi.mock("bcryptjs", () => ({
-  default: {
-    compare: vi.fn(),
-  },
+const getUserMock = vi.fn();
+vi.mock("@/lib/supabase/server", () => ({
+  createClient: () => ({ auth: { getUser: getUserMock } }),
 }));
 
-const mockDbResult: any[] = [];
-
+const limitSpy = vi.fn();
+let mockProfileRows: any[] = [];
 vi.mock("@/lib/db", () => ({
   db: {
     select: () => ({
       from: () => ({
         where: () => ({
-          limit: () => Promise.resolve(mockDbResult),
+          limit: (...args: unknown[]) => {
+            limitSpy(...args);
+            return Promise.resolve(mockProfileRows);
+          },
         }),
       }),
     }),
@@ -25,166 +27,91 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("@/lib/db/schema", () => ({
-  users: { email: "email" },
+  users: {
+    id: "id",
+    role: "role",
+    name: "name",
+    isActive: "is_active",
+    mustResetPassword: "must_reset_password",
+  },
 }));
 
-vi.mock("drizzle-orm", () => ({
-  eq: vi.fn(),
-  sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values })),
-}));
+vi.mock("drizzle-orm", () => ({ eq: vi.fn() }));
 
-// ---------------------------------------------------------------------------
-// authOptions tests
-// ---------------------------------------------------------------------------
-describe("authOptions", () => {
-  let authOptions: any;
-  let bcrypt: any;
+async function loadModule() {
+  vi.resetModules();
+  return import("@/lib/auth");
+}
 
-  beforeEach(async () => {
+describe("getStaffSession", () => {
+  beforeEach(() => {
     vi.clearAllMocks();
-    mockDbResult.length = 0;
-
-    const authModule = await import("@/lib/auth");
-    authOptions = authModule.authOptions;
-
-    bcrypt = (await import("bcryptjs")).default;
+    mockProfileRows = [];
   });
 
-  it("uses JWT strategy", () => {
-    expect(authOptions.session.strategy).toBe("jwt");
+  it("returns null when there is no Supabase user", async () => {
+    getUserMock.mockResolvedValue({ data: { user: null } });
+    const { getStaffSession } = await loadModule();
+    expect(await getStaffSession()).toBeNull();
   });
 
-  it("uses /login as sign-in page", () => {
-    expect(authOptions.pages.signIn).toBe("/login");
+  it("returns null when the user has no profile row", async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: "u1", email: "a@x.com" } } });
+    mockProfileRows = [];
+    const { getStaffSession } = await loadModule();
+    expect(await getStaffSession()).toBeNull();
   });
 
-  it("has a credentials provider", () => {
-    expect(authOptions.providers).toHaveLength(1);
-    expect(authOptions.providers[0].name).toBe("Credentials");
+  it("returns null when the profile is deactivated", async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: "u2", email: "b@x.com" } } });
+    mockProfileRows = [
+      { role: "support_agent", name: "Agent", isActive: false, mustReset: false },
+    ];
+    const { getStaffSession } = await loadModule();
+    expect(await getStaffSession()).toBeNull();
   });
 
-  describe("authorize", () => {
-    function getAuthorize() {
-      return authOptions.providers[0].options.authorize;
-    }
-
-    it("returns null when credentials are missing", async () => {
-      const authorize = getAuthorize();
-      expect(await authorize(null)).toBeNull();
-      expect(await authorize({})).toBeNull();
-      expect(await authorize({ email: "a@test.com" })).toBeNull();
-      expect(await authorize({ password: "pass" })).toBeNull();
-    });
-
-    it("returns null when user is not found", async () => {
-      mockDbResult.length = 0; // empty result
-
-      const authorize = getAuthorize();
-      const result = await authorize({
-        email: "missing@test.com",
-        password: "pass123",
-      });
-      expect(result).toBeNull();
-    });
-
-    it("returns null when user is inactive", async () => {
-      mockDbResult.push({
-        id: "u1",
-        email: "inactive@test.com",
-        name: "Inactive",
-        passwordHash: "hashed",
-        role: "support_agent",
-        isActive: false,
-      });
-
-      const authorize = getAuthorize();
-      const result = await authorize({
-        email: "inactive@test.com",
-        password: "pass123",
-      });
-      expect(result).toBeNull();
-      // bcrypt.compare should NOT be called for inactive users
-      expect(bcrypt.compare).not.toHaveBeenCalled();
-    });
-
-    it("returns null when password is wrong", async () => {
-      mockDbResult.push({
-        id: "u2",
-        email: "agent@test.com",
-        name: "Agent",
-        passwordHash: "hashed",
-        role: "support_agent",
-        isActive: true,
-      });
-
-      bcrypt.compare.mockResolvedValueOnce(false);
-
-      const authorize = getAuthorize();
-      const result = await authorize({
-        email: "agent@test.com",
-        password: "wrongpass",
-      });
-      expect(result).toBeNull();
-      expect(bcrypt.compare).toHaveBeenCalledWith("wrongpass", "hashed");
-    });
-
-    it("returns user object for valid credentials", async () => {
-      mockDbResult.push({
+  it("returns the staff session for an active user", async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: "u3", email: "mgr@x.com" } } });
+    mockProfileRows = [
+      { role: "store_manager", name: "Manager", isActive: true, mustReset: false },
+    ];
+    const { getStaffSession } = await loadModule();
+    expect(await getStaffSession()).toEqual({
+      user: {
         id: "u3",
-        email: "manager@test.com",
-        name: "Manager",
-        passwordHash: "hashed",
-        role: "store_manager",
-        isActive: true,
-      });
-
-      bcrypt.compare.mockResolvedValueOnce(true);
-
-      const authorize = getAuthorize();
-      const result = await authorize({
-        email: "manager@test.com",
-        password: "correct",
-      });
-
-      expect(result).toEqual({
-        id: "u3",
-        email: "manager@test.com",
+        email: "mgr@x.com",
         name: "Manager",
         role: "store_manager",
-      });
+        mustResetPassword: false,
+      },
     });
   });
 
-  describe("callbacks", () => {
-    it("jwt callback stores user id and role in token", async () => {
-      const { jwt } = authOptions.callbacks;
-      const token = await jwt({
-        token: {},
-        user: { id: "u1", role: "store_manager" },
-      });
-      expect(token.id).toBe("u1");
-      expect(token.role).toBe("store_manager");
-    });
+  it("surfaces mustResetPassword from the profile", async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: "u4", email: "c@x.com" } } });
+    mockProfileRows = [
+      { role: "support_agent", name: "Agent", isActive: true, mustReset: true },
+    ];
+    const { getStaffSession } = await loadModule();
+    const session = await getStaffSession();
+    expect(session?.user.mustResetPassword).toBe(true);
+  });
 
-    it("jwt callback preserves token when no user", async () => {
-      const { jwt } = authOptions.callbacks;
-      const token = await jwt({
-        token: { id: "existing", role: "support_agent" },
-        user: undefined,
-      });
-      expect(token.id).toBe("existing");
-      expect(token.role).toBe("support_agent");
-    });
+  it("caches the profile for 60s and bustUserFlagCache clears it", async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: "u5", email: "d@x.com" } } });
+    mockProfileRows = [
+      { role: "support_agent", name: "Agent", isActive: true, mustReset: false },
+    ];
+    const { getStaffSession, bustUserFlagCache } = await loadModule();
 
-    it("session callback copies token to session.user", async () => {
-      const { session: sessionCb } = authOptions.callbacks;
-      const session = { user: { id: "", role: "" } };
-      const result = await sessionCb({
-        session,
-        token: { id: "u1", role: "store_manager" },
-      });
-      expect(result.user.id).toBe("u1");
-      expect(result.user.role).toBe("store_manager");
-    });
+    await getStaffSession();
+    await getStaffSession();
+    // Second call served from cache — the DB terminal ran only once.
+    expect(limitSpy).toHaveBeenCalledTimes(1);
+
+    bustUserFlagCache("u5");
+    await getStaffSession();
+    expect(limitSpy).toHaveBeenCalledTimes(2);
   });
 });

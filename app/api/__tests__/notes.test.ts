@@ -62,13 +62,8 @@ vi.mock("@/lib/pusher/server", () => ({
   }),
 }));
 
-vi.mock("next-auth", () => ({
-  getServerSession: vi.fn(),
-}));
 
-vi.mock("@/lib/auth", () => ({
-  authOptions: {},
-}));
+vi.mock("@/lib/auth", () => ({ getStaffSession: vi.fn(), bustUserFlagCache: vi.fn() }));
 
 vi.mock("@/lib/log", () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -86,8 +81,8 @@ async function setSessionUser(
     email: string;
   } | null
 ) {
-  const { getServerSession } = await import("next-auth");
-  (getServerSession as any).mockResolvedValue(user ? { user } : null);
+  const { getStaffSession } = await import("@/lib/auth");
+  (getStaffSession as any).mockResolvedValue(user ? { user } : null);
 }
 
 function resetMocks() {

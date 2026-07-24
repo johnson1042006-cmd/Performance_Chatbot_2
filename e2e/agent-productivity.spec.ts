@@ -75,7 +75,7 @@ async function loginAsAgent(page: Page) {
   await page.fill('input[id="password"]', AGENT_PASS);
   // 45 s covers a cold first credentials check (fresh build, cold connections).
   const credsDone = page.waitForResponse(
-    (r) => r.url().includes("/api/auth/callback/credentials"),
+    (r) => r.url().includes("/api/auth/login"),
     { timeout: 45000 }
   );
   await page.click('button[type="submit"]');
@@ -89,7 +89,7 @@ async function loginAsManager(page: Page) {
   await page.fill('input[id="email"]', MANAGER_EMAIL);
   await page.fill('input[id="password"]', MANAGER_PASS);
   const credsDone = page.waitForResponse(
-    (r) => r.url().includes("/api/auth/callback/credentials"),
+    (r) => r.url().includes("/api/auth/login"),
     { timeout: 45000 }
   );
   await page.click('button[type="submit"]');

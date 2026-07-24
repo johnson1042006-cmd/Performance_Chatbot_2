@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getStaffSession } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { db } from "@/lib/db";
 import {
   users,
@@ -18,7 +18,7 @@ export async function DELETE(
 ) {
   const requestId = crypto.randomUUID();
   try {
-    const session = await getServerSession(authOptions);
+    const session = await getStaffSession();
     if (!session?.user || session.user.role !== "store_manager") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -82,6 +82,11 @@ export async function DELETE(
     ]);
 
     await db.delete(users).where(eq(users.id, id));
+
+    // Remove the Supabase auth identity too. Profile is already gone, so the
+    // FK cascade is a no-op here; this just deletes the login. Idempotent.
+    const admin = createAdminClient();
+    await admin.auth.admin.deleteUser(id).catch(() => {});
 
     return NextResponse.json({ success: true });
   } catch (error) {

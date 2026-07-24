@@ -28,8 +28,8 @@ Source of truth for what’s required locally is `.env.example`.
 - **DIRECT_URL**: Supabase session pooler URL, port 5432 — used by drizzle-kit (`db:push`) and admin tooling. Rotates together with `DATABASE_URL` (same password).
 - **PUSHER_APP_ID / PUSHER_KEY / PUSHER_SECRET / PUSHER_CLUSTER**: Pusher server credentials (Phase 2). Rotate in Pusher dashboard; update Vercel env vars.
 - **NEXT_PUBLIC_PUSHER_KEY / NEXT_PUBLIC_PUSHER_CLUSTER**: Pusher browser values (Phase 2). Rotate with the Pusher key/cluster.
-- **NEXTAUTH_SECRET**: NextAuth signing secret (Phase 1). Rotate with `openssl rand -base64 32`; invalidate existing sessions.
-- **NEXTAUTH_URL**: Base URL for auth callbacks (Phase 1). Set to production URL in Vercel.
+- **NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY**: Supabase Auth — browser-safe (Phase 2). From Supabase Dashboard → Project Settings → API.
+- **SUPABASE_SECRET_KEY**: Supabase service-role key — SERVER ONLY (Phase 2). Used by `lib/supabase/admin.ts` for invites/resets. Never `NEXT_PUBLIC_`. Rotate in the Supabase dashboard; update Vercel.
 - **BIGCOMMERCE_STORE_HASH / BIGCOMMERCE_ACCESS_TOKEN**: BigCommerce API access (Phase 2). Rotate token in BigCommerce admin.
 - **CRON_SECRET**: Auth secret for `/api/cron/*` (Phase 5). Rotate with `openssl rand -base64 32`; update Vercel.
 - **SLACK_WEBHOOK_URL**: Slack alert notifications (Phase 5). Rotate by creating a new webhook URL.
@@ -43,18 +43,17 @@ Source of truth for what’s required locally is `.env.example`.
 Local env lives in `.env.local` only. Do NOT keep a `.env.production.local` in
 the repo directory: `next build`/`next start` run with NODE_ENV=production and
 prefer that file over `.env.local`, so (a) Vercel "Sensitive" vars pull as
-empty strings — an empty `NEXTAUTH_URL=""` makes next-auth throw `Invalid URL`
-and fails every page at prerender — and (b) its `DATABASE_URL` points local
-servers (including the e2e webServer) at the PRODUCTION database. This exact
-footgun broke local builds on 2026-07-12.
+empty strings — empty Supabase keys break auth on every page — and (b) its
+`DATABASE_URL` points local servers (including the e2e webServer) at the
+PRODUCTION database. This exact footgun broke local builds on 2026-07-12.
 
 To refresh local env: `vercel env pull .env.local --environment=preview`, then
 fix up the values that pull empty (Sensitive-type vars — Pusher, VAPID,
-CRON_SECRET, `USE_ROUTING_CLASSIFIER`) from their dashboards, and make sure
-`NEXTAUTH_URL="http://localhost:3000"` and `DATABASE_URL` never targets the
-production Supabase project (`ouixdfvsbbjfpkpfvcvq`) unless you are doing
-verified production work — use a local Postgres or a Supabase branch database
-for tests. If you need production values for an incident, pull to a file
+CRON_SECRET, `SUPABASE_SECRET_KEY`, `USE_ROUTING_CLASSIFIER`) from their
+dashboards, and make sure `DATABASE_URL` never targets the production Supabase
+project (`ouixdfvsbbjfpkpfvcvq`) unless you are doing verified production work —
+use a local Postgres or a Supabase branch database for tests. If you need
+production values for an incident, pull to a file
 OUTSIDE the repo and delete it when done.
 
 ## Verification suite (`npm run verify`)

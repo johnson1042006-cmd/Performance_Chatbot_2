@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { getStaffSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { feedback, sessions } from "@/lib/db/schema";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
@@ -11,7 +10,7 @@ const RECENT_LIMIT = 50;
 export async function GET(req: NextRequest) {
   const requestId = crypto.randomUUID();
   try {
-    const session = await getServerSession(authOptions);
+    const session = await getStaffSession();
     if (!session?.user || session.user.role !== "store_manager") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

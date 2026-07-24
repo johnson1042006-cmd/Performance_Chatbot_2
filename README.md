@@ -8,7 +8,7 @@ Embeddable customer support chat for Performance Cycle. Customers chat through a
 - **DB**: Postgres on Supabase, accessed via Drizzle ORM
 - **AI**: Anthropic Claude Haiku (`claude-haiku-4-5`)
 - **Realtime**: Pusher (channels per session + a shared `dashboard` channel)
-- **Auth**: NextAuth (Credentials + JWT), with `store_manager` and `support_agent` roles
+- **Auth**: Supabase Auth (email/password) — identity in `auth.users`, roles/flags in `public.users`, with `store_manager` and `support_agent` roles
 - **Catalog/Inventory**: BigCommerce REST API; optional Lightspeed sync for product pairings
 
 ### Key routes
@@ -16,7 +16,7 @@ Embeddable customer support chat for Performance Cycle. Customers chat through a
 | Route | Purpose |
 |-------|---------|
 | `/embed`, `/chat` | Iframe-able widget UI (used by `public/embed.js`) |
-| `/login` | NextAuth sign-in |
+| `/login` | Supabase Auth sign-in |
 | `/dashboard/manager/*` | Manager hub: analytics, team, knowledge, configure, pairings |
 | `/dashboard/agent`, `/dashboard/chats`, `/dashboard/history` | Agent live queue and history |
 | `/api/chat` | Customer message intake |
@@ -56,8 +56,9 @@ All required variables are listed in [`.env.example`](.env.example):
 | `DATABASE_URL` | yes | Supabase Postgres connection string (transaction pooler, port 6543) |
 | `PUSHER_APP_ID`, `PUSHER_KEY`, `PUSHER_SECRET`, `PUSHER_CLUSTER` | yes | Server-side Pusher |
 | `NEXT_PUBLIC_PUSHER_KEY`, `NEXT_PUBLIC_PUSHER_CLUSTER` | yes | Client-side Pusher |
-| `NEXTAUTH_SECRET` | yes | NextAuth JWT signing |
-| `NEXTAUTH_URL` | yes | **Must match the deployed origin** (e.g. `https://your-app.vercel.app`) |
+| `NEXT_PUBLIC_SUPABASE_URL` | yes | Supabase project URL (browser-safe) |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | yes | Supabase publishable key (browser-safe) |
+| `SUPABASE_SECRET_KEY` | yes | Supabase service-role key (**server only**) |
 | `BIGCOMMERCE_STORE_HASH`, `BIGCOMMERCE_ACCESS_TOKEN` | yes | Catalog/inventory enrichment |
 | `LIGHTSPEED_ACCOUNT_ID`, `LIGHTSPEED_API_KEY` | optional | Only for `npm run sync:lightspeed` |
 
@@ -111,7 +112,7 @@ npm run preflight
 The script verifies:
 
 - All required env vars are populated
-- `NEXTAUTH_URL` is **not** `localhost`
+- Supabase env vars (`NEXT_PUBLIC_SUPABASE_URL`, publishable + secret keys) are populated
 - DB is reachable
 - `users`, `knowledge_base`, `products`, and `product_pairings` each have at least one row
 
@@ -136,7 +137,7 @@ Open the deployed site in two browser tabs (or one normal + one private window):
 ### 5. Production secrets
 
 - Rotate the seeded `manager123` / `agent123` passwords (or seed a fresh set of users).
-- Confirm `NEXTAUTH_SECRET` is unique per environment and not the example value.
+- Confirm `SUPABASE_SECRET_KEY` is the service-role key and is set SERVER-ONLY (never `NEXT_PUBLIC_`).
 
 ## Testing notes
 

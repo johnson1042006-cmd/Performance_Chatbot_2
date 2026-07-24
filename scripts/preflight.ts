@@ -6,9 +6,8 @@
  *
  * Verifies:
  *   1. All required environment variables are present
- *   2. NEXTAUTH_URL is not pointing at localhost
- *   3. Database is reachable
- *   4. Required seed data exists (users, knowledge, products, pairings)
+ *   2. Database is reachable
+ *   3. Required seed data exists (users, knowledge, products, pairings)
  *
  * Exits non-zero on failure so it can be wired into CI or a pre-deploy hook.
  */
@@ -34,8 +33,9 @@ const REQUIRED_ENV_VARS = [
   "PUSHER_CLUSTER",
   "NEXT_PUBLIC_PUSHER_KEY",
   "NEXT_PUBLIC_PUSHER_CLUSTER",
-  "NEXTAUTH_SECRET",
-  "NEXTAUTH_URL",
+  "NEXT_PUBLIC_SUPABASE_URL",
+  "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+  "SUPABASE_SECRET_KEY",
   "BIGCOMMERCE_STORE_HASH",
   "BIGCOMMERCE_ACCESS_TOKEN",
   "USE_AI_TOOLS",
@@ -66,27 +66,14 @@ function checkEnvVars(): Result[] {
     }
   }
 
-  const url = process.env.NEXTAUTH_URL || "";
-  const allowLocalNextAuth =
-    process.env.PREFLIGHT_ALLOW_LOCALHOST_NEXTAUTH === "1";
-  if (url.includes("localhost") || url.includes("127.0.0.1")) {
-    if (allowLocalNextAuth && url) {
-      results.push(
-        pass(
-          "NEXTAUTH_URL is localhost",
-          `allowed via PREFLIGHT_ALLOW_LOCALHOST_NEXTAUTH=1 (${url})`,
-        ),
-      );
-    } else {
-      results.push(
-        fail(
-          "NEXTAUTH_URL is localhost",
-          `value="${url}" — must be the production URL when deploying (local dev only: set PREFLIGHT_ALLOW_LOCALHOST_NEXTAUTH=1)`,
-        ),
-      );
-    }
-  } else if (url) {
-    results.push(pass("NEXTAUTH_URL is non-localhost", url));
+  // Guard against a secret key accidentally exposed to the browser.
+  if (process.env.NEXT_PUBLIC_SUPABASE_SECRET_KEY) {
+    results.push(
+      fail(
+        "SUPABASE secret key exposure",
+        "NEXT_PUBLIC_SUPABASE_SECRET_KEY is set — the secret key must never be NEXT_PUBLIC_",
+      ),
+    );
   }
 
   // USE_AI_TOOLS must literally equal "true" — anything else means the

@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Barlow, Barlow_Condensed } from "next/font/google";
-import AuthProvider from "@/components/providers/AuthProvider";
 import { ToastProvider } from "@/components/ui/Toast";
 import "./globals.css";
 
@@ -37,11 +36,9 @@ export default function RootLayout({
         >
           Skip to main content
         </a>
-        <AuthProvider>
-          <ToastProvider>
-            <div id="main-content">{children}</div>
-          </ToastProvider>
-        </AuthProvider>
+        <ToastProvider>
+          <div id="main-content">{children}</div>
+        </ToastProvider>
       </body>
     </html>
   );

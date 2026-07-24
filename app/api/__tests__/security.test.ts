@@ -90,11 +90,8 @@ vi.mock("@/lib/ai/callClaude", () => ({
   callClaude: vi.fn().mockResolvedValue("AI response"),
 }));
 
-vi.mock("next-auth", () => ({
-  getServerSession: vi.fn(),
-}));
 
-vi.mock("@/lib/auth", () => ({ authOptions: {} }));
+vi.mock("@/lib/auth", () => ({ getStaffSession: vi.fn(), bustUserFlagCache: vi.fn() }));
 
 vi.mock("bcryptjs", () => ({
   default: { hash: vi.fn().mockResolvedValue("hashed"), compare: vi.fn() },
@@ -139,11 +136,11 @@ function makeReq(url: string, method = "POST", body?: object) {
 }
 
 async function mockSession(role: "store_manager" | "support_agent" | null) {
-  const { getServerSession } = await import("next-auth");
+  const { getStaffSession } = await import("@/lib/auth");
   if (role === null) {
-    (getServerSession as any).mockResolvedValueOnce(null);
+    (getStaffSession as any).mockResolvedValueOnce(null);
   } else {
-    (getServerSession as any).mockResolvedValueOnce({
+    (getStaffSession as any).mockResolvedValueOnce({
       user: { id: "u1", role, name: "Test User", email: "test@test.com" },
     });
   }
