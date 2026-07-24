@@ -369,3 +369,11 @@ Merge commit `5ec7366` pushed (Antonio's explicit go); Vercel auto-deploy Ready 
 ## [2026-07-22 19:10 MDT] — Schuberth lineage MERGED + DEPLOYED + PROD-VERIFIED
 
 Merge `674329e` pushed (Antonio's go); Vercel auto-deploy Ready in 50s and aliased. Production browser smoke ("looking for a schuberth modular helmet"): 13.4s reply, all four recommendations C5 (in-stock units leading), 4 rendered links, C4 Pro correctly absent from the lead. Curated table now: Shoei RF/X/GT-Air/Neotec, Scorpion EXO-R4x0/AT9x0, REV'IT ×6, Sidi Crossfire, Schuberth C. Standing state: accessory-ranking item PARKED on the A5-telemetry trigger; J-Cruise excluded pending catalog evidence; Phase D (KB lineage enrichment) next on Antonio's go; C/E gated on A5 data.
+
+## [2026-07-24 11:35 MDT] — Supabase Phase 2 (Auth) COMPLETE: deployed, gap-fixed, prod-verified
+
+Phase 2 cutover merged (`9a1915c`) and live: NextAuth fully replaced by Supabase Auth, 5 users imported with preserved UUIDs + bcrypt hashes, Vercel env flipped, `users_id_auth_fk` CASCADE applied post-deploy (cascade live-verified via throwaway-manager delete).
+
+**Prod smoke caught a real regression → hotfixed (merge `9b0fe78`):** old middleware 403'd must-reset staffers on every staff API group, but only requireStaff/requireManager carried the gate after the cutover — ~25 inline-auth routes were open (live repro: must-reset agent got 200 from /api/sessions/history). Fix: `lib/auth/passwordResetGate.ts` after every inline `getStaffSession()` (gate-before-role = middleware precedence) + must-reset denial in `verifySessionAccess` staff branch (customer token path untouched; /api/chat + /api/pusher/auth stay exempt per old matcher). +29 security tests → 776 unit green, lint/build clean, deploy live ~30s after push.
+
+**Full prod smoke green:** agent forced-reset loop (login → 307 /password-reset → API 403 → reset → re-login → 200s), manager gates (agent: admin API 401, manager page redirect; manager: hub 200, admin APIs 200), customer widget end-to-end (token cookie, real AI glove reply, active_ai), cron tick 200/min scheduled, runtime logs clean. Agent account restored: `verify-test-pw-2026` + must_reset=true. Standing: Phases 3–5 (Realtime, RLS+signup-hardening, Storage/Edge) each await their own plan + go; Neon console deletion still Antonio-handled.

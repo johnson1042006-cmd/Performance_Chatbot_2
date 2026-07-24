@@ -232,3 +232,46 @@ no-change check, and the live prod checklist (Step 8).
 **Phase 1 is functionally complete — production runs entirely on Supabase.** Phases 2–5
 (Supabase Auth, Realtime, RLS, Storage/Edge) remain outlined above and each need their own
 plan + explicit go-ahead before starting.
+
+## EXECUTION LOG — Phase 2 (Supabase Auth) completed 2026-07-24
+
+Full plan in `~/.claude/plans/` (Phase 2 — Replace NextAuth with Supabase Auth). Executed
+with Antonio's blanket go ("full permission to finish phase 2 all the way to step 5").
+
+- **Cutover (merge `9a1915c`):** NextAuth fully replaced by Supabase Auth (`@supabase/ssr`).
+  All 5 users imported into `auth.users` with the SAME UUIDs and verbatim bcrypt hashes —
+  zero credential disruption, all 9 FKs intact. `getStaffSession()` (Supabase `getUser()` +
+  `public.users` profile, 60s cache) replaced `getServerSession` across ~40 files; thin edge
+  middleware (cookie refresh + auth-gate only); role gate moved to `app/dashboard/manager/layout.tsx`
+  + `requireManager`; reset gate to dashboard layout + Node helpers. Login via
+  `POST /api/auth/login` (IP rate-limit preserved). Vercel env: 3 Supabase vars in, NEXTAUTH_* out.
+  `password_hash` kept nullable as a rollback lever (frozen, unused).
+- **FK applied post-deploy:** `users_id_auth_fk` (`public.users.id → auth.users.id ON DELETE
+  CASCADE`) — cascade verified live (deleting a throwaway auth user removed its profile row).
+- **Prod smoke gap found → fixed (merge `9b0fe78`):** the old middleware 403'd must-reset
+  staffers on all staff API groups; Phase 2 had the gate only in requireStaff/requireManager,
+  leaving ~25 inline-auth routes open (found live: must-reset agent got 200 from
+  /api/sessions/history). Fix: `lib/auth/passwordResetGate.ts` called after every inline
+  `getStaffSession()` (before role checks = old middleware precedence) + must-reset staffers
+  denied staff access in `verifySessionAccess` (customer token path untouched; /api/chat +
+  /api/pusher/auth stay exempt as under the old matcher). 29 new security tests (776 total).
+- **Prod smoke (all green, 2026-07-24):** agent login → forced-reset 307 + API 403 →
+  reset-password flow → re-login → staff API 200; agent blocked from admin API (401) and
+  manager page (redirect); throwaway manager → /dashboard/manager 200 + admin APIs 200;
+  customer widget end-to-end (session create, pc_st_ token, real AI reply, active_ai);
+  cron tick 200 every minute (scheduled invocations; unauthorized curl 401); runtime logs
+  clean (only a benign Node url.parse DeprecationWarning).
+- **Supabase dashboard state (Antonio):** Site URL → prod app URL; "Confirm email" left ON
+  (couldn't locate toggle — harmless: every creation path sets `email_confirm: true`);
+  public signups left ON (accepted risk: a self-signup gets no `public.users` profile →
+  `getStaffSession()` null → zero access; disable in Phase 4 hardening).
+- **Seeded agent account:** password `verify-test-pw-2026`, `must_reset_password=true`
+  (restored post-smoke). Rotate both seeded accounts anytime via
+  `scripts/rotate-prod-passwords.ts`.
+- **Rollback note:** the "restore NEXTAUTH_* env" rollback now also requires redeploying the
+  last pre-`9a1915c` build (NextAuth code is deleted from main). `password_hash` stays
+  populated until a later cleanup phase.
+
+**Phase 2 is complete — production auth runs entirely on Supabase Auth.** Remaining: Phase 3
+(Realtime), Phase 4 (RLS + role-in-JWT + disable public signups), Phase 5 (Storage/Edge
+evaluation) — each needs its own plan + go-ahead. Neon project deletion still user-handled.
