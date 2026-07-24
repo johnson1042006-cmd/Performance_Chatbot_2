@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStaffSession } from "@/lib/auth";
+import { passwordResetGate } from "@/lib/auth/passwordResetGate";
 import { db } from "@/lib/db";
 import { cannedResponses } from "@/lib/db/schema";
 import { eq, asc } from "drizzle-orm";
@@ -9,8 +10,10 @@ export const dynamic = "force-dynamic";
 
 async function requireManager() {
   const session = await getStaffSession();
+  const resetDenied = passwordResetGate(session);
+  if (resetDenied) return resetDenied;
   if (!session?.user || session.user.role !== "store_manager") {
-    return null;
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   return session;
 }
@@ -19,9 +22,7 @@ export async function GET() {
   const requestId = crypto.randomUUID();
   try {
     const auth = await requireManager();
-    if (!auth) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    if (auth instanceof NextResponse) return auth;
     const rows = await db
       .select()
       .from(cannedResponses)
@@ -43,9 +44,7 @@ export async function POST(req: NextRequest) {
   const requestId = crypto.randomUUID();
   try {
     const auth = await requireManager();
-    if (!auth) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    if (auth instanceof NextResponse) return auth;
     const body = await req.json();
     const title = typeof body?.title === "string" ? body.title.trim() : "";
     const replyBody = typeof body?.body === "string" ? body.body : "";
@@ -89,9 +88,7 @@ export async function PATCH(req: NextRequest) {
   const requestId = crypto.randomUUID();
   try {
     const auth = await requireManager();
-    if (!auth) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    if (auth instanceof NextResponse) return auth;
     const body = await req.json();
     const id = typeof body?.id === "string" ? body.id : null;
     if (!id) {
@@ -146,9 +143,7 @@ export async function DELETE(req: NextRequest) {
   const requestId = crypto.randomUUID();
   try {
     const auth = await requireManager();
-    if (!auth) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    if (auth instanceof NextResponse) return auth;
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
     if (!id) {

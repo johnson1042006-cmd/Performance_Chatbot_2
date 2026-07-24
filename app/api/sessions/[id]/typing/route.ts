@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStaffSession } from "@/lib/auth";
+import { passwordResetGate } from "@/lib/auth/passwordResetGate";
 import { getPusher } from "@/lib/pusher/server";
 import { sessionChannel } from "@/lib/pusher/channels";
 
@@ -10,6 +11,8 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   const authSession = await getStaffSession();
+  const resetDenied = passwordResetGate(authSession);
+  if (resetDenied) return resetDenied;
   if (!authSession?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

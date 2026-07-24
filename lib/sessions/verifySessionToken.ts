@@ -70,7 +70,8 @@ export function requestOwnsSession(
 
 /**
  * Authorize access to a customer session. Returns true when EITHER:
- *   (a) the request carries a valid NextAuth staff session, OR
+ *   (a) the request carries a valid staff session (not under forced password
+ *       reset), OR
  *   (b) the request carries the matching session token.
  *
  * Legacy grace: sessions created before the token_hash column existed have a
@@ -84,6 +85,10 @@ export async function verifySessionAccess(
   const authSession = await getStaffSession();
   if (
     authSession?.user &&
+    // A staffer under forced password reset does not get staff access (the
+    // old middleware 403'd these requests); they fall through to the
+    // customer-token check like any non-staff request.
+    !authSession.user.mustResetPassword &&
     (authSession.user.role === "store_manager" ||
       authSession.user.role === "support_agent")
   ) {
