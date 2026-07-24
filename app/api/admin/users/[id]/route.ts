@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStaffSession } from "@/lib/auth";
+import { passwordResetGate } from "@/lib/auth/passwordResetGate";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { db } from "@/lib/db";
 import {
@@ -19,6 +20,8 @@ export async function DELETE(
   const requestId = crypto.randomUUID();
   try {
     const session = await getStaffSession();
+    const resetDenied = passwordResetGate(session);
+    if (resetDenied) return resetDenied;
     if (!session?.user || session.user.role !== "store_manager") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

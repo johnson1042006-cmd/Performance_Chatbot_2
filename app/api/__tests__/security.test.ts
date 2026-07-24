@@ -611,3 +611,103 @@ describe("Customer session-token auth", () => {
     );
   });
 });
+
+// =======================================================================
+// 6. Forced password reset gate — a must-reset staffer gets 403
+//    password_reset_required on every staff API group the old middleware
+//    matched (/api/admin|analytics|sessions|canned|presence|push). The gate
+//    moved from edge middleware to the Node route layer in Phase 2.
+// =======================================================================
+describe("Forced password reset gate", () => {
+  const SID = "11111111-1111-4111-8111-111111111111";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetDbMocks();
+  });
+
+  async function mockResetSession(role: "store_manager" | "support_agent") {
+    const { getStaffSession } = await import("@/lib/auth");
+    (getStaffSession as any).mockResolvedValueOnce({
+      user: {
+        id: "u1",
+        role,
+        name: "Test User",
+        email: "test@test.com",
+        mustResetPassword: true,
+      },
+    });
+  }
+
+  // [label, module, exported method, url, body?, route params?]
+  const gated: [string, string, string, string, object?, object?][] = [
+    ["GET /api/analytics", "@/app/api/analytics/route", "GET", "http://localhost/api/analytics"],
+    ["GET /api/sessions/history", "@/app/api/sessions/history/route", "GET", "http://localhost/api/sessions/history?page=1"],
+    ["GET /api/admin/settings", "@/app/api/admin/settings/route", "GET", "http://localhost/api/admin/settings"],
+    ["GET /api/admin/users", "@/app/api/admin/users/route", "GET", "http://localhost/api/admin/users"],
+    ["GET /api/admin/knowledge", "@/app/api/admin/knowledge/route", "GET", "http://localhost/api/admin/knowledge"],
+    ["GET /api/admin/pairings", "@/app/api/admin/pairings/route", "GET", "http://localhost/api/admin/pairings"],
+    ["GET /api/admin/feedback", "@/app/api/admin/feedback/route", "GET", "http://localhost/api/admin/feedback"],
+    ["POST /api/admin/cleanup", "@/app/api/admin/cleanup/route", "POST", "http://localhost/api/admin/cleanup", {}],
+    ["DELETE /api/admin/users/[id]", "@/app/api/admin/users/[id]/route", "DELETE", "http://localhost/api/admin/users/u2", undefined, { id: "u2" }],
+    ["GET /api/admin/canned", "@/app/api/admin/canned/route", "GET", "http://localhost/api/admin/canned"],
+    ["GET /api/canned", "@/app/api/canned/route", "GET", "http://localhost/api/canned"],
+    ["POST /api/sessions/claim", "@/app/api/sessions/claim/route", "POST", "http://localhost/api/sessions/claim", { sessionId: SID }],
+    ["POST /api/sessions/close", "@/app/api/sessions/close/route", "POST", "http://localhost/api/sessions/close", { sessionId: SID }],
+    ["POST /api/sessions/release", "@/app/api/sessions/release/route", "POST", "http://localhost/api/sessions/release", { sessionId: SID }],
+    ["POST /api/sessions/reassign", "@/app/api/sessions/reassign/route", "POST", "http://localhost/api/sessions/reassign", { sessionId: SID, toUserId: "u2" }],
+    ["DELETE /api/sessions/[id]", "@/app/api/sessions/[id]/route", "DELETE", `http://localhost/api/sessions/${SID}`, undefined, { id: SID }],
+    ["GET /api/sessions/[id]/trace", "@/app/api/sessions/[id]/trace/route", "GET", `http://localhost/api/sessions/${SID}/trace`, undefined, { id: SID }],
+    ["POST /api/sessions/[id]/typing", "@/app/api/sessions/[id]/typing/route", "POST", `http://localhost/api/sessions/${SID}/typing`, { isTyping: true }, { id: SID }],
+    ["GET /api/sessions/[id]/notes", "@/app/api/sessions/[id]/notes/route", "GET", `http://localhost/api/sessions/${SID}/notes`, undefined, { id: SID }],
+    ["POST /api/sessions/[id]/ai-suggest", "@/app/api/sessions/[id]/ai-suggest/route", "POST", `http://localhost/api/sessions/${SID}/ai-suggest`, {}, { id: SID }],
+    ["GET /api/sessions/by-customer", "@/app/api/sessions/by-customer/[customerIdentifier]/route", "GET", "http://localhost/api/sessions/by-customer/cust-1", undefined, { customerIdentifier: "cust-1" }],
+    ["POST /api/presence/heartbeat", "@/app/api/presence/heartbeat/route", "POST", "http://localhost/api/presence/heartbeat"],
+    ["POST /api/presence/offline", "@/app/api/presence/offline/route", "POST", "http://localhost/api/presence/offline"],
+    ["POST /api/push/subscribe", "@/app/api/push/subscribe/route", "POST", "http://localhost/api/push/subscribe", { endpoint: "e", keys: { p256dh: "p", auth: "a" } }],
+    ["POST /api/push/unsubscribe", "@/app/api/push/unsubscribe/route", "POST", "http://localhost/api/push/unsubscribe", { endpoint: "e" }],
+    // Shared-helper routes (requireStaff / requireManager carry the gate).
+    ["GET /api/admin/team-presence", "@/app/api/admin/team-presence/route", "GET", "http://localhost/api/admin/team-presence"],
+    ["GET /api/admin/agent-stats", "@/app/api/admin/agent-stats/route", "GET", "http://localhost/api/admin/agent-stats"],
+  ];
+
+  for (const [label, mod, method, url, body, params] of gated) {
+    it(`${label} returns 403 password_reset_required for a must-reset manager`, async () => {
+      await mockResetSession("store_manager");
+      const handlers = await import(mod);
+      const req = makeReq(url, method, body);
+      const res = params
+        ? await handlers[method](req, { params })
+        : await handlers[method](req);
+      expect(res.status).toBe(403);
+      const json = await res.json();
+      expect(json.error).toBe("password_reset_required");
+    });
+  }
+
+  it("gate fires before role checks: must-reset agent on a manager route gets password_reset_required (middleware-precedence parity)", async () => {
+    await mockResetSession("support_agent");
+    const { GET } = await import("@/app/api/admin/settings/route");
+    const res = await GET();
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error).toBe("password_reset_required");
+  });
+
+  it("verifySessionAccess denies staff access to a must-reset staffer (messages GET without token → 401)", async () => {
+    await mockResetSession("support_agent");
+    // tokenHash lookup returns a real hash → with staff access denied and no
+    // token provided, the route falls through to its own 401.
+    mockDbSelect.mockResolvedValueOnce([{ tokenHash: "deadbeef" }]);
+
+    const { NextRequest } = require("next/server");
+    const { GET } = await import("@/app/api/sessions/[id]/messages/route");
+    const res = await GET(
+      new NextRequest(`http://localhost/api/sessions/${SID}/messages`, {
+        method: "GET",
+      }),
+      { params: { id: SID } }
+    );
+    expect(res.status).toBe(401);
+  });
+});

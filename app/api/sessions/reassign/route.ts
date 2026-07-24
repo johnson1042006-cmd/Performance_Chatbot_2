@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStaffSession } from "@/lib/auth";
+import { passwordResetGate } from "@/lib/auth/passwordResetGate";
 import { reassign } from "@/lib/sessions/state";
 import { getPusher } from "@/lib/pusher/server";
 import { sessionChannel, DASHBOARD_CHANNEL } from "@/lib/pusher/channels";
@@ -12,6 +13,8 @@ export async function POST(req: NextRequest) {
   const requestId = crypto.randomUUID();
   try {
     const session = await getStaffSession();
+    const resetDenied = passwordResetGate(session);
+    if (resetDenied) return resetDenied;
     if (!session?.user || session.user.role !== "store_manager") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

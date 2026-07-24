@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStaffSession } from "@/lib/auth";
+import { passwordResetGate } from "@/lib/auth/passwordResetGate";
 import { db } from "@/lib/db";
 import { sessions, messages, users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -61,6 +62,8 @@ export async function DELETE(
   const requestId = crypto.randomUUID();
   try {
     const authSession = await getStaffSession();
+    const resetDenied = passwordResetGate(authSession);
+    if (resetDenied) return resetDenied;
     if (!authSession?.user || authSession.user.role !== "store_manager") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

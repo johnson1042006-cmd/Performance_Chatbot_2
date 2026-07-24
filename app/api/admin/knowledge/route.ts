@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStaffSession } from "@/lib/auth";
+import { passwordResetGate } from "@/lib/auth/passwordResetGate";
 import { db } from "@/lib/db";
 import { knowledgeBase } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -9,6 +10,8 @@ export async function GET() {
   const requestId = crypto.randomUUID();
   try {
     const session = await getStaffSession();
+    const resetDenied = passwordResetGate(session);
+    if (resetDenied) return resetDenied;
     if (!session?.user || session.user.role !== "store_manager") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -28,6 +31,8 @@ export async function POST(req: NextRequest) {
   const requestId = crypto.randomUUID();
   try {
     const session = await getStaffSession();
+    const resetDenied = passwordResetGate(session);
+    if (resetDenied) return resetDenied;
     if (!session?.user || session.user.role !== "store_manager") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -80,6 +85,8 @@ export async function DELETE(req: NextRequest) {
   const requestId = crypto.randomUUID();
   try {
     const session = await getStaffSession();
+    const resetDenied = passwordResetGate(session);
+    if (resetDenied) return resetDenied;
     if (!session?.user || session.user.role !== "store_manager") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

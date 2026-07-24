@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStaffSession } from "@/lib/auth";
+import { passwordResetGate } from "@/lib/auth/passwordResetGate";
 import { db } from "@/lib/db";
 import { chatEvents } from "@/lib/db/schema";
 import { and, eq, asc, inArray } from "drizzle-orm";
@@ -19,6 +20,8 @@ export async function GET(
   const requestId = crypto.randomUUID();
   try {
     const auth = await getStaffSession();
+    const resetDenied = passwordResetGate(auth);
+    if (resetDenied) return resetDenied;
     if (!auth?.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
